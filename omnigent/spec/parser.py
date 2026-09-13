@@ -24,6 +24,7 @@ from omnigent.inner.datamodel import (
     OSEnvSpec,
     TerminalEnvSpec,
 )
+from omnigent.inner.sandbox import containment_prefix
 from omnigent.spec.types import (
     DEFAULT_ASK_TIMEOUT,
     AgentSpec,
@@ -2054,13 +2055,13 @@ def _read_contained_file(root: Path, value: str) -> str | None:
         *root*, else ``None``.
     """
     try:
-        root_prefix = os.path.join(os.path.realpath(root), "")
+        root_prefix = containment_prefix(os.path.realpath(root))
         resolved = os.path.realpath(root / value)
         if resolved.startswith(root_prefix):
             candidate = Path(resolved)
             if candidate.is_file():
                 return candidate.read_text()
-    except OSError:
+    except (OSError, ValueError):
         pass
     return None
 
