@@ -64,6 +64,8 @@ def test_reconciliation_sigterms_alive_tagged_process_and_keeps_entry(
 ) -> None:
     """A live tagged process is SIGTERMed and kept for escalation."""
     path = tmp_path / "registry.json"
+    # Legacy entry: no recorded identity, ownership proven by the tag.
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: None)
     registry.register_codex_native_process(
         pid=123,
         pgid=456,
@@ -107,6 +109,10 @@ def test_reconciliation_escalates_to_sigkill_after_grace(tmp_path: Path, monkeyp
     is proven).
     """
     path = tmp_path / "registry.json"
+    # Legacy entry: no recorded identity, ownership proven by the tag. The
+    # fake pgid must also never alias a real group on the test host.
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: None)
+    monkeypatch.setattr(registry._proc, "group_kernel_present", lambda _pgid: False)
     registry.register_codex_native_process(
         pid=123,
         pgid=456,
@@ -169,6 +175,8 @@ def test_reconciliation_escalates_to_sigkill_after_grace(tmp_path: Path, monkeyp
 def test_reconciliation_skips_pid_reuse_without_matching_tag(tmp_path: Path, monkeypatch) -> None:
     """A reused PID is never killed when the cmdline lacks the session tag."""
     path = tmp_path / "registry.json"
+    # Legacy entry: no recorded identity, ownership proven by the tag.
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: None)
     registry.register_codex_native_process(
         pid=123,
         pgid=456,
@@ -231,6 +239,7 @@ def test_reconciliation_skips_live_sibling_when_owner_lock_is_held(
 def test_reconciliation_reaps_when_owner_lock_is_not_held(tmp_path: Path, monkeypatch) -> None:
     """A tagged child is reaped after its owning launcher lock is gone."""
     path = tmp_path / "registry.json"
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: None)
     owner_lock = tmp_path / "owner.lock"
     registry.register_codex_native_process(
         pid=123,
@@ -264,6 +273,7 @@ def test_reconciliation_reaps_when_owner_lock_is_not_held(tmp_path: Path, monkey
 def test_reconciliation_drops_dead_pids(tmp_path: Path, monkeypatch) -> None:
     """Dead process entries are discarded without kill attempts."""
     path = tmp_path / "registry.json"
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: None)
     registry.register_codex_native_process(
         pid=123,
         pgid=456,
@@ -284,6 +294,7 @@ def test_reconciliation_drops_dead_pids(tmp_path: Path, monkeypatch) -> None:
 def test_tmux_session_reaped_only_when_recorded_name_exists(tmp_path: Path, monkeypatch) -> None:
     """Dropping an entry reaps only its recorded, still-existing tmux session."""
     path = tmp_path / "registry.json"
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: None)
     registry.register_codex_native_process(
         pid=123,
         pgid=456,
@@ -411,6 +422,10 @@ def test_escalation_kills_surviving_child_after_leader_exits(tmp_path: Path, mon
         # next pass.
         deadline = time_mod.monotonic() + 10.0
         while _registry_payload(path) and time_mod.monotonic() < deadline:
+            # If an earlier test made this pytest process a subreaper, the
+            # SIGKILLed orphan's zombie is OURS to collect — unreaped it
+            # pins the pgid kernel-present and the entry never drops.
+            test_procs.reap_adopted(child_pid)
             registry.reconcile_codex_native_process_registry(registry_path=path)
             time_mod.sleep(0.05)
         assert _registry_payload(path) == []
@@ -432,6 +447,7 @@ def test_reconciliation_defers_when_member_snapshot_unavailable(
     entry gone. The reap is deferred until a snapshot succeeds.
     """
     path = tmp_path / "registry.json"
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: None)
     registry.register_codex_native_process(
         pid=123,
         pgid=456,
@@ -571,6 +587,9 @@ def test_fallback_tier_never_chases_children_it_did_not_record(
         test_procs.safe_kill(child_pid, child_ident)
         deadline = time_mod.monotonic() + 5.0
         while _registry_payload(path) and time_mod.monotonic() < deadline:
+            # Collect the orphan's zombie if this (possibly subreaper)
+            # process adopted it — see the drop-poll in the escalation test.
+            test_procs.reap_adopted(child_pid)
             registry.reconcile_codex_native_process_registry(registry_path=path)
             time_mod.sleep(0.05)
         assert _registry_payload(path) == []
@@ -615,6 +634,95 @@ def test_reconciliation_is_write_ahead_and_defers_on_write_failure(
     assert killed == [], "must not signal before the record is durable"
     (payload,) = _registry_payload(path)
     assert payload["sigterm_at"] is None, "on-disk entry must be unchanged"
+
+
+def test_reconciliation_reaps_untagged_leader_by_recorded_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A live leader whose argv lost the session tag is still reaped.
+
+    An npm node-shim ``codex`` re-execs and strips the inert tag marker,
+    so the command line can never prove ownership; the start identity
+    recorded at registration does, and a recycled pid can never match it.
+    """
+    path = tmp_path / "registry.json"
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: "start-leader")
+    registry.register_codex_native_process(
+        pid=123,
+        pgid=456,
+        session_tag="tag-123",
+        owner_lock_path=None,
+        registry_path=path,
+    )
+    killed: list[tuple[int, signal.Signals]] = []
+    # The shim stripped the tag from /proc cmdline; identity still matches.
+    monkeypatch.setattr(registry, "_process_cmdline", lambda _pid: "codex app-server")
+    monkeypatch.setattr(
+        registry,
+        "_member_identity_state",
+        lambda pid, start: "match" if (pid, start) == (123, "start-leader") else "gone",
+    )
+    monkeypatch.setattr(
+        registry, "_group_member_identities", lambda _pgid: ((123, "start-leader"),)
+    )
+    monkeypatch.setattr(
+        registry,
+        "_signal_member_verified",
+        lambda pid, _ident, sig: killed.append((pid, sig)) or True,
+    )
+
+    assert registry.reconcile_codex_native_process_registry(registry_path=path) == 1
+
+    assert killed == [(123, signal.SIGTERM)]
+    (payload,) = _registry_payload(path)
+    assert payload["sigterm_at"] is not None
+
+
+def test_reconciliation_drops_recycled_pid_by_identity_mismatch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A pid that no longer matches the recorded identity is never signaled."""
+    path = tmp_path / "registry.json"
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: "start-leader")
+    registry.register_codex_native_process(
+        pid=123,
+        pgid=456,
+        session_tag="tag-123",
+        owner_lock_path=None,
+        registry_path=path,
+    )
+    killed: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(registry, "_member_identity_state", lambda _pid, _start: "gone")
+    monkeypatch.setattr(registry.os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
+
+    registry.reconcile_codex_native_process_registry(registry_path=path)
+
+    assert killed == []
+    assert _registry_payload(path) == []
+
+
+def test_reconciliation_defers_unverifiable_leader_without_signaling(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An unreadable occupant of the recorded pid defers, never signals."""
+    path = tmp_path / "registry.json"
+    monkeypatch.setattr(registry._proc, "process_start_identity", lambda _pid: "start-leader")
+    registry.register_codex_native_process(
+        pid=123,
+        pgid=456,
+        session_tag="tag-123",
+        owner_lock_path=None,
+        registry_path=path,
+    )
+    killed: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(registry, "_member_identity_state", lambda _pid, _start: "unverifiable")
+    monkeypatch.setattr(registry.os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
+
+    assert registry.reconcile_codex_native_process_registry(registry_path=path) == 0
+
+    assert killed == []
+    (payload,) = _registry_payload(path)
+    assert payload["sigterm_at"] is None, "a deferred entry must stay unsignaled"
 
 
 def test_ownerless_entry_matches_leader_requires_identity_and_free_lock(

@@ -214,8 +214,10 @@ def reconcile_codex_native_process_registry(*, registry_path: Path | None = None
 
     An entry is reapable only when its launcher's owner lock is no longer
     held (the kernel releases the flock on any launcher death) and the
-    live process still carries the entry's unique session tag on its
-    command line (guards against PID reuse). A reapable process group is
+    live process still matches the leader start identity recorded at
+    registration (guards against PID reuse; legacy entries without an
+    identity fall back to the command-line session tag). A reapable
+    process group is
     SIGTERMed first and its entry kept; a later pass escalates to SIGKILL
     once :data:`_SIGKILL_GRACE_S` has elapsed, so a child that ignores or
     wedges on SIGTERM cannot outlive reconciliation.
@@ -260,13 +262,18 @@ def reconcile_codex_native_process_registry(*, registry_path: Path | None = None
                     continue
                 _reap_tmux_session(entry.tmux_session_name)
                 continue
-            if not _pid_alive(entry.pid) or not _process_cmdline_has_tag(
-                entry.pid, entry.session_tag
-            ):
-                # Never signaled and the tagged leader is gone (or its pid
-                # was reused): without the leader there is no safe way to
-                # verify group ownership, so drop the entry and sweep any
-                # leftover tmux session.
+            leader = _entry_leader_state(entry)
+            if leader == "unverifiable":
+                # Something occupies the pid but its identity cannot be
+                # read — never a safe signal target, but possibly still
+                # ours: keep the entry and re-verify on a later pass.
+                survivors.append(entry)
+                continue
+            if leader == "gone":
+                # Never signaled and the recorded leader incarnation is
+                # gone (or its pid was reused): without the leader there
+                # is no safe way to verify group ownership, so drop the
+                # entry and sweep any leftover tmux session.
                 _reap_tmux_session(entry.tmux_session_name)
                 continue
             members = _group_member_identities(entry.pgid)
@@ -579,6 +586,27 @@ def _pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _entry_leader_state(entry: CodexNativeProcessEntry) -> str:
+    """
+    Classify an entry's recorded leader: ``match``/``gone``/``unverifiable``.
+
+    The start identity recorded at registration is the primary ownership
+    proof: it survives argv rewrites (an npm node-shim ``codex`` re-execs
+    and strips the inert session-tag marker before it ever reaches
+    ``/proc/<pid>/cmdline``) and a recycled pid can never reproduce it.
+    The cmdline tag remains the fallback for legacy entries written
+    before identities were recorded.
+
+    :param entry: The registry entry to classify.
+    :returns: A :func:`omnigent.inner._proc.process_identity_state` verdict.
+    """
+    if entry.leader_identity is not None:
+        return _member_identity_state(entry.pid, entry.leader_identity)
+    if _pid_alive(entry.pid) and _process_cmdline_has_tag(entry.pid, entry.session_tag):
+        return "match"
+    return "gone"
 
 
 def _process_cmdline_has_tag(pid: int, session_tag: str) -> bool:

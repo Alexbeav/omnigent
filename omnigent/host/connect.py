@@ -716,6 +716,12 @@ _RUNNER_ENV_ALLOWLIST: frozenset[str] = frozenset(
         # cli._ensure_host_daemon), never to a (possibly hosted) runner.
         "OMNIGENT_CONFIG_HOME",
         "OMNIGENT_DATA_DIR",
+        # Codex-native state-root override. The crash-teardown ledger (the
+        # process registry + owner locks under this root) is shared between
+        # the runner that registers an app-server and the host daemon whose
+        # ownerless sweep reconciles it; a root override visible to only one
+        # side splits the ledger and orphans become unattributable.
+        "OMNIGENT_CODEX_NATIVE_STATE_DIR",
         # Auth provider selection. The env-unset default was flipped
         # to "accounts", so the whole CLI → daemon → local-server chain has
         # to agree on the mode. Without this, the daemon strips
@@ -1901,7 +1907,20 @@ class HostProcess:
             from omnigent.inner.terminal import terminal_owner_is_dead
 
             return terminal_owner_is_dead(instance_dir) is True
-        return _argv_condemn_match(argv)
+        if _argv_condemn_match(argv):
+            return True
+        # The codex crash-teardown tag can be stripped from argv (an npm
+        # node-shim codex re-execs and rewrites argv0), so a live adopted
+        # codex leader is also attributed by its ownership record: the
+        # registry recorded (pid, start identity) at spawn, and a free
+        # owner lock proves its launcher is gone.
+        if not pin.is_leader:
+            return False
+        from omnigent.harnesses.codex_native.process_registry import (
+            ownerless_entry_matches_leader,
+        )
+
+        return ownerless_entry_matches_leader(pid, pin.identity)
 
     def _dead_leader_group_is_ours(self, pid: int, pin: _AdoptedPin) -> bool:
         """Attribute a deferred dead leader's group to a known family.

@@ -11,6 +11,8 @@ exempt — holding the handle pins the pid — and should keep using
 
 from __future__ import annotations
 
+import contextlib
+import os
 import signal
 import time
 
@@ -77,6 +79,23 @@ def wait_gone(pid: int, identity: str, deadline_s: float = 10.0) -> bool:
             return True
         time.sleep(0.05)
     return settled(pid, identity)
+
+
+def reap_adopted(pid: int) -> None:
+    """Collect *pid*'s zombie if this process adopted it as a subreaper.
+
+    A test that installs the child-subreaper flag (directly, or via an
+    earlier test in the same pytest process — the flag is process-wide and
+    irreversible) becomes the parent of every orphan its subprocess trees
+    leave behind. Nothing else will ever ``wait()`` such a zombie, and an
+    unreaped group leader keeps its pgid kernel-present forever. Scoped to
+    exactly *pid*, so no other ``Popen``'s exit status can be stolen.
+
+    :param pid: The orphaned child to reap; a no-op when it was never
+        adopted by this process (or is still running).
+    """
+    with contextlib.suppress(ChildProcessError, OSError):
+        os.waitpid(pid, os.WNOHANG)
 
 
 def safe_kill(pid: int, identity: str) -> None:

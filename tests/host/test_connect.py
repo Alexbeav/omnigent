@@ -1923,6 +1923,38 @@ def test_condemn_signatures_key_on_argv_elements_not_joined_substrings(
     )
 
 
+def test_live_adopted_leader_condemned_via_codex_ownership_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live adopted codex leader is attributed by its registry record.
+
+    An npm node-shim ``codex`` strips the crash-teardown argv marker, so
+    the app-server carries no condemnable argv shape at all; the codex
+    registry recorded (pid, start identity) at spawn, and a free owner
+    lock proves its launcher died — that record must condemn it. Without
+    a matching record the same child is spared.
+    """
+    calls: list[tuple[int, str | None]] = []
+    argv = ["node", "/opt/codex/bin/codex.js", "app-server"]
+
+    def record_matches(pid: int, identity: str | None) -> bool:
+        calls.append((pid, identity))
+        return True
+
+    monkeypatch.setattr(
+        "omnigent.harnesses.codex_native.process_registry.ownerless_entry_matches_leader",
+        record_matches,
+    )
+    assert _classify_live_child_with_argv(monkeypatch, argv) is True
+    assert calls == [(4242, "x")]
+
+    monkeypatch.setattr(
+        "omnigent.harnesses.codex_native.process_registry.ownerless_entry_matches_leader",
+        lambda _pid, _identity: False,
+    )
+    assert _classify_live_child_with_argv(monkeypatch, argv) is False
+
+
 @pytest.mark.skipif(
     sys.platform != "linux",
     reason="zombie pgid inspection (and subreaper adoption) are Linux-only",
@@ -2784,6 +2816,7 @@ def test_build_runner_env_allowlists_host_env_and_strips_secrets() -> None:
         "OMNIGENT_LOG_LEVEL": "DEBUG",
         "OMNIGENT_LOG_TO_STDERR": "1",
         "OMNIGENT_LOG_TTY_FD": "9",
+        "OMNIGENT_CODEX_NATIVE_STATE_DIR": "/srv/omnigent/codex-state",
     }
 
     env = _build_runner_env(
@@ -2825,6 +2858,11 @@ def test_build_runner_env_allowlists_host_env_and_strips_secrets() -> None:
     # must reach the runner without also forcing
     # ``OMNIGENT_RUNNER_ENV_PASSTHROUGH=OMNIGENT_CLAUDE_SDK_NO_SANDBOX``.
     assert env["OMNIGENT_CLAUDE_SDK_NO_SANDBOX"] == "1"
+    # The codex-native state-root override forwards — the crash-teardown
+    # ledger (process registry + owner locks) must be ONE root across the
+    # daemon and its runners, or an app-server registered by the runner is
+    # invisible to the daemon's ownerless sweep and leaks on unclean death.
+    assert env["OMNIGENT_CODEX_NATIVE_STATE_DIR"] == "/srv/omnigent/codex-state"
     # KUBECONFIG is a filesystem path (not a secret) — kubectl, helm, k9s
     # need it to resolve the user's cluster contexts and namespaces.
     assert env["KUBECONFIG"] == "/home/alice/.kube/config"
