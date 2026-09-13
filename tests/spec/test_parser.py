@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ntpath
+from functools import partialmethod
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -443,6 +444,23 @@ def test_parse_instructions_embedded_nul_stays_literal(
     (agent_dir / "AGENTS.md").write_text("Lower-priority instructions.")
 
     assert parse(agent_dir).instructions == value
+
+
+@pytest.mark.parametrize("instruction_key", ["instructions", "prompt", None])
+def test_parse_instructions_decode_error_propagates(
+    agent_dir: Path, monkeypatch: pytest.MonkeyPatch, instruction_key: str | None
+) -> None:
+    """Decode real files as UTF-8 regardless of the test machine's locale."""
+    monkeypatch.setattr(Path, "read_text", partialmethod(Path.read_text, encoding="utf-8"))
+    config = {"spec_version": 1}
+    if instruction_key is not None:
+        config[instruction_key] = "AGENTS.md"
+    (agent_dir / "config.yaml").write_text(yaml.dump(config))
+    (agent_dir / "AGENTS.md").write_bytes(b"\xff")
+    (agent_dir / "CLAUDE.md").write_text("Lower-priority instructions.")
+
+    with pytest.raises(UnicodeDecodeError):
+        parse(agent_dir)
 
 
 @pytest.mark.parametrize(

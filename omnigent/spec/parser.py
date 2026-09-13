@@ -2053,15 +2053,19 @@ def _read_contained_file(root: Path, value: str) -> str | None:
         ``"prompts/system.md"``.
     :returns: The file contents if *value* names a file contained within
         *root*, else ``None``.
+    :raises UnicodeDecodeError: If a contained instruction file cannot be decoded.
     """
     try:
         root_prefix = containment_prefix(os.path.realpath(root))
         resolved = os.path.realpath(root / value)
+    except (OSError, ValueError):
+        return None
+    try:
         if resolved.startswith(root_prefix):
             candidate = Path(resolved)
             if candidate.is_file():
                 return candidate.read_text()
-    except (OSError, ValueError):
+    except OSError:
         pass
     return None
 
