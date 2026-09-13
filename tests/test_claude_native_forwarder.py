@@ -73,6 +73,20 @@ def _allow_tmp_path_as_bridge_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     monkeypatch.setattr("omnigent.harnesses.claude_native.bridge._BRIDGE_ROOT", tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def _idle_gate_at_production_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Clear the idle-gate kill switch so tests see the production default.
+
+    An ambient ``OMNIGENT_CLAUDE_FORWARDER_IDLE_GATE=0`` on the host would
+    silently run every gate test against the ungated loop.
+
+    :param monkeypatch: Pytest monkeypatch fixture.
+    :returns: None.
+    """
+    monkeypatch.delenv("OMNIGENT_CLAUDE_FORWARDER_IDLE_GATE", raising=False)
+
+
 class _RecordingHTTPServer(ThreadingHTTPServer):
     """
     HTTP server that records JSON POST bodies.
@@ -10711,10 +10725,20 @@ async def test_fingerprint_never_watches_a_file_the_forwarder_itself_writes(
     real forwarder, diff the bridge directory around it to see what *it* wrote,
     and require none of that to be watched.
 
+    One documented exception: ``context.json`` stays watched even though the
+    body's normalize step writes it, because older bridge dirs' settings invoke
+    the status module directly and write it from another process. Seeding
+    ``context_raw.json`` below makes the body take that write path, so the
+    exception is exercised rather than silently skipped.
+
     :param tmp_path: Per-test temp directory.
     :returns: None.
     """
     bridge_dir, _transcript = _seed_idle_session(tmp_path)
+    (bridge_dir / claude_native_status.CONTEXT_RAW_FILE).write_text(
+        json.dumps({"context_window": {"context_window_size": 200000}}),
+        encoding="utf-8",
+    )
 
     def _snapshot() -> dict[str, tuple[int, int, int]]:
         return {
@@ -10757,8 +10781,15 @@ async def test_fingerprint_never_watches_a_file_the_forwarder_itself_writes(
     written = {name for name, stamp in after.items() if before.get(name) != stamp}
     assert written, "forwarder wrote nothing — the check would be vacuous"
 
+    assert "context.json" in written, (
+        "the seeded context_raw.json was never normalized into context.json — "
+        "the documented watched-though-self-written exception went unexercised"
+    )
     watched = set(forwarder._WATCHED_BRIDGE_FILES)
-    self_watched = sorted(written & watched)
+    # context.json is the one deliberate exception: watched for the legacy
+    # shim that writes it externally; our own normalize write re-trips the
+    # fingerprint once after real statusLine activity, then converges.
+    self_watched = sorted((written & watched) - {"context.json"})
     assert not self_watched, (
         f"the forwarder writes {self_watched}, which the fingerprint also watches — "
         "each write re-opens the gate on our own output, so a full body triggers "
@@ -11302,10 +11333,10 @@ def test_bridge_input_fingerprint_stops_relisting_once_a_subagent_dir_settles(
     listings = 0
     original = paths._refresh_subagents
 
-    def _counting(dir_key: tuple[int, int]) -> None:
+    def _counting(dir_key: tuple[int, int], *, provisional: bool) -> None:
         nonlocal listings
         listings += 1
-        original(dir_key)
+        original(dir_key, provisional=provisional)
 
     paths._refresh_subagents = _counting  # type: ignore[method-assign]
     for _ in range(5):

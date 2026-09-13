@@ -58,7 +58,8 @@ pytestmark = pytest.mark.skipif(
 # of unchanged inputs before it may engage (the shipped gate uses 8 s), so the
 # warm-up must outlast it; measuring earlier captures the cold-start burst and
 # not the steady state. An unfixed fixed-rate poller fails identically at any
-# warm-up length.
+# warm-up length. Keep this above forwarder._IDLE_SETTLE_SECONDS with margin —
+# retuning that settle window past this warm-up would make this test flaky.
 _WARMUP_S = 12.0
 # Fully idle observation window. Long enough that a fixed 4 Hz poller produces
 # an unambiguous count (~112 opens at the observed ~28 opens/s), short enough
@@ -70,6 +71,9 @@ _IDLE_WINDOW_S = 4.0
 # behind a stat()-based change detector (stat emits no IN_OPEN), or tearing
 # down after a terminal Stop -- lands at or near <=3/s. Chosen ~10x below the
 # buggy rate so the test is robust to fix shape but fails loudly today.
+# Coupled to forwarder._IDLE_RESYNC_SECONDS: the gate still runs one full body
+# per resync (~7 opens each 10 s, ~1.75/s over this window), so shortening the
+# resync or this window materially eats the ~1.7x headroom under this budget.
 _MAX_IDLE_OPENS_PER_S = 3.0
 
 _IN_OPEN = 0x00000020

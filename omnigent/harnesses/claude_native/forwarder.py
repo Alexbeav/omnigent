@@ -1039,6 +1039,10 @@ _WATCHED_BRIDGE_FILES = (
     "tool_relay.json",
     "tmux.json",
     "permission_hook.json",
+    # Watched even though sync_raw_status_context also writes it: older bridge
+    # dirs' settings invoke the status module directly, which writes
+    # context.json from another process. Our own normalize write re-trips the
+    # fingerprint once after real statusLine activity, then converges.
     "context.json",
     # The statusLine shim's raw capture; the loop normalizes it into
     # context.json via sync_raw_status_context, so a write must wake the gate.
