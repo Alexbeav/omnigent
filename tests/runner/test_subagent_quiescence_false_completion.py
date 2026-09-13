@@ -1,7 +1,7 @@
 """Regression test: false "sub-agent finished (completed)" inbox notices.
 
 A claude-native Task-tool sub-agent has no explicit "done" record in its
-transcript, so ``claude_native_forwarder`` infers status from item flow: any
+transcript, so the claude-native forwarder infers status from item flow: any
 transcript lull longer than ``_SUBAGENT_IDLE_QUIESCENCE_S`` (5 s) makes the
 quiescence branch post ``external_session_status: idle`` for the child — even
 while the sub-agent is still mid-task (e.g. inside a long tool call).  The
@@ -34,7 +34,7 @@ from typing import Any
 
 import pytest
 
-from omnigent.claude_native_forwarder import (
+from omnigent.harnesses.claude_native.forwarder import (
     SubagentEntry,
     SubagentForwardState,
     _forward_available_subagents,

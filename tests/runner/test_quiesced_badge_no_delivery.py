@@ -21,17 +21,16 @@ def test_forwarder_quiescence_posts_quiesced_not_idle() -> None:
     """The forwarder's quiescence branch emits the badge value, never idle."""
     import inspect
 
-    from omnigent import claude_native_forwarder as fwd
+    from omnigent.harnesses.claude_native import forwarder as fwd
 
     src = inspect.getsource(fwd)
-    # The quiescence branch sets desired_status = "quiesced"; asserting on the
-    # source keeps the regression tied to the branch itself (any revert to
-    # "idle" reintroduces the false-terminal path).
-    quiescence_block = src[
-        src.index("Quiescence-based status") : src.index("Quiescence-based status") + 1400
-    ]
-    assert 'desired_status = "quiesced"' in quiescence_block
-    assert 'desired_status = "idle"' not in quiescence_block
+    # The quiescence branch chooses the badge value; asserting on the source
+    # keeps the regression tied to the branch itself (any revert to "idle"
+    # reintroduces the false-terminal path).
+    anchor = src.index("desired_status: str | None = None")
+    quiescence_block = src[anchor : anchor + 800]
+    assert 'else "quiesced"' in quiescence_block
+    assert 'else "idle"' not in quiescence_block
 
 
 def test_runner_terminal_branch_ignores_quiesced() -> None:
