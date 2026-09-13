@@ -2917,6 +2917,51 @@ describe("Composer sub-agent tray", () => {
   });
 });
 
+// The trays peeking above the composer (queued strip, sub-agent tray) dock
+// onto the inset workspace bar: a tray's negative-margin tuck only hides its
+// bottom corners behind a surface at least as wide, so the trays must share
+// the bar's column wrapper and inset. Rendered as full-column siblings of the
+// wrapper instead, page background shows under their outer edges and the tray
+// floats detached above the composer (real geometry is covered by
+// tests/e2e_ui/chat/test_queued_strip_docks_on_composer.py).
+describe("Composer trays dock onto the workspace bar", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useChatStore.setState({ queuedMessages: [] });
+  });
+
+  /** The column wrapper holding the workspace bar. */
+  function workspaceBarParent(): Element | null {
+    return (
+      document.querySelector('[data-testid="composer-workspace-controls"]')?.parentElement ?? null
+    );
+  }
+
+  it("renders the queued strip inside the workspace bar's column wrapper", () => {
+    useChatStore.setState({
+      conversationId: "conv_test",
+      skills: [],
+      queuedMessages: [{ queueId: "q_1", text: "held follow-up", conversationId: "conv_test" }],
+    });
+    // Tooltip provider for the strip's per-row steer/edit/delete buttons.
+    renderWithTooltips(<Composer {...composerProps()} />);
+    const strip = document.querySelector('[data-testid="composer-queued-strip"]');
+    expect(strip).not.toBeNull();
+    expect(workspaceBarParent()).not.toBeNull();
+    expect(strip!.parentElement).toBe(workspaceBarParent());
+  });
+
+  it("renders the sub-agent tray inside the workspace bar's column wrapper", () => {
+    useChatStore.setState({ conversationId: "conv_test", skills: [] });
+    render(<Composer {...composerProps({ subAgentLabel: "check-account-eligibility" })} />);
+    const tray = document.querySelector('[data-testid="composer-subagent-tray"]');
+    expect(tray).not.toBeNull();
+    expect(workspaceBarParent()).not.toBeNull();
+    expect(tray!.parentElement).toBe(workspaceBarParent());
+  });
+});
+
 describe("Composer — queued-message flush gating", () => {
   afterEach(() => {
     cleanup();

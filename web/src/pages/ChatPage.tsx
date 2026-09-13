@@ -2177,17 +2177,17 @@ export function subAgentComposerLabel(
 }
 
 /**
- * Peeking tray tucked behind the composer's top edge while the active
+ * Peeking tray tucked behind the composer stack's top edge while the active
  * session is a sub-agent (child) — names the sub-agent the message is going
  * to, so the composer reads as "messaging the sub-agent", not the
- * orchestrator. Mirrors ``ComposerStatusLine`` (the worktree/context shelf
- * below the card) but rises above it: ``-mb-4`` slides the tray's square
- * bottom corners down behind the card (the 16px overlap exceeds the card's
- * ~14px corner radius, hiding them behind its straight sides) and ``pb-5.5``
- * re-reserves the hidden region so the label sits above the card's top edge.
- * The card is ``position:relative`` and paints on top, so its own top border
- * is the divider. Brand pink (``brand-accent``) marks this as a sub-agent
- * context cue, not a status.
+ * orchestrator. Rendered inside the composer column wrapper with the same
+ * ``mx-3`` inset as the workspace bar below it: ``-mb-4`` slides the tray's
+ * square bottom corners down behind the bar (the 16px overlap exceeds the
+ * bar's ~14px corner radius, hiding them behind its straight sides) and
+ * ``pb-5.5`` re-reserves the hidden region so the label sits above the bar's
+ * top edge. The bar is ``position:relative`` and paints on top, so its own
+ * top border is the divider. Brand pink (``brand-accent``) marks this as a
+ * sub-agent context cue, not a status.
  *
  * @param label - The sub-agent instance name, e.g.
  *   ``"check-account-eligibility"`` (from ``subAgentComposerLabel``).
@@ -2196,10 +2196,7 @@ function SubagentComposerTray({ label }: { label: string }) {
   return (
     <div
       data-testid="composer-subagent-tray"
-      className={cn(
-        "mx-auto -mb-4 flex w-full items-center gap-1.5 rounded-t-2xl bg-brand-accent/10 px-4 pt-1.5 pb-5.5 text-sm text-brand-accent",
-        COMPOSER_COLUMN_WIDTH,
-      )}
+      className="mx-3 -mb-4 flex items-center gap-1.5 rounded-t-2xl bg-brand-accent/10 px-4 pt-1.5 pb-5.5 text-sm text-brand-accent"
     >
       <BotIcon className="size-3.5 shrink-0" aria-hidden="true" />
       {/* truncate so a long sub-agent name never wraps the tray to two rows */}
@@ -3298,40 +3295,46 @@ function ComposerImpl(
           }
         }}
       />
-      {/* Queued messages — peeks above the card like the sub-agent tray.
-          Lists follow-ups held while the agent is busy; drains FIFO on idle.
-          Scope to this conversation so a queue held elsewhere never leaks in. */}
-      <QueuedMessagesStrip
-        messages={queuedMessages.filter((m) => m.conversationId === conversationId)}
-        onDelete={dequeueMessage}
-        onEdit={(queueId) => {
-          // Pull the queued message back into the composer for editing:
-          // replace the composer's text + attachments with the queued
-          // message's, remove it from the queue, and focus the textarea.
-          // Re-sending re-queues it (busy) or sends it (idle).
-          const target = queuedMessages.find((m) => m.queueId === queueId);
-          if (!target) return;
-          replaceText(target.text, target.replyDraft);
-          dirtyRef.current = true;
-          resetCursor();
-          recallingRef.current = false;
-          textareaRef.current = tailTextareaRef.current;
-          setFiles(target.files ?? []);
-          dequeueMessage(queueId);
-          textareaRef.current?.focus();
-        }}
-        onSteer={(queueId) => steerMessage(queueId)}
-        onReorder={reorderQueuedMessage}
-        widthClassName={COMPOSER_COLUMN_WIDTH}
-      />
-      {/* Sub-agent context tray — peeks above the card; reserves its own
-          layout slot so the card sits below it (see SubagentComposerTray).
-          Truthy (not just non-null) so an empty label never peeks a
-          nameless tray. */}
-      {subAgentLabel ? <SubagentComposerTray label={subAgentLabel} /> : null}
       {/* Drop cue, spanning the chat column this composer belongs to. */}
       {isDragActive && dropTarget ? <FileDropOverlay container={dropTarget} /> : null}
+      {/* The composer stack above the card: trays dock onto the inset
+          workspace bar, so they share its column wrapper and its mx-3
+          inset — a tray's negative-margin tuck only hides its square
+          bottom corners when the surface below is at least as wide,
+          otherwise page background shows and the tray floats detached. */}
       <div className={cn("mx-auto", COMPOSER_COLUMN_WIDTH)}>
+        {/* Queued messages — peeks above the workspace bar like the
+            sub-agent tray. Lists follow-ups held while the agent is busy;
+            drains FIFO on idle. Scope to this conversation so a queue held
+            elsewhere never leaks in. */}
+        <QueuedMessagesStrip
+          messages={queuedMessages.filter((m) => m.conversationId === conversationId)}
+          onDelete={dequeueMessage}
+          onEdit={(queueId) => {
+            // Pull the queued message back into the composer for editing:
+            // replace the composer's text + attachments with the queued
+            // message's, remove it from the queue, and focus the textarea.
+            // Re-sending re-queues it (busy) or sends it (idle).
+            const target = queuedMessages.find((m) => m.queueId === queueId);
+            if (!target) return;
+            replaceText(target.text, target.replyDraft);
+            dirtyRef.current = true;
+            resetCursor();
+            recallingRef.current = false;
+            textareaRef.current = tailTextareaRef.current;
+            setFiles(target.files ?? []);
+            dequeueMessage(queueId);
+            textareaRef.current?.focus();
+          }}
+          onSteer={(queueId) => steerMessage(queueId)}
+          onReorder={reorderQueuedMessage}
+          widthClassName="mx-3 w-auto"
+        />
+        {/* Sub-agent context tray — peeks above the workspace bar; reserves
+            its own layout slot so the bar sits below it (see
+            SubagentComposerTray). Truthy (not just non-null) so an empty
+            label never peeks a nameless tray. */}
+        {subAgentLabel ? <SubagentComposerTray label={subAgentLabel} /> : null}
         <ComposerWorkspaceBar data-testid="composer-workspace-controls">
           <ComposerWorkspaceStatus
             workspacePath={composerWorkspace ?? null}
