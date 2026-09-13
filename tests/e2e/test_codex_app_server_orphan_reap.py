@@ -33,7 +33,7 @@ import httpx
 import pytest
 
 from omnigent.entities.session_resources import terminal_resource_id
-from omnigent.native_coding_agents import CODEX_NATIVE_AGENT_NAME
+from omnigent.native.native_coding_agents import CODEX_NATIVE_AGENT_NAME
 from omnigent.process_logging import PROCESS_LOG_FILE_ENV_VAR
 from tests._helpers.compat import apply_runner_env, compat_runner_cwd, runner_executable
 from tests.e2e.helpers import POLL_INTERVAL_S
@@ -62,7 +62,20 @@ def _spawn_host_daemon(
     """
     repo_root = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
-    env["PYTHONPATH"] = f"{repo_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    # Put the repo root AND the sdks/ editable package roots on PYTHONPATH as
+    # ABSOLUTE paths. PYTHONPATH is allowlisted on the daemon->runner env, so
+    # the daemon-spawned runner (whose cwd is the session workspace, not the
+    # repo) can only import the ``omnigent_client`` / ``omnigent_ui_sdk`` SDK
+    # packages -- which live under ``sdks/`` and are pulled in at runner boot --
+    # if their roots are absolute here; a relative ``sdks/python-client`` entry
+    # would resolve against the runner's workspace cwd and miss them, failing
+    # the runner with ``ModuleNotFoundError: No module named 'omnigent_client'``
+    # before any codex app-server spawns. Mirrors pyproject's pytest
+    # ``pythonpath = [".", "sdks/python-client", "sdks/ui"]`` for the subprocess.
+    sdk_roots = [repo_root, repo_root / "sdks" / "python-client", repo_root / "sdks" / "ui"]
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(p) for p in sdk_roots] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
     daemon_log = tmp_path / "host-daemon.log"
     env[PROCESS_LOG_FILE_ENV_VAR] = str(daemon_log)
     with open(daemon_log, "w") as log_fh:
@@ -158,17 +171,27 @@ def _find_codex_app_server_pids(workspace: Path) -> list[int]:
     """
     Find THIS session's live ``codex app-server`` process(es).
 
-    Every host-spawned codex-native app-server embeds a unique
-    ``omnigent_crash_teardown_tag=...`` marker in its command line and runs
-    with the session workspace as its cwd. Matching both keys the scan to
-    exactly this test's session, so a parallel opt-in run (which uses its
-    own tmp workspace) can never be picked up — or killed — by this test.
+    A host-spawned codex-native app-server runs ``codex app-server`` with the
+    session workspace as its cwd, and the harness embeds a unique
+    ``omnigent_crash_teardown_tag=...`` argv0 marker for crash reconciliation.
+    The per-test tmp workspace cwd is already unique to this session (a
+    parallel opt-in run uses its own tmp workspace), so it is the reliable
+    identity key.
+
+    The tag is an ADDITIONAL signal, not required: when ``codex`` is installed
+    as an npm node shim (the CLI re-execs node, which rewrites ``argv[0]``), the
+    argv0 tag is stripped before it reaches ``/proc/<pid>/cmdline`` and never
+    appears on the app-server or its children. Keying strictly on the tag would
+    then match nothing and the orphan scenario could not be exercised at all.
+    So match ``app-server`` + workspace cwd, and let the tag narrow further only
+    when it survived.
 
     :param workspace: The session workspace the app-server was launched in.
-    :returns: PIDs of this session's live tagged app-server processes.
+    :returns: PIDs of this session's live ``codex app-server`` processes.
     """
     resolved_workspace = workspace.resolve()
-    pids: list[int] = []
+    tagged: list[int] = []
+    untagged: list[int] = []
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
@@ -182,9 +205,15 @@ def _find_codex_app_server_pids(workspace: Path) -> list[int]:
             cwd = Path(os.readlink(entry / "cwd")).resolve()
         except OSError:
             continue
-        if _TAG_ARG_PREFIX in cmdline and "app-server" in cmdline and cwd == resolved_workspace:
-            pids.append(int(entry.name))
-    return pids
+        if "app-server" not in cmdline or cwd != resolved_workspace:
+            continue
+        if _TAG_ARG_PREFIX in cmdline:
+            tagged.append(int(entry.name))
+        else:
+            untagged.append(int(entry.name))
+    # Prefer the tag-narrowed set when the tag survived; otherwise fall back to
+    # the workspace-keyed match (node-shim codex strips the argv0 tag).
+    return tagged or untagged
 
 
 def _live_group_member_pids(pgid: int) -> list[int]:
