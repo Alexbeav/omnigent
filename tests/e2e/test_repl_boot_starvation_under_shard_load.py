@@ -203,7 +203,11 @@ def test_repl_boot_reaches_prompt_ready_under_full_shard_load(
                 # The input-ready prompt marker the suppressed modules
                 # wait for (`_wait_for_prompt_ready`).
                 child.expect("❯", timeout=_PROMPT_READY_BUDGET_S)
-                results.append((idx, time.monotonic() - t0, "ready", ""))
+                dt = time.monotonic() - t0
+                # Enforce the budget from t0, not from when expect()
+                # started: spawn stagger must not grant extra time.
+                status = "ready" if dt <= _PROMPT_READY_BUDGET_S else "ready past budget"
+                results.append((idx, dt, status, ""))
             except pexpect.TIMEOUT:
                 tail = _strip_ansi(child.before or "")[-600:]
                 results.append((idx, time.monotonic() - t0, "starved (60s TIMEOUT)", tail))
@@ -220,11 +224,16 @@ def test_repl_boot_reaches_prompt_ready_under_full_shard_load(
         for t in threads:
             t.join()
     finally:
-        for child in children:
-            with contextlib.suppress(Exception):
-                child.terminate(force=True)
+        # Unload the box before tearing the REPLs down, then give the
+        # graceful HUP/INT escalation real time ahead of the SIGKILL
+        # fallback — a force-killed REPL can't reap its spawned
+        # server/runner tree.
         for b in burners:
             b.kill()
+        for child in children:
+            with contextlib.suppress(Exception):
+                child.delayafterterminate = 2.0
+                child.terminate(force=True)
         for b in burners:
             with contextlib.suppress(Exception):
                 b.wait(timeout=10)

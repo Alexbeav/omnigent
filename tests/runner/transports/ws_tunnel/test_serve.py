@@ -304,6 +304,65 @@ async def test_serve_tunnel_caps_backoff_low_until_first_connection(
 
 
 @pytest.mark.asyncio
+async def test_serve_tunnel_keeps_full_backoff_cap_for_remote_initial_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote server's initial connect keeps the full reconnect cap.
+
+    The low boot-phase cap exists for a sibling server still booting on
+    the same machine, where a refused loopback connect is free. A remote
+    server failing its initial connect (DNS failure, outage, 5xx storm)
+    must not be retried every ~2s forever: the backoff escalates to the
+    normal 10s cap even though no upgrade ever succeeded.
+
+    :param monkeypatch: Pytest monkeypatch fixture.
+    :returns: None.
+    """
+    attempts = {"count": 0}
+    sleeps: list[float] = []
+
+    async def _serve_once(*_args: Any, **_kwargs: Any) -> None:
+        """Refuse the connection until the test has seen enough retries.
+
+        :raises ConnectionError: While the fake remote server is down.
+        :raises asyncio.CancelledError: To end the test afterwards.
+        """
+        attempts["count"] += 1
+        if attempts["count"] <= 8:
+            raise ConnectionError("connection refused — remote server down")
+        raise asyncio.CancelledError
+
+    async def _sleep(delay: float) -> None:
+        """Record reconnect delays without waiting.
+
+        :param delay: Delay passed to ``asyncio.sleep``.
+        :returns: None.
+        """
+        sleeps.append(delay)
+
+    monkeypatch.setattr(serve_module, "_serve_tunnel_once", _serve_once)
+    monkeypatch.setattr(serve_module.asyncio, "sleep", _sleep)
+    # Pin jitter to 0 so sleep delays are the unjittered backoff curve.
+    monkeypatch.setattr(serve_module.random, "uniform", lambda *_args, **_kw: 0.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await serve_tunnel(
+            _noop_app,
+            server_url="https://example.databricksapps.com",
+            runner_id="runner_remote_boot_backoff",
+            runner_version="0.1.0",
+        )
+
+    assert sleeps, "expected reconnect sleeps while the remote server was down"
+    assert max(sleeps) > serve_module._MAX_INITIAL_CONNECT_DELAY_S, (
+        f"remote initial-connect backoff never escalated past the boot cap: {sleeps}"
+    )
+    assert sleeps[-1] == serve_module._MAX_RECONNECT_DELAY_S, (
+        f"remote initial-connect backoff must reach the full reconnect cap: {sleeps}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_serve_tunnel_releases_boot_backoff_cap_after_first_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
