@@ -42,7 +42,7 @@ from pathlib import Path
 
 import pytest
 
-from omnigent.claude_native_bridge import inject_user_message
+from omnigent.harnesses.claude_native.bridge import inject_user_message
 
 _REAL_TMUX = shutil.which("tmux")
 

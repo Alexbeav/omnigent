@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from omnigent import claude_native_bridge
-from omnigent.claude_native_bridge import (
+from omnigent.harnesses.claude_native import bridge as claude_native_bridge
+from omnigent.harnesses.claude_native.bridge import (
     _key_fallback_bytes,
     _send_keys,
     inject_interrupt,
