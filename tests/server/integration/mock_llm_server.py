@@ -567,6 +567,12 @@ class QueuedResponse:
     status_code: int = 500
     delay: float = 0.0
     truncate_after: int | None = None
+    # Request-body keys this response rejects with HTTP 400 when present and
+    # non-null (xAI-style "Argument not supported on this model: <key>").
+    # Mimics providers that reject unsupported params (e.g. grok-4 rejecting
+    # ``reasoning_effort``): the same entry serves the scripted response once
+    # the client stops sending the offending key.
+    reject_params: list[str] | None = None
     _gate: asyncio.Event = field(default_factory=asyncio.Event)
     _pending: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -774,6 +780,30 @@ class MockState:
 _state = MockState()
 
 
+def _reject_unsupported_param(qr: QueuedResponse, parsed: object) -> JSONResponse | None:
+    """Return an xAI-style HTTP 400 when the request carries a rejected param.
+
+    :param qr: The queued response (its ``reject_params`` drive the check).
+    :param parsed: The parsed request body.
+    :returns: A 400 ``JSONResponse`` naming the first offending key, or
+        ``None`` when nothing in ``reject_params`` is present in the body.
+    """
+    if not qr.reject_params or not isinstance(parsed, dict):
+        return None
+    for key in qr.reject_params:
+        if parsed.get(key) is not None:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": f"Argument not supported on this model: {key}",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+    return None
+
+
 # ── Endpoints ────────────────────────────────────────────
 
 
@@ -802,6 +832,10 @@ async def create_response(
     # Fixed wall-clock pause the mock owns (see QueuedResponse.delay).
     if qr.delay:
         await asyncio.sleep(qr.delay)
+
+    rejected = _reject_unsupported_param(qr, parsed)
+    if rejected is not None:
+        return rejected
 
     # Error response
     if qr.error is not None:
@@ -936,6 +970,10 @@ async def create_chat_completion(
     if qr.delay:
         await asyncio.sleep(qr.delay)
 
+    rejected = _reject_unsupported_param(qr, parsed)
+    if rejected is not None:
+        return rejected
+
     if qr.error is not None:
         return JSONResponse(
             status_code=qr.status_code,
@@ -1067,6 +1105,7 @@ async def configure(request: Request) -> dict[str, object]:
                     status_code=entry.get("status_code", 500),
                     delay=entry.get("delay", 0.0),
                     truncate_after=entry.get("truncate_after"),
+                    reject_params=entry.get("reject_params"),
                 )
             )
         count = len(queue.responses)

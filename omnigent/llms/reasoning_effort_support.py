@@ -23,8 +23,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-
-import httpx
+from urllib.parse import urlparse
 
 _logger = logging.getLogger(__name__)
 
@@ -42,6 +41,48 @@ _SEED_REJECTIONS: frozenset[tuple[str, str]] = frozenset(
 # Rejections learned from live provider 400s, so a process pays at most
 # one wasted round trip per (provider, model).
 _learned_rejections: set[tuple[str, str]] = set()
+
+
+def gating_identity(model: str, base_url: str = "") -> tuple[str, str]:
+    """Best-effort ``(provider, model)`` identity for gating decisions.
+
+    A ``provider/model`` prefix wins (``"xai/grok-4"`` → ``("xai",
+    "grok-4")`` — the form the harness path sends verbatim). A bare model
+    id falls back to matching *base_url*'s host against the known provider
+    endpoints (``api.x.ai`` → ``"xai"``), then ``"openai"``. Unknown
+    prefixes (e.g. an OpenRouter vendor path) are kept as-is: they only
+    have to be *consistent* so a learned rejection is found again — they
+    never have to be canonical.
+
+    :param model: The model id as sent on the wire, e.g. ``"xai/grok-4"``.
+    :param base_url: The client's base URL, used when *model* has no prefix.
+    :returns: The ``(provider, model)`` pair to gate on.
+    """
+    if "/" in model:
+        provider, bare = model.split("/", 1)
+        return provider.lower(), bare
+    return _provider_for_base_url(base_url) or "openai", model
+
+
+def _provider_for_base_url(base_url: str) -> str | None:
+    """Match *base_url*'s host against the known provider endpoints.
+
+    :param base_url: An OpenAI-compatible base URL, e.g.
+        ``"https://api.x.ai/v1"``.
+    :returns: The provider id, or ``None`` when no endpoint matches.
+    """
+    from omnigent.llms.routing import PROVIDER_CONFIGS
+
+    try:
+        host = urlparse(base_url).hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    for provider, url in PROVIDER_CONFIGS.items():
+        if url and urlparse(url).hostname == host:
+            return provider
+    return None
 
 
 def accepts_reasoning_effort(provider: str, model: str) -> bool:
@@ -81,15 +122,19 @@ def is_reasoning_effort_rejection(exc: Exception) -> bool:
     rejection ("must be one of the supported values") triggers the
     fallback.
 
+    Detection is duck-typed on the exception's ``response`` so both
+    transport shapes match: ``httpx.HTTPStatusError`` (the ``omnigent.llms``
+    adapters) and ``openai.APIStatusError`` (the openai-agents executor
+    path) each carry an ``httpx.Response`` there.
+
     :param exc: The exception raised by the provider call.
     :returns: ``True`` when the fallback should strip and retry.
     """
-    if not isinstance(exc, httpx.HTTPStatusError):
-        return False
-    if exc.response.status_code != 400:
+    response = getattr(exc, "response", None)
+    if response is None or getattr(response, "status_code", None) != 400:
         return False
     try:
-        body = exc.response.text.lower()
+        body = response.text.lower()
     except Exception:  # an unreadable body is not a param rejection
         return False
     if "reasoning_effort" not in body.replace("reasoningeffort", "reasoning_effort"):

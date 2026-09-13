@@ -10,11 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import openai
 import pytest
 
 from omnigent.llms.reasoning_effort_support import (
     accepts_reasoning_effort,
     clear_learned_rejections,
+    gating_identity,
     is_reasoning_effort_rejection,
     record_reasoning_effort_rejection,
     strip_rejected_reasoning_effort,
@@ -127,6 +129,55 @@ def test_non_http_errors_not_matched() -> None:
     assert not is_reasoning_effort_rejection(
         httpx.ConnectError("no route", request=httpx.Request("POST", "http://test"))
     )
+
+
+def _openai_error(status_code: int, body: str) -> openai.APIStatusError:
+    """Build the openai-client exception shape the executor path raises.
+
+    :param status_code: HTTP status code, e.g. ``400``.
+    :param body: Raw response body text.
+    :returns: The constructed error.
+    """
+    response = httpx.Response(
+        status_code,
+        content=body.encode(),
+        request=httpx.Request("POST", "https://api.x.ai/v1/chat/completions"),
+    )
+    return openai.APIStatusError(f"Error code: {status_code}", response=response, body=None)
+
+
+def test_openai_client_400_shape_detected() -> None:
+    """``openai.APIStatusError`` (the agents-SDK path) matches too."""
+    exc = _openai_error(400, "Argument not supported on this model: reasoning_effort")
+    assert is_reasoning_effort_rejection(exc)
+
+
+def test_openai_client_unrelated_400_not_matched() -> None:
+    """An openai-shaped 400 about another parameter stays untouched."""
+    assert not is_reasoning_effort_rejection(_openai_error(400, "max_tokens is too large"))
+    assert not is_reasoning_effort_rejection(
+        _openai_error(429, "Argument not supported on this model: reasoning_effort")
+    )
+
+
+# ── gating_identity ────────────────────────────────────────────────
+
+
+def test_gating_identity_splits_provider_prefix() -> None:
+    """``provider/model`` strings gate on the split pair, case-normalized."""
+    assert gating_identity("xai/grok-4") == ("xai", "grok-4")
+    assert gating_identity("XAI/grok-4") == ("xai", "grok-4")
+
+
+def test_gating_identity_infers_provider_from_base_url() -> None:
+    """A bare model id falls back to the client base URL's endpoint."""
+    assert gating_identity("grok-4", "https://api.x.ai/v1") == ("xai", "grok-4")
+
+
+def test_gating_identity_defaults_to_openai() -> None:
+    """An unknown or empty base URL defaults the provider to openai."""
+    assert gating_identity("grok-4", "") == ("openai", "grok-4")
+    assert gating_identity("grok-4", "http://127.0.0.1:8123/v1") == ("openai", "grok-4")
 
 
 # ── strip_rejected_reasoning_effort ──────────────────────────────────
