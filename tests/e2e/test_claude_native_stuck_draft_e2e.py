@@ -36,7 +36,7 @@ The swallowed Enter is a timing race inside Claude Code's TUI, so it cannot
 be reproduced on demand against the real binary (and this environment has no
 interactive Claude login). Instead the tests drive the *exact* host-side
 delivery path the runner invokes for a web-UI message —
-``omnigent.claude_native_bridge.inject_user_message`` against a **real tmux
+``omnigent.harnesses.claude_native.bridge.inject_user_message`` against a **real tmux
 pane** — where the pane hosts a minimal fake TUI that faithfully misbehaves
 the way the report describes:
 
@@ -78,8 +78,8 @@ from pathlib import Path
 
 import pytest
 
-import omnigent.claude_native_bridge as _bridge_mod
-from omnigent.claude_native_bridge import (
+import omnigent.harnesses.claude_native.bridge as _bridge_mod
+from omnigent.harnesses.claude_native.bridge import (
     inject_user_message,
     write_tmux_target,
 )
