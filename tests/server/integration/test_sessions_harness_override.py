@@ -274,6 +274,11 @@ async def test_create_session_init_carries_harness_override(
         f"got {init_posts[-1]!r}. The runner then resolves the harness from "
         f"the spec and spawns that one instead."
     )
+    assert init_posts[-1].get("session_init", {}).get("suppress_recovery_turn") is True, (
+        f"The create-time init must suppress the runner's recovery turn — the "
+        f"kickoff was already forwarded, so recovery would run it twice; got "
+        f"{init_posts[-1]!r}."
+    )
 
 
 async def test_patch_rebind_init_carries_harness_override(
@@ -323,6 +328,10 @@ async def test_patch_rebind_init_carries_harness_override(
         f"Rebind session-init notification lost the harness override; got "
         f"{init_posts[-1]!r}. The runner then resolves the harness from the "
         f"spec, and the kickoff recovery turn runs on the wrong harness."
+    )
+    assert not init_posts[-1].get("session_init", {}).get("suppress_recovery_turn"), (
+        f"The rebind init must keep recovery enabled — on rebind the recovery "
+        f"turn is what runs the pending seeded kickoff; got {init_posts[-1]!r}."
     )
 
 
