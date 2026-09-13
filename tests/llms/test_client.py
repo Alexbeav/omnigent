@@ -1198,10 +1198,13 @@ async def test_streaming_param_rejection_strips_and_retries(
     assert captured[0].get("reasoning_effort") == "low"
     assert "reasoning_effort" not in captured[1]
 
-    # The completed stripped retry learned the rejection.
+    # The completed stripped retry learned the rejection, scoped to the
+    # effective endpoint (default xAI routing here) — a different endpoint
+    # is unaffected.
     from omnigent.llms.reasoning_effort_support import accepts_reasoning_effort
 
-    assert not accepts_reasoning_effort("xai", "grok-new")
+    assert not accepts_reasoning_effort("xai", "grok-new", "https://api.x.ai/v1")
+    assert accepts_reasoning_effort("xai", "grok-new", "https://other.example.com/v1")
 
 
 @pytest.mark.asyncio

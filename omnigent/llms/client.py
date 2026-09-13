@@ -28,7 +28,7 @@ from omnigent.llms.reasoning_effort_support import (
     record_reasoning_effort_rejection,
     strip_rejected_reasoning_effort,
 )
-from omnigent.llms.routing import parse_model_string
+from omnigent.llms.routing import PROVIDER_CONFIGS, parse_model_string
 from omnigent.llms.types import (
     Response,
     ResponseCompletedEvent,
@@ -71,6 +71,7 @@ async def _stream_with_reasoning_effort_fallback(
     messages: list[dict[str, Any]],
     provider: str,
     model: str,
+    endpoint: str,
     tools: list[dict[str, Any]] | None,
     extra: dict[str, Any],
     connection_params: dict[str, str] | None,
@@ -88,6 +89,7 @@ async def _stream_with_reasoning_effort_fallback(
     :param messages: Chat Completions messages.
     :param provider: Provider identifier, e.g. ``"xai"``.
     :param model: Model id without provider prefix.
+    :param endpoint: The effective base URL the call is routed to.
     :param tools: Tool schemas or ``None``.
     :param extra: The extra-params dict the first attempt used.
     :param connection_params: Per-call connection overrides.
@@ -119,7 +121,7 @@ async def _stream_with_reasoning_effort_fallback(
     # The stripped retry streamed to completion, so the rejection is
     # real — learn it. A retry that fails learns nothing, so a 400 that
     # merely looked like a param rejection self-corrects.
-    record_reasoning_effort_rejection(provider, model)
+    record_reasoning_effort_rejection(provider, model, endpoint)
 
 
 class _ResponsesNamespace:
@@ -291,8 +293,13 @@ class _ResponsesNamespace:
         # Send reasoning_effort optimistically, but skip models with a
         # seeded/learned HTTP 400 rejection (e.g. xAI rejects it on
         # grok-4). An unlisted model that rejects it self-heals below:
-        # strip the param, retry once, and remember the rejection.
-        if reasoning and accepts_reasoning_effort(routed.provider, routed.model):
+        # strip the param, retry once, and remember the rejection —
+        # scoped to the effective endpoint, so one gateway's 400 never
+        # suppresses the param for the same model reached elsewhere.
+        endpoint = (connection_params or {}).get("base_url") or (
+            PROVIDER_CONFIGS.get(routed.provider) or ""
+        )
+        if reasoning and accepts_reasoning_effort(routed.provider, routed.model, endpoint):
             extra["reasoning_effort"] = reasoning.get("effort")
 
         if stream:
@@ -313,6 +320,7 @@ class _ResponsesNamespace:
                     messages=messages,
                     provider=routed.provider,
                     model=routed.model,
+                    endpoint=endpoint,
                     tools=tools,
                     extra=extra,
                     connection_params=connection_params,
@@ -352,7 +360,7 @@ class _ResponsesNamespace:
             # Learn the rejection only after the stripped retry succeeded,
             # so a 400 that merely looked like a param rejection
             # self-corrects instead of durably disabling the param.
-            record_reasoning_effort_rejection(routed.provider, routed.model)
+            record_reasoning_effort_rejection(routed.provider, routed.model, endpoint)
         assert isinstance(result, dict)
         return chat_response_to_response(result)
 

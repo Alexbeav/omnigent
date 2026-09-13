@@ -928,7 +928,7 @@ async def _create_with_reasoning_effort_gate(
         # Absent, None, or the SDK's omit sentinel — nothing to gate.
         return await completions.create(**kwargs)
     provider, model = gating_identity(str(kwargs.get("model") or ""), base_url)
-    if not accepts_reasoning_effort(provider, model):
+    if not accepts_reasoning_effort(provider, model, base_url):
         return await completions.create(**_without_reasoning_effort(kwargs))
     try:
         return await completions.create(**kwargs)
@@ -938,7 +938,7 @@ async def _create_with_reasoning_effort_gate(
         # One inline retry without the rejected param — a capability
         # rejection is deterministic, so no backoff applies.
         result = await completions.create(**_without_reasoning_effort(kwargs))
-        record_reasoning_effort_rejection(provider, model)
+        record_reasoning_effort_rejection(provider, model, base_url)
         return result
 
 

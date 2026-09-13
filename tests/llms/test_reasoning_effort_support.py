@@ -160,6 +160,25 @@ def test_openai_client_unrelated_400_not_matched() -> None:
     )
 
 
+def test_learned_rejection_is_scoped_to_endpoint() -> None:
+    """A 400 learned via one endpoint must not suppress the param elsewhere."""
+    record_reasoning_effort_rejection("openai", "proxy-model", "https://proxy.example.com/v1")
+
+    assert not accepts_reasoning_effort("openai", "proxy-model", "https://proxy.example.com/v1")
+    # Same host, different path — still the same endpoint.
+    assert not accepts_reasoning_effort("openai", "proxy-model", "https://proxy.example.com/v2")
+    # A different endpoint (or default routing) keeps the param.
+    assert accepts_reasoning_effort("openai", "proxy-model", "https://api.openai.com/v1")
+    assert accepts_reasoning_effort("openai", "proxy-model")
+
+
+def test_seed_applies_at_any_endpoint() -> None:
+    """Seeds encode the vendor's API contract, wherever the model is reached."""
+    assert not accepts_reasoning_effort("xai", "grok-4", "https://api.x.ai/v1")
+    assert not accepts_reasoning_effort("xai", "grok-4", "http://127.0.0.1:9999/v1")
+    assert not accepts_reasoning_effort("xai", "grok-4")
+
+
 # ── gating_identity ────────────────────────────────────────────────
 
 

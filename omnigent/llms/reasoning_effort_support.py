@@ -17,6 +17,12 @@ than a hand-maintained allowlist:
   call with a 400 naming the parameter, the client strips it, retries
   once, and records the rejection so later calls in this process skip
   the wasted round trip.
+
+Seeds are keyed by ``(provider, model)`` — they encode the vendor's own
+API contract, which holds wherever that vendor's model is addressed.
+Learned rejections additionally carry the *effective endpoint*, so a
+400 from one proxy or gateway never suppresses the parameter for the
+same model reached through a different endpoint.
 """
 
 from __future__ import annotations
@@ -39,8 +45,8 @@ _SEED_REJECTIONS: frozenset[tuple[str, str]] = frozenset(
 )
 
 # Rejections learned from live provider 400s, so a process pays at most
-# one wasted round trip per (provider, model).
-_learned_rejections: set[tuple[str, str]] = set()
+# one wasted round trip per (endpoint, provider, model).
+_learned_rejections: set[tuple[str, str, str]] = set()
 
 
 def gating_identity(model: str, base_url: str = "") -> tuple[str, str]:
@@ -85,15 +91,31 @@ def _provider_for_base_url(base_url: str) -> str | None:
     return None
 
 
-def accepts_reasoning_effort(provider: str, model: str) -> bool:
+def _endpoint_key(endpoint: str) -> str:
+    """Normalize an endpoint URL to its network location for cache keys.
+
+    :param endpoint: A base URL, e.g. ``"https://api.x.ai/v1"``, or ``""``.
+    :returns: The lowercased ``host[:port]``, or ``""`` when unparseable.
+    """
+    try:
+        return (urlparse(endpoint).netloc or "").lower()
+    except ValueError:
+        return ""
+
+
+def accepts_reasoning_effort(provider: str, model: str, endpoint: str = "") -> bool:
     """Return whether ``reasoning_effort`` should be sent to this model.
 
     :param provider: Provider identifier, e.g. ``"xai"``.
     :param model: Model id without provider prefix, e.g. ``"grok-4"``.
+    :param endpoint: The effective base URL the call is routed to. Seeds
+        apply regardless of it; learned rejections are scoped to it.
     :returns: ``False`` when the pair is a seeded or learned rejection.
     """
-    key = (provider, model.lower())
-    return key not in _SEED_REJECTIONS and key not in _learned_rejections
+    pair = (provider, model.lower())
+    if pair in _SEED_REJECTIONS:
+        return False
+    return (_endpoint_key(endpoint), *pair) not in _learned_rejections
 
 
 # Capability-rejection phrasings. A bare "support" is not enough: a
@@ -144,22 +166,25 @@ def is_reasoning_effort_rejection(exc: Exception) -> bool:
     return any(phrase in body for phrase in _CAPABILITY_REJECTION_PHRASES)
 
 
-def record_reasoning_effort_rejection(provider: str, model: str) -> None:
-    """Cache a live rejection so later calls skip the parameter.
+def record_reasoning_effort_rejection(provider: str, model: str, endpoint: str = "") -> None:
+    """Cache a live rejection so later calls to this endpoint skip the parameter.
 
     :param provider: Provider identifier, e.g. ``"xai"``.
     :param model: Model id without provider prefix.
+    :param endpoint: The effective base URL that rejected the call.
     """
-    key = (provider, model.lower())
+    key = (_endpoint_key(endpoint), provider, model.lower())
     if key in _learned_rejections:
         return
     _learned_rejections.add(key)
     _logger.warning(
-        "%s/%s rejected reasoning_effort (HTTP 400); retrying without it and "
-        "omitting it for this model from now on. If this repeats across runs, "
-        "seed the model in reasoning_effort_support to skip the wasted call.",
+        "%s/%s (endpoint %s) rejected reasoning_effort (HTTP 400); retrying "
+        "without it and omitting it for this model at this endpoint from now "
+        "on. If this repeats across runs, seed the model in "
+        "reasoning_effort_support to skip the wasted call.",
         provider,
         model,
+        endpoint or "default",
     )
 
 
