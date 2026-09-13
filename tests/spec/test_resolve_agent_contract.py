@@ -36,3 +36,51 @@ def test_resolve_agent_stages_the_ci_bundle_inside_the_worktree() -> None:
     assert ".omnigent/repro-bundle" in normalized
     assert "file tools are worktree-scoped" in normalized
     assert "`/tmp` or `$RUNNER_TEMP`" in normalized
+
+
+def _normalized_resolve_instructions() -> str:
+    text = (_RESOLVE_AGENT / "AGENTS.md").read_text(encoding="utf-8")
+    return " ".join(text.split())
+
+
+def test_textual_carveout_scoped_to_api_and_test_asserted_values() -> None:
+    """The no-footage carve-out must not be readable as covering CLI output.
+
+    An unscoped "static line / value" carve-out once let a fix for a host's
+    misleading console error ship with ``recordings: []`` by calling the
+    command's output "a log line", though the lane doc films exactly that
+    journey.
+    """
+    normalized = _normalized_resolve_instructions()
+
+    assert (
+        "The no-footage carve-out applies **only** to `api` facets and to "
+        "values only a test asserts" in normalized
+    )
+    # The old unscoped phrasing offered the loophole; it must stay gone.
+    assert "just a static line, value, or the absence of an error" not in normalized
+    assert "For purely textual evidence" not in normalized
+
+
+def test_cli_console_output_is_always_filmed() -> None:
+    normalized = _normalized_resolve_instructions()
+
+    assert (
+        "A `cli`/`terminal` facet whose fixed outcome is what a command prints "
+        "on its console is **always filmed**" in normalized
+    )
+    assert "expired-login `omnigent host` example" in normalized
+
+
+def test_unavailable_reason_rejects_purely_textual_on_cli_facets() -> None:
+    normalized = _normalized_resolve_instructions()
+
+    assert (
+        "On a `cli`/`terminal` facet the reason must name a concrete tooling "
+        "or reachability blocker (`vhs`/`ttyd` missing, the host/server won't "
+        "boot)" in normalized
+    )
+    assert (
+        '"the outcome is purely textual" and "the repro handoff carried no '
+        'recordings" are not accepted reasons on those facets' in normalized
+    )

@@ -18,13 +18,18 @@ which clip `kind` it produces and where it goes; this file is the how.
 ## What is expected to yield a recording
 
 A `web` / `mobile` / `terminal` / `cli` / `desktop` facet is expected to yield a recording:
-drive it on that surface and film it. A facet legitimately has no recording when
-its outcome is not something a user *watches* — an `api` failure no user observes
-on any surface (a wrong value in a response, an internal state a pytest asserts),
-or a facet whose whole user-visible outcome is a static piece of text (an error
-string, a value, a log line) with nothing that moves on screen. For those,
-`recordings: []` is correct and not a gap: state the observed text and how you
-confirmed it in your prose/evidence instead. Tests may drive and verify the
+drive it on that surface and film it. A facet legitimately has no recording only
+when its outcome is not something a user *watches* — an `api` failure no user
+observes on any surface, or a value only a test asserts (a wrong field in a
+response, an internal state a pytest checks) with no surface that reacts. For
+those, `recordings: []` is correct and not a gap: state the observed text and
+how you confirmed it in your prose/evidence instead. **Text a command prints to
+its console is never that carve-out**: on a `cli`/`terminal` facet whose outcome
+is what a command prints — an error line, a remedy hint, a status message — the
+command run is the live action, so film the real command and its console output
+per the `cli` facets section below (its expired-login `omnigent host` example is
+exactly this shape). "The outcome is just a log line" never exempts a runnable
+command from footage. Tests may drive and verify the
 journey, but the clip itself must show the product surface and user-visible
 outcome, never the test process, pytest output, assertions, logs, or a synthetic
 evidence-summary slide.
@@ -52,7 +57,11 @@ Recording is **best-effort**: if the tooling below is missing, or a user-facing
 facet's state is genuinely unreachable in this harness, keep `recordings: []` for
 that facet and **name the specific blocker** in `recording_unavailable_reason` —
 an empty recordings list on a `web`/`mobile`/`terminal`/`cli`/`desktop` facet must
-always come with a concrete reason, never a silent skip. Never let recording block
+always come with a concrete reason, never a silent skip. On a `cli`/`terminal`
+facet the reason must name a concrete tooling or reachability blocker
+(`vhs`/`ttyd` missing, the host/server won't boot); "the outcome is purely
+textual" and "the upstream handoff carried no recordings" are not accepted
+reasons there. Never let recording block
 or distort the work itself, and never fabricate a hollow journey that doesn't
 reach the failure just to produce a video. Missing or rejected footage never
 blocks the verdict, fix, or PR.

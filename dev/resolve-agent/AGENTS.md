@@ -662,10 +662,16 @@ produces*:
   evidence; never report an after-clip you didn't actually produce.
 - A clip must show a **live action producing the corrected outcome** — a command
   runs and the pane prints it, a screen changes — never static text asserting the
-  fix works. When the fixed outcome is just a static line, value, or the absence
-  of an error with nothing to watch, do **not** film a video of text: keep
+  fix works. The no-footage carve-out applies **only** to `api` facets and to
+  values only a test asserts (a fixed response field, an internal state, the
+  absence of a raised error with no surface a user watches): there, keep
   `recordings: []` for that facet and state the corrected text in your evidence
-  and the PR Demo section, per `dev/recording-lanes.md`. When you run
+  and the PR Demo section, per `dev/recording-lanes.md`. A `cli`/`terminal`
+  facet whose fixed outcome is what a command prints on its console is **always
+  filmed**: the command run is the live action, so drive the real command and
+  capture its output per `dev/recording-lanes.md`'s `cli` section (its
+  expired-login `omnigent host` example is exactly this shape) — "the outcome
+  is just a log line" is not a reason to skip. When you run
   inside a server-spawned runner (`OMNIGENT_RUNNER_ID` is set), a recorder
   `online: false` is **not** an environmental blocker until you have stripped the
   leaked runner/host env vars per `dev/recording-lanes.md`; an un-stripped
@@ -773,9 +779,10 @@ Once the set is genuinely green:
    before/after recordings in the **Demo** section: upload the files when your
    environment can attach media to the PR; otherwise link where they live (the
    CI run's artifact bundle, or the repro session) so reviewers can watch the
-   failure and the fix. When a facet's outcome is purely textual (nothing to
-   film), put the observed before/after text in the **Demo** section in place of a
-   video, so the section is never left empty or padded with a video of text. When
+   failure and the fix. When a facet legitimately has no footage (an `api`
+   facet, or a value only a test asserts — the 2B.5 carve-out), put the observed
+   before/after text in the **Demo** section in place of a video, so the section
+   is never left empty or padded with a video of text. When
    the bug is a Linear ticket and a Linear key is available, also attach both
    recordings to the ticket (GraphQL `fileUpload` + `attachmentCreate`) so the
    ticket carries the visual before/after.
@@ -1391,13 +1398,17 @@ Field meanings:
   review mode, the "after" entries are the drivers recorded against the reviewed
   PR head. The list is empty **only** when recording is genuinely blocked — the
   recorder tooling is missing, or the fixture can't come online after the SPA
-  build — or when the outcome is purely textual with nothing to watch; never
-  merely because the upstream run left no footage.
+  build — or when the facet is in the 2B.5 carve-out (`api`-surface, or a value
+  only a test asserts); never merely because the upstream run left no footage,
+  and never on a `cli`/`terminal` facet whose outcome is what a command prints.
 - `recording_unavailable_reason` — empty when every expected clip is present;
-  otherwise name the concrete blocker. For purely textual evidence — an `api`
-  facet, or a facet whose fixed outcome is just a static line or value — say it is
-  textual and carry the observed text in the PR Demo section; `recordings: []` is
-  correct and not a blocker. Missing or rejected footage never blocks the fix or
+  otherwise name the concrete blocker. For an `api` facet or a value only a test
+  asserts, say the evidence is textual and carry the observed text in the PR
+  Demo section; `recordings: []` is correct and not a blocker there. On a
+  `cli`/`terminal` facet the reason must name a concrete tooling or reachability
+  blocker (`vhs`/`ttyd` missing, the host/server won't boot); "the outcome is
+  purely textual" and "the repro handoff carried no recordings" are not accepted
+  reasons on those facets. Missing or rejected footage never blocks the fix or
   PR, and must never be replaced with a synthetic fallback or a video of the test
   runner.
 - `test_audit` — the result of the Step 2B.1 audit (author mode). In review mode,
