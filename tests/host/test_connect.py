@@ -1766,6 +1766,163 @@ async def test_sweep_ownerless_trees_once_runs_all_families(
     assert host._owned_subprocess_ops == 0
 
 
+async def test_sweep_bounds_a_wedged_codex_registry_reconcile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reconcile stuck on its registry flock stalls only its own pass.
+
+    The registry RMW takes a blocking flock; a wedged holder must not
+    freeze the sweep loop — the pass times out, the other families still
+    run, and the worker's subprocess-op ref drains once it finishes.
+    """
+    import omnigent.harnesses.codex_native.process_registry as registry_mod
+    import omnigent.inner.terminal as terminal_mod
+    import omnigent.runtime.harnesses.process_manager as pm_mod
+    from omnigent.host import connect as connect_mod
+
+    host = _make_host_process()
+    calls: list[str] = []
+    release = threading.Event()
+
+    def wedged_reconcile() -> int:
+        calls.append("codex")
+        release.wait(8.0)
+        return 0
+
+    def fake_reap_terminals() -> int:
+        calls.append("terminals")
+        return 0
+
+    async def fake_sweep_instance_dirs(tmp_parent: Path | None = None) -> int:
+        calls.append("instance-dirs")
+        return 0
+
+    monkeypatch.setattr(connect_mod, "_OWNERLESS_SWEEP_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(connect_mod, "_OWNERLESS_SWEEP_JOIN_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(registry_mod, "reconcile_codex_native_process_registry", wedged_reconcile)
+    monkeypatch.setattr(terminal_mod, "reap_orphaned_terminals", fake_reap_terminals)
+    monkeypatch.setattr(pm_mod, "sweep_orphaned_instance_dirs", fake_sweep_instance_dirs)
+
+    try:
+        await asyncio.wait_for(host._sweep_ownerless_trees_once(), timeout=5.0)
+    finally:
+        release.set()
+
+    assert calls == ["codex", "terminals", "instance-dirs"]
+    # The timed-out worker holds its subprocess-op ref for its true
+    # lifetime; once unwedged it must drain promptly.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and host._owned_subprocess_ops:
+        await asyncio.sleep(0.05)
+    assert host._owned_subprocess_ops == 0
+
+
+def _classify_live_child_with_argv(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str]
+) -> bool:
+    """Classify one live adopted child whose /proc argv reads *argv*.
+
+    Stubs the psutil cmdline read so the verdict reflects classification
+    alone, independent of any real process.
+
+    :param monkeypatch: The active monkeypatch fixture.
+    :param argv: The intact argv the child would expose.
+    :returns: The condemn verdict for that child.
+    """
+    from omnigent.host import connect as connect_mod
+
+    host = _make_host_process()
+    monkeypatch.setattr(
+        connect_mod.psutil,
+        "Process",
+        lambda _pid: SimpleNamespace(cmdline=lambda: list(argv)),
+    )
+    pin = connect_mod._AdoptedPin(identity="x", is_leader=True)
+    return host._classify_adopted_pin(4242, pin)
+
+
+def test_tmux_owner_gate_survives_whitespace_in_socket_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tmux server with spaces in its socket path still hits the owner gate.
+
+    The per-session server's argv embeds its pane command (the
+    start-on-attach shell), so bypassing the owner-liveness gate would
+    condemn — and group-kill — a LIVE session whose temp dir merely
+    contains whitespace.
+    """
+    gate_calls: list[Path] = []
+
+    def owner_alive(instance_dir: Path) -> bool | None:
+        gate_calls.append(instance_dir)
+        return False
+
+    monkeypatch.setattr("omnigent.inner.terminal.terminal_owner_is_dead", owner_alive)
+    condemned = _classify_live_child_with_argv(
+        monkeypatch,
+        [
+            "tmux",
+            "-S",
+            "/tmp/dir with spaces/omnigent-terminal-abc/tmux.sock",
+            "new-session",
+            "-d",
+            "tmux wait-for omnigent-start-on-attach; exec bash",
+        ],
+    )
+    assert condemned is False, "a live-owner tmux server must never be condemned"
+    assert gate_calls == [Path("/tmp/dir with spaces/omnigent-terminal-abc")]
+
+
+def test_condemn_signatures_key_on_argv_elements_not_joined_substrings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Family matching follows real spawn shapes, not free substrings.
+
+    A stranger process (e.g. an agent-daemonized service) whose
+    *arguments* merely mention a framework module name must be spared;
+    the real scaffolding spawn shapes must all still be condemned —
+    including the serve-mcp relay under its relocated module path.
+    """
+    # Real spawn shapes: condemned.
+    assert _classify_live_child_with_argv(
+        monkeypatch,
+        [sys.executable, "-P", "-m", "omnigent.runtime.harnesses._runner", "--x"],
+    )
+    assert _classify_live_child_with_argv(
+        monkeypatch,
+        [
+            sys.executable,
+            "-I",
+            "-m",
+            "omnigent.harnesses.claude_native.bridge",
+            "serve-mcp",
+            "--bridge-dir",
+            "/tmp/b",
+        ],
+    ), "the relocated serve-mcp relay module must be condemnable"
+    assert _classify_live_child_with_argv(
+        monkeypatch,
+        [sys.executable, "-m", "omnigent.claude_native_bridge", "serve-mcp"],
+    ), "a relay spawned by a pre-relocation install must stay condemnable"
+    assert _classify_live_child_with_argv(
+        monkeypatch, ["codex", "app-server", "omnigent_crash_teardown_tag=abc123"]
+    )
+    assert _classify_live_child_with_argv(
+        monkeypatch,
+        ["sh", "-c", "tmux wait-for omnigent-start-on-attach; exec bash"],
+    )
+
+    # Stranger processes naming a module in an argument: spared.
+    assert not _classify_live_child_with_argv(
+        monkeypatch,
+        ["tail", "-f", "/var/log/omnigent.runtime.harnesses._runner.log"],
+    )
+    assert not _classify_live_child_with_argv(
+        monkeypatch,
+        ["grep", "-r", "omnigent.harnesses.claude_native.bridge", "/workspace"],
+    )
+
+
 @pytest.mark.skipif(
     sys.platform != "linux",
     reason="zombie pgid inspection (and subreaper adoption) are Linux-only",

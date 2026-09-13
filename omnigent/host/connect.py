@@ -20,7 +20,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, SupportsIndex, SupportsInt, cast
@@ -297,7 +297,7 @@ def _ownerless_sweep_enabled() -> bool:
 # SIGKILL. With the 60s sweep cadence the escalation lands on the next pass.
 _ADOPTED_SIGTERM_GRACE_S = 10.0
 
-# Cmdline substrings identifying the session-scaffolding families from the
+# Argv shapes identifying the session-scaffolding families from the
 # ownerless-tree superset. For an ADOPTED child (its parent died) these
 # families are ownerless by construction — none of them legitimately
 # daemonizes away from a live owner. Per-session tmux servers DO (they
@@ -307,13 +307,47 @@ _ADOPTED_SIGTERM_GRACE_S = 10.0
 # deliberately NOT condemned: a user-launched one is indistinguishable
 # from the framework's, and either exits on its own once its session or
 # tmux server is gone.
-_ADOPTED_CONDEMN_SIGNATURES: tuple[str, ...] = (
-    "omnigent_crash_teardown_tag=",
-    "omnigent.runtime.harnesses._runner",
-    "claude_native_bridge",
-    "omnigent-start-on-attach",
+#
+# Matching is per argv ELEMENT, shaped like the real spawns, so a stranger
+# process whose *arguments* merely mention a module name (a log path, a
+# grep pattern) is never condemned by it:
+#  - module invocations run as ``python -m <module> …`` — the module name
+#    is matched as the exact element right after ``-m`` (a pattern/path
+#    argument equal to the module name alone does not match);
+#  - the codex crash-teardown tag is an inert standalone marker element,
+#    matched by prefix;
+#  - the start-on-attach channel rides inside a pane's single shell -c
+#    command string, so it can only be matched as an element substring.
+_ADOPTED_CONDEMN_MODULE_ARGS: frozenset[str] = frozenset(
+    {
+        # Harness runner subprocesses (process_manager spawn).
+        "omnigent.runtime.harnesses._runner",
+        # The serve-mcp bridge relay — current module path and its
+        # pre-relocation name (an already-running relay spawned by an older
+        # install keeps the old module in its argv until it exits).
+        "omnigent.harnesses.claude_native.bridge",
+        "omnigent.claude_native_bridge",
+    }
 )
+_ADOPTED_CONDEMN_ARG_PREFIX = "omnigent_crash_teardown_tag="
+_ADOPTED_CONDEMN_ARG_SUBSTRING = "omnigent-start-on-attach"
 _TMUX_INSTANCE_DIR_MARKER = "omnigent-terminal-"
+
+
+def _argv_condemn_match(argv: Sequence[str]) -> bool:
+    """Whether an adopted child's argv names a condemnable family.
+
+    :param argv: The child's intact argv (never a re-split joined string).
+    :returns: ``True`` when a family shape matches.
+    """
+    for i, arg in enumerate(argv):
+        if arg in _ADOPTED_CONDEMN_MODULE_ARGS and i > 0 and argv[i - 1] == "-m":
+            return True
+        if arg.startswith(_ADOPTED_CONDEMN_ARG_PREFIX):
+            return True
+        if _ADOPTED_CONDEMN_ARG_SUBSTRING in arg:
+            return True
+    return False
 
 
 @dataclass
@@ -413,27 +447,31 @@ def _pid_is_zombie(pid: int) -> bool:
     return _proc.process_is_zombie(pid)
 
 
-def _adopted_child_cmdline(pid: int) -> str:
-    """Space-joined cmdline of a live direct child, ``""`` if unreadable.
+def _adopted_child_argv(pid: int) -> list[str]:
+    """Intact argv of a live direct child, ``[]`` if unreadable.
 
     :param pid: The child pid.
-    :returns: The command line (empty for zombies — their argv is gone).
+    :returns: The argv list (empty for zombies — their argv is gone).
     """
     try:
-        return " ".join(psutil.Process(pid).cmdline())
+        return psutil.Process(pid).cmdline()
     except (psutil.Error, OSError):
-        return ""
+        return []
 
 
-def _tmux_instance_dir_from_cmdline(cmdline: str) -> Path | None:
-    """Extract the per-session terminal instance dir from a tmux cmdline.
+def _tmux_instance_dir_from_argv(argv: Sequence[str]) -> Path | None:
+    """Extract the per-session terminal instance dir from a tmux argv.
 
-    :param cmdline: e.g. ``tmux -S /tmp/omnigent-terminal-abc/tmux.sock …``.
+    Matches the socket path as one intact argv element — a path containing
+    whitespace must still hit the owner-liveness gate, never fall through
+    to the condemn signatures.
+
+    :param argv: e.g. ``["tmux", "-S", "/tmp/omnigent-terminal-abc/tmux.sock", …]``.
     :returns: The instance dir, or ``None`` when not a per-session server.
     """
-    for token in cmdline.split():
-        if _TMUX_INSTANCE_DIR_MARKER in token and token.endswith("tmux.sock"):
-            return Path(token).parent
+    for arg in argv:
+        if _TMUX_INSTANCE_DIR_MARKER in arg and arg.endswith("tmux.sock"):
+            return Path(arg).parent
     return None
 
 
@@ -1699,7 +1737,16 @@ class HostProcess:
             except Exception:  # noqa: BLE001 — best-effort per family
                 _logger.warning("adopted-orphan sweep failed", exc_info=True)
         try:
-            signaled = await self._run_family_in_thread(reconcile_codex_native_process_registry)
+            # Bounded like the instance-dir family below: a wedged lock
+            # holder (the registry RMW takes a blocking flock) must pause
+            # only this pass, not stall the sweep loop indefinitely. The
+            # worker thread keeps its subprocess-op ref until it truly
+            # finishes, so a timed-out worker still pauses the reaper for
+            # its real lifetime.
+            signaled = await asyncio.wait_for(
+                self._run_family_in_thread(reconcile_codex_native_process_registry),
+                timeout=_OWNERLESS_SWEEP_TIMEOUT_S,
+            )
             if signaled:
                 _logger.info(
                     "ownerless sweep: signaled %d codex-native process group(s)",
@@ -1708,7 +1755,10 @@ class HostProcess:
         except Exception:  # noqa: BLE001 — best-effort per family
             _logger.warning("codex-native ownerless sweep failed", exc_info=True)
         try:
-            reaped = await self._run_family_in_thread(reap_orphaned_terminals)
+            reaped = await asyncio.wait_for(
+                self._run_family_in_thread(reap_orphaned_terminals),
+                timeout=_OWNERLESS_SWEEP_TIMEOUT_S,
+            )
             if reaped:
                 _logger.info(
                     "ownerless sweep: reaped %d orphaned terminal tmux server(s)",
@@ -1839,19 +1889,19 @@ class HostProcess:
         """
         if pin.deferred_zombie:
             return self._dead_leader_group_is_ours(pid, pin)
-        cmdline = _adopted_child_cmdline(pid)
-        if not cmdline:
+        argv = _adopted_child_argv(pid)
+        if not argv:
             return False
         # The tmux gate must run FIRST: a per-session server's argv can
         # embed its pane command (e.g. the start-on-attach shell), so a
         # signature match on a LIVE session's server must never condemn it
         # — only its owner marker may.
-        instance_dir = _tmux_instance_dir_from_cmdline(cmdline)
+        instance_dir = _tmux_instance_dir_from_argv(argv)
         if instance_dir is not None:
             from omnigent.inner.terminal import terminal_owner_is_dead
 
             return terminal_owner_is_dead(instance_dir) is True
-        return any(marker in cmdline for marker in _ADOPTED_CONDEMN_SIGNATURES)
+        return _argv_condemn_match(argv)
 
     def _dead_leader_group_is_ours(self, pid: int, pin: _AdoptedPin) -> bool:
         """Attribute a deferred dead leader's group to a known family.
@@ -1866,8 +1916,7 @@ class HostProcess:
         :returns: ``True`` when the group is provably ours to drain.
         """
         for member in _live_group_member_pids(pid, exclude=pid) or []:
-            cmdline = _adopted_child_cmdline(member)
-            if any(marker in cmdline for marker in _ADOPTED_CONDEMN_SIGNATURES):
+            if _argv_condemn_match(_adopted_child_argv(member)):
                 return True
         from omnigent.harnesses.codex_native.process_registry import (
             ownerless_entry_matches_leader,
