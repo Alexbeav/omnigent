@@ -8,9 +8,11 @@ User journey (from the ticket's Steps to reproduce):
 3. A runner binds (the external-host launch analog: ``PATCH`` ``runner_id``)
    and the automatic kickoff turn fires.
 4. Observed failure: the kickoff executes on the agent spec's **claude-sdk**
-   brain, not the overridden **codex-native** harness. A second, manually
-   posted message *does* take the codex-native path — so only the
-   ``initial_items`` kickoff ignores the override.
+   brain, not the overridden **codex-native** harness.
+5. A later message posted through the standard events route must also stay
+   on the override: the native forward carries the override as session
+   state, and a runner that resolves a turn from the spec alone evicts the
+   override harness mid-session (the split-brain between turns).
 
 The test boots a real ``omnigent server`` + external runner + the mock LLM
 (``tests/server/integration/mock_llm_server.py``) as subprocesses, drives the
@@ -163,6 +165,11 @@ def rig(tmp_path: Path) -> Iterator[dict[str, Any]]:
             )
         )
 
+        # Runner-owned native terminals (the codex-native override) refuse to
+        # launch without a workspace; without it turn dispatch dies before the
+        # harness-resolution behavior under test is ever reached.
+        runner_workspace = tmp_path / "workspace"
+        runner_workspace.mkdir()
         runner_log = open(logs / "runner.log", "w")  # noqa: SIM115 — lives for Popen's lifetime
         procs.append(
             subprocess.Popen(
@@ -172,6 +179,7 @@ def rig(tmp_path: Path) -> Iterator[dict[str, Any]]:
                     "OMNIGENT_RUNNER_ID": runner_id,
                     "OMNIGENT_RUNNER_TUNNEL_BINDING_TOKEN": binding_token,
                     "OMNIGENT_RUNNER_PARENT_PID": str(os.getpid()),
+                    "OMNIGENT_RUNNER_WORKSPACE": str(runner_workspace),
                     "RUNNER_SERVER_URL": base_url,
                 },
                 cwd=str(REPO),
@@ -222,9 +230,9 @@ def test_initial_items_kickoff_honors_cross_harness_override(
 
     While the bug is live, the kickoff turn runs on the spec harness:
     the mock records claude-model requests and the assistant answer is
-    the claude fallback marker. Post-fix, the kickoff takes the
-    codex-native path (like the second manual message already does) and
-    zero claude requests are recorded.
+    the claude fallback marker. Post-fix, the kickoff and every later
+    message take the codex-native path and zero claude requests are
+    recorded.
     """
     base, mock = rig["base_url"], rig["mock_url"]
     c = httpx.Client(base_url=base, timeout=30)
@@ -298,4 +306,35 @@ def test_initial_items_kickoff_honors_cross_harness_override(
     )
     assert all(CLAUDE_MARKER not in t for t in assistant_texts), (
         f"kickoff assistant reply came from the claude-sdk brain: {assistant_texts!r}"
+    )
+
+    # Step 5 of the journey: a later message on the standard events route
+    # must also stay on the override. The native forward carries no per-event
+    # harness_override, so a runner that resolves the turn from the spec
+    # alone runs the claude-sdk brain and evicts the codex-native harness.
+    # (In an environment without the codex CLI the forward fails before the
+    # runner resolves a harness — the assertion is then vacuous, and the
+    # runner-level test covers the resolution directly.)
+    turn2 = c.post(
+        f"/v1/sessions/{sid}/events",
+        json={
+            "type": "message",
+            "data": {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "turn two: which model are you?"}],
+            },
+        },
+        timeout=60,
+    )
+    assert turn2.status_code < 500 or not _claude_requests(mock), turn2.text
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        if _claude_requests(mock):
+            break
+        time.sleep(3)
+    late_claude = _claude_requests(mock)
+    assert not late_claude, (
+        f"a post-kickoff message executed on the spec claude-sdk brain despite "
+        f"harness_override=codex-native: {len(late_claude)} claude request(s) "
+        f"hit the mock LLM after turn two"
     )

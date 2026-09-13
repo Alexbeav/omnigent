@@ -2144,6 +2144,84 @@ async def test_create_session_spawns_the_snapshot_harness_override() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_turn_resolves_the_recorded_harness_override() -> None:
+    """A turn whose body has no ``harness_override`` still runs the override.
+
+    The native terminal forward carries the override as session state, not
+    per-event state, so a turn body can arrive without it. Resolving that
+    turn from the body alone dropped it back onto the spec's harness —
+    process-manager entries are keyed by conversation, so the respawn
+    evicted the override harness mid-session (the split-brain on the turn
+    after the kickoff).
+    """
+    spec = AgentSpec(
+        spec_version=1,
+        name="override-agent",
+        executor=ExecutorSpec(config={"harness": "claude-sdk"}),
+    )
+    pm = _FakeProcessManager(_ScriptedHarnessClient([]))
+
+    async def _resolver(agent_id: str, session_id: str | None = None) -> AgentSpec:
+        del agent_id, session_id
+        return spec
+
+    app = create_runner_app(
+        process_manager=pm,  # type: ignore[arg-type]
+        spec_resolver=_resolver,
+        server_client=NullServerClient(),  # type: ignore[arg-type]
+    )
+    session_id = "6c1d2e8b5f3a4d9eb2c4e7fad1a3b5c7"
+    agent_id = "8e4f3c2d1b6a05f79d3e2c1b4a6f8dae"
+    payload = {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "sub_agent_name": None,
+        "session_init": {
+            "protocol_version": 2,
+            "server_version": "0.6.0.dev0",
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "sub_agent_name": None,
+            "snapshot": {
+                "created_at": 1234,
+                "updated_at": 1234,
+                "workspace": None,
+                "labels": {},
+                "harness_override": "pi",
+            },
+        },
+    }
+
+    async with _runner_client(app) as client:
+        resp = await client.post("/v1/sessions", json=payload)
+        assert resp.status_code == 201, resp.text
+        turn = await client.post(
+            f"/v1/sessions/{session_id}/events",
+            json={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "turn two"}],
+                "agent_id": agent_id,
+            },
+        )
+        assert turn.status_code == 202, turn.text
+        # The turn runs as a background task; wait for its harness request.
+        for _ in range(200):
+            if len(pm.get_client_calls) >= 2:
+                break
+            await asyncio.sleep(0.05)
+
+    harnesses = [harness for _conv, harness, _env in pm.get_client_calls]
+    assert "claude-sdk" not in harnesses, (
+        f"A turn without a body harness_override ran the spec's harness, "
+        f"evicting the session's recorded override; got {harnesses}."
+    )
+    assert harnesses[-1] == "pi", (
+        f"The turn must run the session's recorded override 'pi'; got {harnesses}."
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_session_envelope_is_single_flight_and_skips_metadata_callbacks() -> None:
     """Concurrent v2 initialization resolves once and uses supplied metadata."""
 
