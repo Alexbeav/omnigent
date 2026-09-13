@@ -2773,7 +2773,9 @@ async def _forward_session_cost(
     #   statusLine frozen on the orchestrator's model: tagging the settled S
     #   with that one model would fold the sub-agent's spend into the
     #   orchestrator's bucket (and drop its model from the per-model cost
-    #   breakdown entirely).
+    #   breakdown entirely). When only some transcripts are priceable, the
+    #   weights cover just those models, so an advance can skew toward them;
+    #   later advances self-correct once the others price.
     # - Without sub-agents (or when nothing in the transcripts could be
     #   priced), keep the single ``model`` tag from the statusLine
     #   (``{"model": "claude-opus-4-8", ...}`` in context.json) — everything
