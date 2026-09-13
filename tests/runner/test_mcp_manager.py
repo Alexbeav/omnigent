@@ -233,6 +233,38 @@ class TestDescribeConnectError:
         described = _describe_connect_error(exc)
         assert described == "RuntimeError: unreachable: https://mcp.example.com/sse"
 
+    def test_strips_userinfo_credentials(self) -> None:
+        from omnigent.runner.mcp_manager import _describe_connect_error
+
+        exc = RuntimeError("unreachable: https://alice:hunter2@mcp.example.com/sse")
+        described = _describe_connect_error(exc)
+        assert "hunter2" not in described
+        assert "https://<redacted>@mcp.example.com/sse" in described
+
+    def test_strips_query_on_non_http_scheme(self) -> None:
+        from omnigent.runner.mcp_manager import _describe_connect_error
+
+        exc = RuntimeError("handshake failed for wss://mcp.example.com/ws?token=secret123")
+        described = _describe_connect_error(exc)
+        assert "secret123" not in described
+        assert "wss://mcp.example.com/ws?<redacted>" in described
+
+    def test_strips_authorization_header_value(self) -> None:
+        from omnigent.runner.mcp_manager import _describe_connect_error
+
+        exc = RuntimeError("rejected request with Authorization: Bearer fake-token-abc123")
+        described = _describe_connect_error(exc)
+        assert "fake-token-abc123" not in described
+        assert "Authorization: Bearer <redacted>" in described
+
+    def test_strips_api_key_pair_outside_url(self) -> None:
+        from omnigent.runner.mcp_manager import _describe_connect_error
+
+        exc = RuntimeError("connect failed: api_key=fake-key-xyz is not valid")
+        described = _describe_connect_error(exc)
+        assert "fake-key-xyz" not in described
+        assert "api_key=<redacted>" in described
+
 
 @pytest.mark.asyncio
 async def test_pool_reuses_connection_for_same_spec(

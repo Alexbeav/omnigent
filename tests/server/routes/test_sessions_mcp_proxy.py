@@ -156,10 +156,12 @@ async def test_mcp_tools_list_failure_publishes_startup_event(
         runner_router=_StubRunnerRouter({"pipeshub": "401 Unauthorized"}),  # type: ignore[arg-type]
     )
 
-    # The JSON-RPC response itself stays a plain tools/list result — no new
-    # fields grafted onto it; failure visibility rides the SSE event instead.
+    # The JSON-RPC result carries the tools plus degraded-listing metadata
+    # (MCP-legal ``_meta``) so the runner re-issues tools/list next turn;
+    # failure visibility for the UI rides the SSE event below.
     payload = json.loads(bytes(response.body))
     assert payload["result"]["tools"] == []
+    assert payload["result"]["_meta"]["omnigent/mcpFailures"] == {"pipeshub": "401 Unauthorized"}
 
     assert len(published) == 1
     event = published[0]
@@ -224,10 +226,66 @@ async def test_mcp_tools_list_all_healthy_publishes_nothing(
     monkeypatch.setattr(_helpers_mod, "session_stream", _RecordingStream)
     monkeypatch.setattr(_helpers_mod, "_session_mcp_startup_cache", {})
 
-    await _handle_mcp_tools_list(
+    response = await _handle_mcp_tools_list(
         rpc_id=1,
         session_id="conv_sdk_healthy",
         runner_router=_StubRunnerRouter({}),  # type: ignore[arg-type]
     )
 
     assert published == []
+    # A clean listing carries no degraded-listing metadata.
+    payload = json.loads(bytes(response.body))
+    assert "_meta" not in payload["result"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_list_native_session_skips_publish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native-harness session's ``tools/list`` must NOT publish startup state.
+
+    Native forwarders own the session's startup-cache entry (via
+    ``external_mcp_startup``); a runner-path publish for the same session
+    could fold a native ``"starting"`` server to ``"ready"``. A failure
+    here means the single-publisher invariant is no longer enforced in
+    code.
+    """
+    published: list[dict[str, object]] = []
+
+    class _RecordingStream:
+        @staticmethod
+        def publish(conversation_id: str, event: dict[str, object]) -> None:
+            published.append({"_conversation_id": conversation_id, **event})
+
+    monkeypatch.setattr(_helpers_mod, "session_stream", _RecordingStream)
+    monkeypatch.setattr(_helpers_mod, "_session_mcp_startup_cache", {})
+
+    from omnigent.server.routes import sessions as sessions_facade
+
+    monkeypatch.setattr(sessions_facade, "_resolve_harness", lambda conv, **_kw: "codex-native")
+
+    class _StubConversationStore:
+        def get_conversation(self, conversation_id: str) -> object:
+            """Return a placeholder conversation row.
+
+            :param conversation_id: Ignored session id.
+            :returns: An opaque object; harness resolution is patched.
+            """
+            del conversation_id
+            return object()
+
+    response = await _handle_mcp_tools_list(
+        rpc_id=1,
+        session_id="conv_native_mcp",
+        runner_router=_StubRunnerRouter({"pipeshub": "401 Unauthorized"}),  # type: ignore[arg-type]
+        conversation_store=_StubConversationStore(),  # type: ignore[arg-type]
+    )
+
+    payload = json.loads(bytes(response.body))
+    # The response still carries the tools and degraded-listing metadata...
+    assert payload["result"]["tools"] == []
+    assert payload["result"]["_meta"]["omnigent/mcpFailures"] == {"pipeshub": "401 Unauthorized"}
+    # ...but nothing is published — the native forwarder owns this
+    # session's startup snapshot.
+    assert published == []
+    assert "conv_native_mcp" not in _helpers_mod._session_mcp_startup_cache

@@ -1034,6 +1034,8 @@ describe("MCP startup failure diagnostics", () => {
     const block = screen.getByTestId("mcp-startup-failures");
     expect(block.textContent).toContain("pipeshub");
     expect(block.textContent).toContain("401 Unauthorized");
+    // The empty-list fallback must not contradict the failure block.
+    expect(screen.queryByText("No MCP servers")).toBeNull();
   });
 
   it("gives the failing server's pill the warning treatment", () => {

@@ -17,23 +17,37 @@ from mcp.types import ElicitRequestParams, ElicitResult
 from mcp.types import Tool as McpToolDef
 
 from omnigent.debug_logging import runner_primary_session_id
-from omnigent.json_types import JsonObject as _JsonObject
 from omnigent.spec.types import AgentSpec, MCPServerConfig, RetryPolicy
 from omnigent.tools.base import is_valid_tool_name
 from omnigent.tools.mcp import McpServerConnection
+from omnigent.util.json_types import JsonObject as _JsonObject
 
 _logger = logging.getLogger(__name__)
 
 
-# Matches a URL's query string and/or fragment, so it can be stripped from
-# connect-failure messages before they're logged or surfaced to the UI.
-_URL_QUERY_OR_FRAGMENT = re.compile(r"(https?://[^\s'\"]+?)[?#][^\s'\"]*")
+# Matches a URL's userinfo section (``scheme://user:secret@host``), so
+# embedded credentials can be stripped from connect-failure messages.
+_URL_USERINFO = re.compile(r"([a-z][a-z0-9+.-]*://)[^/\s'\"@]+@", re.IGNORECASE)
+
+# Matches a URL's query string and/or fragment (any scheme, e.g. wss://),
+# so it can be stripped from connect-failure messages.
+_URL_QUERY_OR_FRAGMENT = re.compile(
+    r"([a-z][a-z0-9+.-]*://[^\s'\"]+?)[?#][^\s'\"]*", re.IGNORECASE
+)
+
+# Matches ``name: value`` / ``name=value`` pairs whose name is a common
+# credential carrier (an echoed header dump, a key=value in an error body).
+_CREDENTIAL_PAIR = re.compile(
+    r"((?:authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token"
+    r"|client[-_]?secret)\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?)[^\s'\"]+",
+    re.IGNORECASE,
+)
 
 
 def _describe_connect_error(exc: Exception) -> str:
     """
-    Render *exc* for logging and UI surfacing, with URL query strings
-    and fragments stripped.
+    Render *exc* for logging and UI surfacing, with common credential
+    carriers scrubbed.
 
     Some MCP servers require a credential in the URL itself (e.g.
     ``?api_key=...``) rather than an ``Authorization`` header, and httpx
@@ -41,14 +55,23 @@ def _describe_connect_error(exc: Exception) -> str:
     commonly includes the full request URL verbatim in its exception
     messages. This message ends up in ``server.error``, which is both
     logged and forwarded to the browser through the session's MCP
-    startup events, so it must not carry a live credential.
+    startup events.
+
+    Scrubbed carriers: URL userinfo (``user:secret@host``), URL query
+    strings/fragments (any scheme), and ``name: value`` / ``name=value``
+    pairs whose name is credential-bearing (``Authorization``,
+    ``api_key``, ``access_token``, …). This is a best-effort scrub of
+    the shapes transport errors actually produce, not a proof the result
+    is secret-free — e.g. a token embedded in a URL *path* survives it.
 
     :param exc: The exception raised while connecting.
-    :returns: ``"{ExceptionType}: {message}"`` with any URL's query
-        string/fragment replaced by ``?<redacted>``.
+    :returns: ``"{ExceptionType}: {message}"`` with matched credential
+        carriers replaced by ``<redacted>`` placeholders.
     """
     message = f"{type(exc).__name__}: {exc}"
-    return _URL_QUERY_OR_FRAGMENT.sub(r"\1?<redacted>", message)
+    message = _URL_USERINFO.sub(r"\1<redacted>@", message)
+    message = _URL_QUERY_OR_FRAGMENT.sub(r"\1?<redacted>", message)
+    return _CREDENTIAL_PAIR.sub(r"\1<redacted>", message)
 
 
 def _schema_requires_fields(params: ElicitRequestParams) -> bool:
@@ -351,42 +374,45 @@ class RunnerMcpManager:
             if requested_schema is not None:
                 event_data["requestedSchema"] = requested_schema
 
-            try:
-                resp = await server_client.post(
-                    f"/v1/sessions/{session_id}/events",
-                    json=body,
-                    timeout=30.0,
-                )
-                resp.raise_for_status()
-                data: object = resp.json()
-            except Exception as exc:  # noqa: BLE001
-                _logger.warning(
-                    "MCP elicitation callback: Omnigent server POST failed (%s) — declining",
-                    exc,
-                    extra={"session_id": session_id},
-                )
-                return ElicitResult(action="decline")
+            while True:
+                try:
+                    resp = await server_client.post(
+                        f"/v1/sessions/{session_id}/events",
+                        json=body,
+                        timeout=30.0,
+                    )
+                    resp.raise_for_status()
+                    data: object = resp.json()
+                except Exception as exc:  # noqa: BLE001
+                    _logger.warning(
+                        "MCP elicitation callback: Omnigent server POST failed (%s) — declining",
+                        exc,
+                        extra={"session_id": session_id},
+                    )
+                    return ElicitResult(action="decline")
 
-            elicitation_id = data.get("elicitation_id") if isinstance(data, dict) else None
-            if not isinstance(elicitation_id, str) or not elicitation_id:
-                _logger.warning(
-                    "MCP elicitation callback: Omnigent server returned no "
-                    "elicitation_id — declining",
-                    extra={"session_id": session_id},
-                )
-                return ElicitResult(action="decline")
+                elicitation_id = data.get("elicitation_id") if isinstance(data, dict) else None
+                if not isinstance(elicitation_id, str) or not elicitation_id:
+                    _logger.warning(
+                        "MCP elicitation callback: Omnigent server returned no "
+                        "elicitation_id — declining",
+                        extra={"session_id": session_id},
+                    )
+                    return ElicitResult(action="decline")
 
-            # Park until the user approves or declines (or timeout).
-            # No-op publish_event: ``response.elicitation_resolved``
-            # won't fire on timeout/cancellation, so the Omnigent server's
-            # sidebar badge may stay stale. Same pattern as
-            # proxy_mcp_manager. A future enhancement could POST
-            # the resolved event back to the Omnigent server here.
-            verdict = await pending_approvals.wait_for_user_verdict(
-                elicitation_id=elicitation_id,
-                conversation_id=session_id,
-                publish_event=lambda _s, _e: None,
-            )
+                # The runner-owned MCP execution is suspended in this callback.
+                # A reconnect re-publishes the same question under a fresh id;
+                # it never invokes the external tool again.
+                try:
+                    verdict = await pending_approvals.wait_for_user_verdict(
+                        elicitation_id=elicitation_id,
+                        conversation_id=session_id,
+                        publish_event=lambda _s, _e: None,
+                        retry_on_server_reconnect=True,
+                    )
+                except pending_approvals.ServerReconnected:
+                    continue
+                break
 
             if not verdict.approved:
                 return ElicitResult(action="decline")

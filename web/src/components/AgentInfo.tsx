@@ -1168,7 +1168,10 @@ function McpServersSection({
           failures={startupFailures}
         />
       ) : (
-        <p className="text-sm text-muted-foreground">No MCP servers</p>
+        // A failed server may be absent from the configured list (the SDK
+        // bare-agent case); don't contradict its failure block with a
+        // "No MCP servers" fallback.
+        failedNames.length === 0 && <p className="text-sm text-muted-foreground">No MCP servers</p>
       )}
       {canEdit && (
         <McpServerManagerDialog
