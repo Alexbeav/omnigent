@@ -214,9 +214,7 @@ def test_host_daemon_env_preserves_pythonutf8(
     assert remote_env.get("PYTHONUTF8") == "1", (
         "PYTHONUTF8 stripped from the remote host-daemon env"
     )
-    assert local_env.get("PYTHONUTF8") == "1", (
-        "PYTHONUTF8 stripped from the local host-daemon env"
-    )
+    assert local_env.get("PYTHONUTF8") == "1", "PYTHONUTF8 stripped from the local host-daemon env"
 
 
 def test_os_tools_return_real_payloads_without_active_sandbox(
@@ -255,8 +253,7 @@ def test_os_tools_return_real_payloads_without_active_sandbox(
 
     assert isinstance(result, dict)
     assert not result.get("error"), (
-        f"OS tool returned an error payload instead of running the command: "
-        f"{result!r}"
+        f"OS tool returned an error payload instead of running the command: {result!r}"
     )
     assert "degraded-mode-ok" in json.dumps(result), (
         f"shell output missing from OS tool result: {result!r}"
