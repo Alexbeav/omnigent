@@ -187,31 +187,23 @@ describe("computeSelectionData", () => {
     expect(result).toEqual({ start_index: 0, end_index: 3, anchor_content: "foo" });
   });
 
-  it("falls back to proportional indices when anchor_content is not in rawContent verbatim", () => {
-    // Simulate a multi-line selection where the doc joins with "\n" but
-    // rawContent uses a different representation.
-    const docText = "first\nsecond"; // doc has "\n" as separator
-    const rawContent = "first\r\nsecond"; // raw file has "\r\n" (different)
+  it("recovers the real raw span when line endings differ (\\n vs \\r\\n)", () => {
+    const docText = "first\nsecond"; // doc joins blocks with "\n"
+    const rawContent = "first\r\nsecond"; // raw file uses "\r\n"
     const doc = makeDoc(docText);
-    // Select "first\nsecond" — the "\n" form won't be found in rawContent.
     const result = computeSelectionData(0, 12, doc, rawContent);
-    expect(result).not.toBeNull();
-    // Should use proportional fallback (hint-based) rather than returning null.
-    expect(result!.anchor_content).toBe("first\nsecond");
-    // start_index is proportional: hint = round(0 * 13 / 12) = 0
-    expect(result!.start_index).toBe(0);
-    // end_index is start_index + anchor_content.length = 0 + 12 = 12
-    expect(result!.end_index).toBe(12);
+    expect(result).toEqual({
+      start_index: 0,
+      end_index: rawContent.length,
+      anchor_content: "first\nsecond",
+    });
   });
 
-  it("falls back to proportional indices when rawContent is empty", () => {
+  it("stores an empty placeholder span when rawContent is empty", () => {
     const text = "Hello";
     const doc = makeDoc(text);
     const result = computeSelectionData(0, 5, doc, "");
-    expect(result).not.toBeNull();
-    expect(result!.anchor_content).toBe("Hello");
-    expect(result!.start_index).toBe(0);
-    expect(result!.end_index).toBe(5);
+    expect(result).toEqual({ start_index: 0, end_index: 0, anchor_content: "Hello" });
   });
 
   it("handles selection of the full document", () => {
@@ -223,5 +215,109 @@ describe("computeSelectionData", () => {
       end_index: text.length,
       anchor_content: text,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeSelectionData — selections with no verbatim source match
+// ---------------------------------------------------------------------------
+
+describe("computeSelectionData with markdown syntax in the source", () => {
+  it("stores the real raw span when the selection spans inline formatting", () => {
+    const rawContent =
+      "A plain paragraph with no formatting at all.\n\n" +
+      "This paragraph has **formatted words** inside.\n";
+    const docText =
+      "A plain paragraph with no formatting at all.\n" +
+      "This paragraph has formatted words inside.";
+    const doc = makeDoc(docText);
+    const selStart = docText.indexOf("This");
+    const result = computeSelectionData(selStart, docText.length, doc, rawContent);
+    expect(result!.anchor_content).toBe("This paragraph has formatted words inside.");
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe(
+      "This paragraph has **formatted words** inside.",
+    );
+  });
+
+  it("anchors a selection ending inside emphasized text at the right raw offsets", () => {
+    const rawContent = "This paragraph has **formatted words** inside.";
+    const docText = "This paragraph has formatted words inside.";
+    const doc = makeDoc(docText);
+    // Select "has formatted" — crosses into the strong mark.
+    const from = docText.indexOf("has");
+    const result = computeSelectionData(from, from + "has formatted".length, doc, rawContent);
+    expect(result!.anchor_content).toBe("has formatted");
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe("has **formatted");
+  });
+
+  it("anchors intra-word emphasis selections", () => {
+    const rawContent = "some intra**word**emphasis here";
+    const docText = "some intrawordemphasis here";
+    const doc = makeDoc(docText);
+    const from = docText.indexOf("intra");
+    const result = computeSelectionData(from, from + "intrawordemphasis".length, doc, rawContent);
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe("intra**word**emphasis");
+  });
+
+  it("anchors text selected across a markdown link, spanning the URL in raw", () => {
+    const rawContent = "see [the docs](https://example.com) for more";
+    const docText = "see the docs for more";
+    const doc = makeDoc(docText);
+    const from = docText.indexOf("the");
+    const result = computeSelectionData(from, docText.length, doc, rawContent);
+    expect(result!.anchor_content).toBe("the docs for more");
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe(
+      "the docs](https://example.com) for more",
+    );
+  });
+
+  it("anchors a selection spanning list items past the bullet markers", () => {
+    const rawContent = "- item one\n- item two\n";
+    const docText = "item one\nitem two";
+    const doc = makeDoc(docText);
+    const result = computeSelectionData(0, docText.length, doc, rawContent);
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe("item one\n- item two");
+  });
+
+  it("anchors a selection spanning ordered list items past the numeric markers", () => {
+    const rawContent = "1. first step\n2. second step\n";
+    const docText = "first step\nsecond step";
+    const doc = makeDoc(docText);
+    const result = computeSelectionData(0, docText.length, doc, rawContent);
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe(
+      "first step\n2. second step",
+    );
+  });
+
+  it("anchors a selection spanning table cells across pipes and the alignment row", () => {
+    const rawContent = "| alpha | beta |\n| --- | --- |\n| one | two |\n";
+    const docText = "alpha\nbeta\none\ntwo";
+    const doc = makeDoc(docText);
+    const from = docText.indexOf("beta");
+    const result = computeSelectionData(from, docText.indexOf("two") + 3, doc, rawContent);
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe(
+      "beta |\n| --- | --- |\n| one | two",
+    );
+  });
+
+  it("anchors a heading-to-body selection past the heading markers", () => {
+    const rawContent = "## Title\n\nBody text\n";
+    const docText = "Title\nBody text";
+    const doc = makeDoc(docText);
+    const result = computeSelectionData(0, docText.length, doc, rawContent);
+    expect(rawContent.slice(result!.start_index, result!.end_index)).toBe("Title\n\nBody text");
+  });
+
+  it("never fuses words: raw whitespace does not stand in for anchor content", () => {
+    // "ab" must not silently anchor to "a b" — that would select wrong text.
+    const doc = makeDoc("ab");
+    const result = computeSelectionData(0, 2, doc, "a b");
+    expect(result).toEqual({ start_index: 0, end_index: 0, anchor_content: "ab" });
+  });
+
+  it("stores an empty placeholder span when the selection cannot be located at all", () => {
+    const doc = makeDoc("completely different words");
+    const result = computeSelectionData(0, 10, doc, "# Unrelated raw content\n");
+    expect(result).toEqual({ start_index: 0, end_index: 0, anchor_content: "completely" });
   });
 });
