@@ -203,10 +203,11 @@ def test_status_counts_and_pr_share_workspace_bar(
             expect(chip_label).to_be_hidden()
         else:
             expect(chip_label).to_be_visible()
-    # A seven-digit PR or a wide font on a 375px bar is the one case the number
-    # still ellipsizes, even with the directory and branch text gone; its full
-    # value stays in the title. Everything else shows the number in full.
-    if not (pr_number == 1234567 or font_family is not None):
+    # From 390px up the number shows in full. A 375px bar with the large font
+    # setting is the one place it may still ellipsize even with the directory
+    # and branch text gone (CI's fonts run wider than macOS's, so it is
+    # font-dependent there); its full value stays in the title.
+    if viewport_width >= 390:
         assert pr_label.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
     for test_id in status_ids:
         rect = control_bounds[test_id]
