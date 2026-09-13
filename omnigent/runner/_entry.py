@@ -1290,6 +1290,11 @@ def _agent_cache_dest(spec_cache_root: Path, agent_id: str, version: str) -> Pat
     return dest
 
 
+# LRU bound on the parse memo: per-agent eviction keeps one entry per agent,
+# so this caps how many distinct agents' parsed specs a runner retains.
+_SPEC_PARSE_CACHE_MAX_AGENTS = 32
+
+
 async def _resolve_agent_spec_from_server(
     server_client: httpx.AsyncClient,
     spec_cache_root: Path,
@@ -1313,7 +1318,9 @@ async def _resolve_agent_spec_from_server(
     :param spec_parse_cache: Optional memo of parsed specs keyed by
         ``(agent_id, version, expand_env)``, so a sub-agent fan-out
         reuses the parent bundle's parse instead of repeating it. Each
-        caller gets a deepcopy. ``None`` disables memoization.
+        caller gets a deepcopy. Holds at most one entry per agent, LRU
+        beyond :data:`_SPEC_PARSE_CACHE_MAX_AGENTS` agents. ``None``
+        disables memoization.
     :returns: The parsed :class:`AgentSpec` plus its extracted bundle
         directory, or ``None`` when the server returns 404 for the
         requested agent.
@@ -1372,9 +1379,18 @@ async def _resolve_agent_spec_from_server(
         master = spec_parse_cache.get(cache_key)
         if master is None:
             master = load(dest, expand_env=expand_env, prune_invalid_sub_agents=True)
-            # A newly parsed version supersedes every other entry for this agent.
+            # A new parse supersedes the agent's other entries across every key
+            # dimension (version and expand_env are provenance-stable per
+            # agent), so at most one entry per agent survives.
             for stale in [k for k in spec_parse_cache if k[0] == agent_id]:
                 del spec_parse_cache[stale]
+            spec_parse_cache[cache_key] = master
+            # LRU bound across distinct agents (dict insertion order is recency).
+            while len(spec_parse_cache) > _SPEC_PARSE_CACHE_MAX_AGENTS:
+                del spec_parse_cache[next(iter(spec_parse_cache))]
+        else:
+            # Re-insert the hit so recently used agents stay cached.
+            del spec_parse_cache[cache_key]
             spec_parse_cache[cache_key] = master
         # Callers edit the resolved spec in place per session (a builtin tool can
         # append a sub-agent), so keep the memoized one pristine.

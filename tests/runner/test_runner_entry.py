@@ -2558,6 +2558,67 @@ async def test_resolve_agent_spec_from_server_evicts_prior_version(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_resolve_agent_spec_from_server_bounds_memo_across_agents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The parse memo is LRU-bounded across distinct agents.
+
+    Per-agent eviction keeps one entry per agent, but a long-lived runner
+    resolving many distinct agents would otherwise retain one fully parsed
+    spec per agent forever. Beyond the cap the least recently used agent's
+    entry is dropped, and a memo hit refreshes recency.
+
+    :param tmp_path: Temporary spec cache root.
+    :param monkeypatch: Pytest patch fixture.
+    :returns: None.
+    """
+    import omnigent.runner._entry as entry_mod
+
+    config_bytes = (
+        b"spec_version: 1\nname: cached-agent\nexecutor:\n  config:\n    harness: claude-sdk\n"
+    )
+    bundle_buf = io.BytesIO()
+    with tarfile.open(fileobj=bundle_buf, mode="w:gz") as tf:
+        info = tarfile.TarInfo(name="config.yaml")
+        info.size = len(config_bytes)
+        tf.addfile(info, io.BytesIO(config_bytes))
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        """Serve the same bundle for every agent.
+
+        :param request: Incoming mocked HTTP request.
+        :returns: A mocked successful bundle response.
+        """
+        return httpx.Response(200, content=bundle_buf.getvalue(), headers={"X-Agent-Version": "1"})
+
+    monkeypatch.setattr(entry_mod, "_SPEC_PARSE_CACHE_MAX_AGENTS", 2)
+    cache: dict[tuple[str, str, bool], Any] = {}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_handler), base_url="http://server.test"
+    ) as client:
+
+        async def _resolve(agent_id: str) -> None:
+            """Resolve *agent_id* through the shared memo and assert success.
+
+            :param agent_id: Agent id to resolve.
+            :returns: None.
+            """
+            resolved = await _resolve_agent_spec_from_server(
+                client, tmp_path, agent_id, session_id="conv_a", spec_parse_cache=cache
+            )
+            assert resolved is not None
+
+        await _resolve("ag_a")
+        await _resolve("ag_b")
+        await _resolve("ag_c")  # exceeds the cap of 2: ag_a is least recent
+        assert [key[0] for key in cache] == ["ag_b", "ag_c"]
+        await _resolve("ag_b")  # memo hit refreshes ag_b's recency
+        await _resolve("ag_d")  # evicts ag_c, not the just-used ag_b
+    assert [key[0] for key in cache] == ["ag_b", "ag_d"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [401, 403, 500, 502])
 async def test_resolve_agent_spec_from_server_raises_for_non_404_errors(
     tmp_path: Path,
