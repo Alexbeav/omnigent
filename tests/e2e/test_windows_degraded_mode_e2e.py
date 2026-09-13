@@ -204,7 +204,10 @@ def test_host_daemon_env_preserves_pythonutf8(
     """``PYTHONUTF8`` set by the user must reach the spawned host daemon.
 
     The daemon env is built from an allowlist; dropping Python runtime-mode
-    vars leaves cp1252 consoles with no workaround for glyph crashes.
+    vars leaves cp1252 consoles with no workaround for glyph crashes. This
+    pins the allowlist (an explicit user value passes through); the UTF-8
+    *default* for unset values is pinned by
+    ``tests/cli/test_host_daemon_env.py::test_host_daemon_env_defaults_pythonutf8_on``.
     """
     from omnigent.cli import _build_host_daemon_env
 
