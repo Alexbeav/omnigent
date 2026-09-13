@@ -537,6 +537,73 @@ def test_initial_host_token_falls_back_to_managed_mint_when_no_sdk_auth(
     assert len(mint_calls) >= 1
 
 
+def test_initial_host_token_declines_when_no_credential_to_renew(
+    _accounts_login_env: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected host bearer with no renewable credential declines, not fails closed.
+
+    On a persistent accounts/OIDC host the bootstrap bearer eventually
+    expires and there is no SDK/OIDC/mint credential to renew it. The
+    factory must report ``declined`` so ``_RunnerDatabricksAuth`` sends a
+    bare request (the server answers 401/403 honestly) rather than raising
+    a Databricks-flavored error on a deployment that never used Databricks.
+
+    :param _accounts_login_env: Isolated accounts-only environment fixture.
+    :param monkeypatch: Pytest environment patch fixture.
+    :returns: None.
+    """
+    server_url = _accounts_login_env
+    monkeypatch.setenv(RUNNER_INITIAL_AUTH_TOKEN_ENV_VAR, "host-bootstrap-token")
+
+    factory = _make_auth_token_factory()
+    assert isinstance(factory, _InitialAuthTokenFactory)
+
+    # While the host bearer is valid the factory is not declined.
+    assert factory() == "host-bootstrap-token"
+    assert factory.declined is False
+
+    # The host bearer expires and is rejected; nothing can renew it.
+    factory.invalidate()
+    assert factory() is None
+    assert factory.declined is True
+
+    # auth_flow must send a bare request, not raise a Databricks error.
+    auth = _RunnerDatabricksAuth(factory, server_url=server_url)
+    request = httpx.Request("GET", server_url + "/v1/agents/ag_1/download")
+    sent = next(auth.auth_flow(request))
+    assert "Authorization" not in sent.headers
+
+
+def test_initial_host_token_no_credential_remedy_names_omnigent_login(
+    _accounts_login_env: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The terminal no-credential log names ``omnigent login``, not Databricks.
+
+    :param _accounts_login_env: Isolated accounts-only environment fixture.
+    :param monkeypatch: Pytest environment patch fixture.
+    :param caplog: Pytest log capture fixture.
+    :returns: None.
+    """
+    server_url = _accounts_login_env
+    monkeypatch.setenv(RUNNER_INITIAL_AUTH_TOKEN_ENV_VAR, "host-bootstrap-token")
+
+    factory = _make_auth_token_factory()
+    assert isinstance(factory, _InitialAuthTokenFactory)
+    assert factory() == "host-bootstrap-token"
+
+    factory.invalidate()
+    with caplog.at_level(logging.ERROR, logger="omnigent.runner._entry"):
+        assert factory() is None
+
+    messages = " ".join(record.getMessage() for record in caplog.records)
+    assert "omnigent login" in messages
+    assert server_url in messages
+    assert "databricks auth login" not in messages.lower()
+
+
 def test_delegated_factory_falls_back_when_apps_proxy_redirects_mint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

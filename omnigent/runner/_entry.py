@@ -424,6 +424,7 @@ class _InitialAuthTokenFactory:
         self._server_url = server_url
         self._fallback_factory: Callable[[], str | None] | None = None
         self._fallback_resolved = False
+        self._no_credential = False
         self._no_credential_logged = False
         self._lock = threading.Lock()
 
@@ -451,21 +452,38 @@ class _InitialAuthTokenFactory:
                     _allow_delegated_mint=False,
                 )
                 token = self._fallback_factory() if self._fallback_factory is not None else None
-            if self._fallback_factory is None and not self._no_credential_logged:
+            # An expired host bearer with no SDK/OIDC credential to renew it
+            # is terminal: there is nothing left to mint. Decline so the auth
+            # flow sends a bare request and the server answers 401/403
+            # honestly, instead of failing closed with a Databricks-flavored
+            # error on an accounts/OIDC deployment that never used Databricks.
+            self._no_credential = self._fallback_factory is None
+            if self._no_credential and not self._no_credential_logged:
                 # This state is terminal for the process, so say it once
                 # rather than on every subsequent callback.
+                from omnigent.server_url import display_server_url
+
                 self._no_credential_logged = True
                 _logger.error(
                     "host bootstrap bearer expired and no SDK/OIDC credential is available "
-                    "to renew it; run `databricks auth login` to re-authenticate",
+                    "to renew it; run `omnigent login %s` to re-authenticate",
+                    display_server_url(self._server_url),
                     extra={"session_id": runner_primary_session_id()},
                 )
             return token
 
     @property
     def declined(self) -> bool:
-        """True when the inner fallback factory has definitively declined."""
+        """True when the runner has no credential to present.
+
+        Either the inner fallback factory definitively declined, or there is
+        no SDK/OIDC credential available to renew an expired host bearer. Both
+        mean a bare request is correct: the server answers 401/403 honestly
+        rather than the runner failing closed with a Databricks-flavored error.
+        """
         with self._lock:
+            if self._no_credential:
+                return True
             f = self._fallback_factory
             return getattr(f, "declined", False) and not getattr(f, "proxy_auth_failed", False)
 
