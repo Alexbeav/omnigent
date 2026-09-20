@@ -859,6 +859,16 @@ def _build_acp_bundle(*, harness: str, name: str) -> bytes:
         "prompt": _ACP_AGENT_PROMPT,
         "executor": {"type": "omnigent", "config": {"harness": harness}},
         "os_env": {"type": "caller_process", "cwd": ".", "sandbox": {"type": "none"}},
+        # Top-level ``spawn:`` grants the session-orchestration writes
+        # (``sys_session_create`` / ``send`` / ``close``) on top of the
+        # always-on session reads. ACP rows are generated from this
+        # template rather than an authored spec, so without the key the
+        # parser default (False) silently strips the whole surface —
+        # leaving an ACP agent unable to delegate to a child session
+        # while a native agent like polly can. Session reads are ungated
+        # either way, so this widens writes only, and only for sessions
+        # that ask for them.
+        "spawn": True,
     }
     with tempfile.TemporaryDirectory() as tmpdir:
         source = Path(tmpdir) / "src"
