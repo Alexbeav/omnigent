@@ -84,3 +84,27 @@ def test_acp_bundle_identity_is_unchanged(harness: str, name: str) -> None:
     assert raw["prompt"] == _ACP_AGENT_PROMPT
     assert raw["executor"] == {"type": "omnigent", "config": {"harness": harness}}
     assert raw["os_env"]["type"] == "caller_process"
+
+
+def test_acp_prompt_advertises_delegation() -> None:
+    """The generated prompt names the spawn tools, not just the grant.
+
+    Registering ``sys_session_create`` makes the capability *available*,
+    but nothing else tells the agent it exists: ACP rows get this
+    hardcoded prompt and no orchestrator framing. A fresh session then
+    holds the tool while being unable to describe it. Pins the
+    discoverability half of the spawn grant.
+    """
+    assert "sys_session_create" in _ACP_AGENT_PROMPT
+    assert "sys_session_send" in _ACP_AGENT_PROMPT
+
+
+def test_acp_prompt_states_child_only_limit() -> None:
+    """The prompt must not imply an authority the dispatcher refuses.
+
+    ``_build_session_create_body`` hard-forces ``parent_session_id`` to
+    the caller, so top-level and sibling creates always fail. An agent
+    told it can spawn freely would attempt them and burn turns on
+    errors the spec cannot prevent.
+    """
+    assert "child-only" in _ACP_AGENT_PROMPT

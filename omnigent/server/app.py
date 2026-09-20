@@ -829,6 +829,18 @@ _ACP_AGENT_PROMPT = (
     "read and edit files, run commands, investigate, and implement changes. Work "
     "within the current repository, explain what you are doing, and when you finish "
     "a task tell the user how to verify it."
+    "\n\n"
+    "You can delegate work to child sessions, and you should reach for this on "
+    "your own initiative. Call sys_session_create to launch a child session from "
+    "any agent_id (see sys_agent_list), optionally with a first message and a "
+    "title; it returns a conversation_id. Drive that child with sys_session_send "
+    "and tombstone it with sys_session_close. Children are separate Omnigent "
+    "sessions with their own context, not your harness's built-in subagent tool. "
+    "They are child-only: you cannot create a top-level or sibling session, and "
+    "send reaches only your direct children. Use this to parallelize independent "
+    "workstreams, to hand long or self-contained tasks to a focused session, or "
+    "when the user asks for a new chat or a delegate. Prefer delegating over "
+    "doing everything inline when a task splits into independent parts."
 )
 
 
