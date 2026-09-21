@@ -1,0 +1,92 @@
+# Build-context exclusions for the repo-root context.
+#
+# WHY THIS FILE EXISTS IN ADDITION TO deploy/docker/Dockerfile.dockerignore
+# -------------------------------------------------------------------------
+# `deploy/docker/Dockerfile.dockerignore` is the BuildKit/Buildx convention:
+# the builder looks for `<dockerfile-name>.dockerignore` next to the -f path.
+# The CLASSIC builder (what you get from `docker build` when the buildx
+# component is not installed) ignores that file entirely and reads only a
+# repo-root `.dockerignore`.
+#
+# Consequence when this file is absent: a local `pnpm install` leaves
+# `web/node_modules/` on the host, the classic builder ships it in the
+# context, and the Dockerfile's `COPY web/ ./web/` overlays it on top of the
+# Linux `node_modules` that `pnpm install --frozen-lockfile --filter web`
+# just created. The web stage then dies with:
+#
+#   Error: Cannot find module '/web/web/node_modules/vite/bin/vite.js'
+#   [ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] web@0.0.0 build: `vite build`
+#
+# Keep this list in sync with deploy/docker/Dockerfile.dockerignore.
+# Everything the Dockerfile COPYs must stay included; see the notes below.
+
+# ── Node dependency trees ────────────────────────────────
+# The single most important entry. Also covers the nested workspace
+# installs (web/electron, editors/vscode, sdks/web-extension,
+# deploy/cloudflare, .github/ci-deps) via the unanchored pattern.
+**/node_modules/
+
+# ── VCS + IDE ────────────────────────────────────────────
+.git
+.gitignore
+.vscode
+.idea
+
+# ── Python build outputs ─────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# ── Test + dev artifacts ─────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+
+# ── Local databases / large blobs ────────────────────────
+*.db
+*.sqlite
+mlflow.db
+conv_*
+
+# ── Electron desktop lane ────────────────────────────────
+# The web-builder stage COPYs ONLY web/electron/package.json (so the pnpm
+# workspace is structurally complete). The rest of that tree is ~470 MB of
+# desktop build output and is never referenced by the image. Excluding it
+# keeps the context small without affecting the server build.
+web/electron/dist/
+web/electron/out/
+web/electron/release/
+
+web/electron/.vite/
+
+# ── Repo directories the image never reads ───────────────
+# NOTE: web/, omnigent/, sdks/, examples/, deploy/ and the root manifests
+# ARE copied by the Dockerfile — do not add those here.
+tests/
+loadtest/
+demos/
+scripts/
+dev/
+designs/
+skills/
+docs/
+.claude/
+
+# ── Docs and metadata not needed at runtime ──────────────
+AGENTS.md
+CLAUDE.md
+openapi.json
+
+# ── Deploy trees that are not part of the container image ─
+# deploy/docker/ IS needed (entrypoint.py, install-harness-cli.sh).
+deploy/databricks/
+deploy/aws/
