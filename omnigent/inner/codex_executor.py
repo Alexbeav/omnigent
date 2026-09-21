@@ -931,12 +931,18 @@ def _populate_codex_home_config(
             # The title worker needs custom-provider routing, but copying the
             # full user config also starts unrelated MCPs/plugins and can exceed
             # its timeout. auth.json alone cannot supply these provider tables.
-            source_config = tomlkit.parse(source_file.read_text())
+            # ``encoding="utf-8"`` is required: this is the user's own
+            # ``~/.codex/config.toml``, which may hold a non-ASCII byte. Without
+            # it Python picks the locale code page (cp1253 here) and raises
+            # UnicodeDecodeError on such a byte, which fails the model-options
+            # probe and leaves the picker without a catalog. The sibling write
+            # above passes no encoding either, so close the pair.
+            source_config = tomlkit.parse(source_file.read_text(encoding="utf-8"))
             minimal_document = tomlkit.document()
             for key in ("model_provider", "model_providers", "profiles"):
                 if key in source_config:
                     minimal_document[key] = source_config[key]
-            dest_path.write_text(tomlkit.dumps(minimal_document))
+            dest_path.write_text(tomlkit.dumps(minimal_document), encoding="utf-8")
             continue
         shutil.copy2(source_file, dest_path)
         if filename == "config.toml":
