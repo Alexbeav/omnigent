@@ -28,6 +28,7 @@ import { ConversationBreadcrumb } from "./ConversationBreadcrumb";
 import { HeaderConversationMenu } from "./HeaderConversationMenu";
 import { HeaderProjectTag } from "./HeaderProjectTag";
 import { HeaderTitle } from "./HeaderTitle";
+import { PermissionModeBadge } from "./PermissionModeBadge";
 import { UNTITLED_CONVERSATION_LABEL } from "./sidebarNav";
 import { PresenceAvatars } from "@/components/PresenceAvatars";
 import type { Agent } from "@/hooks/useAgents";
@@ -496,20 +497,26 @@ export function ChatHeader({
             collapsed, the slot's traffic-light-clearance pads it past the
             window controls + title-bar cluster (index.css). */}
         {conversationId && (conversationTitle || titleLinkTo) && (
-          <ConversationBreadcrumb
-            conversationTitle={conversationTitle ?? UNTITLED_CONVERSATION_LABEL}
-            projectName={projectName}
-            projectIcon={projectIcon}
-            projectTag={projectTag ?? undefined}
-            titleSlot={titleSlot ?? undefined}
-            titleLinkTo={titleLinkTo}
-            isChildSession={isChildSession}
-            subAgentName={subAgentName}
-            boundAgent={boundAgent}
-            wrapperLabel={wrapperLabel}
-            actions={isMobile ? undefined : (conversationMenu ?? undefined)}
-            className="pr-1"
-          />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <ConversationBreadcrumb
+              conversationTitle={conversationTitle ?? UNTITLED_CONVERSATION_LABEL}
+              projectName={projectName}
+              projectIcon={projectIcon}
+              projectTag={projectTag ?? undefined}
+              titleSlot={titleSlot ?? undefined}
+              titleLinkTo={titleLinkTo}
+              isChildSession={isChildSession}
+              subAgentName={subAgentName}
+              boundAgent={boundAgent}
+              wrapperLabel={wrapperLabel}
+              actions={isMobile ? undefined : (conversationMenu ?? undefined)}
+              className="pr-1"
+            />
+            {/* Approval mode, next to the breadcrumb's host icon. Self-
+                contained (reads the chat store), so it renders nothing on
+                non-claude-native sessions and while the mode is unknown. */}
+            <PermissionModeBadge />
+          </div>
         )}
       </div>
 
