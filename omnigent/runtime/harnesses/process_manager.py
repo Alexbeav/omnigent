@@ -1511,16 +1511,17 @@ class HarnessProcessManager:
         if not self._tmp_parent.exists():
             return
         for child in self._tmp_parent.iterdir():
-            if not child.is_dir() or not child.name.startswith("ap-"):
+            if not child.name.startswith("ap-"):
                 continue
             sentinel = child / _AP_PID_FILE
-            if not sentinel.exists():
-                # No sentinel — directory either pre-dates the
-                # convention or is mid-creation. Leave alone.
-                continue
             try:
+                if not child.is_dir():
+                    continue
                 pid_str = sentinel.read_text(encoding="utf-8").strip()
                 pid = int(pid_str)
+            except FileNotFoundError:
+                # No sentinel: the directory may still be getting created.
+                continue
             except (OSError, ValueError) as exc:
                 _logger.warning(
                     "could not read AP_PID sentinel at %s: %s; skipping",

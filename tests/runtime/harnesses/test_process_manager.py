@@ -1010,6 +1010,47 @@ async def test_orphan_sweep_removes_dead_omnigent_dirs(
         await fresh.shutdown()
 
 
+@pytest.mark.parametrize("denied_entry", ["directory", "sentinel"])
+async def test_orphan_sweep_skips_inaccessible_entries(
+    short_tmp_parent: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    denied_entry: str,
+) -> None:
+    """An inaccessible sibling must not prevent startup or later cleanup."""
+    sibling = short_tmp_parent / "ap-inaccessible"
+    sibling.mkdir()
+    sentinel = sibling / _AP_PID_FILE
+    sentinel.write_text("99999999", encoding="utf-8")
+    orphan = short_tmp_parent / "ap-orphan"
+    orphan.mkdir()
+    (orphan / _AP_PID_FILE).write_text("99999999", encoding="utf-8")
+    denied = sibling if denied_entry == "directory" else sentinel
+    original_stat = Path.stat
+
+    def guarded_stat(path: Path, *args, **kwargs):
+        if path == denied:
+            raise PermissionError("access denied")
+        return original_stat(path, *args, **kwargs)
+
+    original_read = Path.read_text
+
+    def guarded_read(path: Path, *args, **kwargs):
+        if path == denied:
+            raise PermissionError("access denied")
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", guarded_stat)
+    monkeypatch.setattr(Path, "read_text", guarded_read)
+    fresh = HarnessProcessManager(tmp_parent=short_tmp_parent)
+    await fresh.start()
+    try:
+        assert fresh.instance_dir.is_dir()
+        assert not orphan.exists()
+        assert sibling in list(short_tmp_parent.iterdir())
+    finally:
+        await fresh.shutdown()
+
+
 async def test_orphan_sweep_preserves_live_omnigent_dirs(
     short_tmp_parent: Path,
 ) -> None:
