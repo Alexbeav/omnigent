@@ -3066,7 +3066,10 @@ def _spawn_host_daemon_process(
                 stdin=subprocess.DEVNULL,
                 stdout=log_fh,
                 stderr=log_fh,
-                **_proc.spawn_kwargs(),
+                # This daemon must outlive the terminal that launched it, so
+                # detach from that console (Windows DETACHED_PROCESS) rather
+                # than merely taking a new Ctrl-C group.
+                **_proc.daemon_spawn_kwargs(),
                 **logging_kwargs,
             )
     except OSError:

@@ -167,6 +167,36 @@ def test_spawn_kwargs_shape_matches_platform() -> None:
         assert kw == {"start_new_session": True}
 
 
+def test_daemon_spawn_kwargs_shape_matches_platform() -> None:
+    kw = _proc.daemon_spawn_kwargs()
+    if os.name == "nt":
+        # Detaching from the parent console is what lets a background daemon
+        # outlive the terminal that launched it; a bare new process group
+        # still shares that console and dies when it closes.
+        assert kw == {
+            "creationflags": (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS)
+        }
+    else:
+        assert kw == {"start_new_session": True}
+
+
+def test_daemon_spawn_kwargs_does_not_widen_spawn_kwargs() -> None:
+    """The supervised-child helper must stay console-attached on Windows.
+
+    Harness/executor children are driven over their parent's pipes, so
+    detaching them from the console would be wrong (and would also break
+    Ctrl-C propagation to the group); only daemons opt in.
+    """
+    if os.name != "nt":
+        pytest.skip("console attachment is a Windows-only concern")
+    assert "creationflags" in _proc.spawn_kwargs()
+    plain = _proc.spawn_kwargs()["creationflags"]
+    daemon = _proc.daemon_spawn_kwargs()["creationflags"]
+    assert plain & subprocess.CREATE_NEW_PROCESS_GROUP
+    assert not plain & subprocess.DETACHED_PROCESS
+    assert daemon & subprocess.DETACHED_PROCESS
+
+
 def test_process_alive_is_a_nondestructive_probe() -> None:
     proc = subprocess.Popen(_spin_cmd(), **_proc.spawn_kwargs())
     # Bind to the live PID so psutil pins its creation time; a recycled PID
