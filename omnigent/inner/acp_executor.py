@@ -53,6 +53,7 @@ import math
 import os
 import secrets
 import shlex
+import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -170,6 +171,11 @@ if not math.isfinite(_PROMPT_TIMEOUT_SECONDS) or _PROMPT_TIMEOUT_SECONDS <= 0:
 
 # Idle timeout for the initial ACP handshake (initialize / session setup).
 _INIT_TIMEOUT_SECONDS = 30.0
+
+# Budget for the best-effort ``session/cancel`` sent after a stalled prompt turn.
+# The child is already silent and a wedged one may have stopped draining stdin,
+# so this write must never be able to hang a turn that is already failing.
+_CANCEL_TIMEOUT_SECONDS = 5.0
 
 # Agent stderr kept for diagnostics: how many trailing lines to retain, how many
 # to quote in a turn error, and the per-line cap (a chatty CLI can emit one
@@ -380,6 +386,27 @@ def _unattended_auth_method_id(initialize_result: _AcpJsonObject) -> str | None:
     return None
 
 
+def _summarize_inbound(msg: _AcpJsonObject) -> str:
+    """One-line label for an inbound ACP frame, for stall diagnostics.
+
+    A stall report needs to say how far the agent got: ``session/update
+    (tool_call)`` means it died mid-tool, whereas nothing past the handshake
+    means the model call never returned.
+    """
+    method = msg.get("method")
+    if isinstance(method, str) and method:
+        if method == _CLIENT_NOTIFICATION_SESSION_UPDATE:
+            params = msg.get("params")
+            update = params.get("update") if isinstance(params, dict) else None
+            kind = update.get("sessionUpdate") if isinstance(update, dict) else None
+            if isinstance(kind, str) and kind:
+                return f"{method}({kind})"
+        return method
+    if msg.get("id") is not None:
+        return f"response id={msg['id']}"
+    return "frame"
+
+
 class AcpExecutor(Executor):
     """Executor that drives any ACP agent over JSON-RPC 2.0 on stdio."""
 
@@ -439,6 +466,11 @@ class AcpExecutor(Executor):
         # stderr ("no API key", "unknown flag"), and that text is the whole
         # diagnosis; without it the turn error names only the stalled RPC.
         self._recent_stderr: deque[str] = deque(maxlen=_STDERR_RING_LINES)
+        # When the agent last spoke and what it said. A turn that goes idle is
+        # otherwise indistinguishable from one where the child died quietly, so
+        # the stall report needs the last frame it managed to emit.
+        self._last_inbound_at: float | None = None
+        self._last_inbound_summary: str = "none"
         # Serializes stdin writes: run_turn (prompt / request replies) and the
         # adapter's interrupt_session() write from different tasks.
         self._write_lock = asyncio.Lock()
@@ -585,17 +617,78 @@ class AcpExecutor(Executor):
         diagnosis — and the log file so the full traceback is findable.
         """
         detail = describe_exception(exc)
-        if self._recent_stderr:
-            tail = " | ".join(list(self._recent_stderr)[-_STDERR_QUOTED_LINES:])
-            # Cap here too, not just per line in the reader: this string ends up
-            # in a UI toast, and the ring can hold several long lines.
-            if len(tail) > _STDERR_QUOTED_LIMIT:
-                tail = tail[:_STDERR_QUOTED_LIMIT] + "...[truncated]"
+        tail = self._stderr_tail()
+        if tail:
             detail = f"{detail}; {self._config.name} stderr: {tail}"
         log_path = current_process_log_path()
         if log_path is not None:
             detail = f"{detail} (harness log: {display_log_path(log_path)})"
         return detail
+
+    def _stderr_tail(self) -> str:
+        """The agent's trailing stderr, capped for a turn error (empty if silent)."""
+        if not self._recent_stderr:
+            return ""
+        tail = " | ".join(list(self._recent_stderr)[-_STDERR_QUOTED_LINES:])
+        # Cap here too, not just per line in the reader: this string ends up in a
+        # UI toast, and the ring can hold several long lines.
+        if len(tail) > _STDERR_QUOTED_LIMIT:
+            tail = tail[:_STDERR_QUOTED_LIMIT] + "...[truncated]"
+        return tail
+
+    def _stall_diagnostics(self, req_id: int) -> str:
+        """Explain why a prompt turn went idle, from the client's side.
+
+        An idle timeout looks identical whether the model call hung inside the
+        agent, the agent stopped reading its own transcript, or the child died
+        without closing stdout — so report every signal that separates them,
+        including the agent's own stderr (drained throughout the turn, but until
+        now quoted only for handshake failures).
+        """
+        parts = [f"no ACP message for {_PROMPT_TIMEOUT_SECONDS:g}s"]
+        if self._last_inbound_at is None:
+            parts.append("agent silent since the prompt was sent")
+        else:
+            age = time.monotonic() - self._last_inbound_at
+            parts.append(f"last ACP message {self._last_inbound_summary} {age:.0f}s ago")
+        process = self._proc
+        if process is None:
+            parts.append("child never started")
+        elif process.returncode is None:
+            parts.append("child still alive")
+        else:
+            parts.append(f"child exited rc={process.returncode}")
+        reader = self._reader_task
+        if reader is None:
+            parts.append("stdout reader absent")
+        elif not reader.done():
+            parts.append("stdout reader reading")
+        elif reader.cancelled():
+            parts.append("stdout reader cancelled")
+        else:
+            failure = reader.exception()
+            state = describe_exception(failure) if failure else "returned"
+            parts.append(f"stdout reader stopped: {state}")
+        parts.append(f"pending {_AGENT_METHOD_SESSION_PROMPT} id={req_id}")
+        tail = self._stderr_tail()
+        if tail:
+            parts.append(f"agent stderr: {tail}")
+        return "; ".join(parts)
+
+    async def _abort_stalled_turn(self, session_id: str) -> None:
+        """Best-effort ``session/cancel`` for a prompt turn that went idle.
+
+        ACP's own abort, so the agent stops the stalled prompt instead of
+        wedging the session for the next turn. Bounded and swallowed: the child
+        is already silent and the turn is already failing, so a cancel that
+        cannot be delivered must not add a second failure.
+        """
+        try:
+            await asyncio.wait_for(
+                self.interrupt_session(session_id), timeout=_CANCEL_TIMEOUT_SECONDS
+            )
+        except Exception as exc:  # noqa: BLE001 — the turn is failing already
+            logger.debug("acp[%s] cancel after stall failed: %s", self._config.name, exc)
 
     async def _read_stderr(self) -> None:
         """Continuously drain the agent's stderr, logging each line at debug.
@@ -651,6 +744,8 @@ class AcpExecutor(Executor):
                     )
                     continue
 
+                self._last_inbound_at = time.monotonic()
+                self._last_inbound_summary = _summarize_inbound(msg)
                 msg_id = msg.get("id")
                 # Match a response by "id + no method": the agent's own requests
                 # (session/request_permission) also carry an id, so the method
@@ -1854,7 +1949,26 @@ class AcpExecutor(Executor):
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                yield ExecutorError(message="Timeout waiting for ACP response", retryable=True)
+                diagnostics = self._stall_diagnostics(req_id)
+                logger.warning(
+                    "acp[%s] prompt turn stalled (session %s): %s [command: %s]",
+                    self._config.name,
+                    session_id,
+                    diagnostics,
+                    self._config.command,
+                )
+                # The turn is about to be reported as failed, so the agent must
+                # stop working it: a prompt left running keeps executing tools
+                # after Omnigent has given up on it. Drop the abandoned request
+                # first so its future does not outlive the turn.
+                self._pending.pop(req_id, None)
+                await self._abort_stalled_turn(session_id)
+                yield ExecutorError(
+                    message=(
+                        f"Timeout waiting for ACP response — {self._config.name}: {diagnostics}"
+                    ),
+                    retryable=True,
+                )
                 return
 
             # Complete only once the future is resolved AND the queue is drained,

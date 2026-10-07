@@ -2321,6 +2321,102 @@ def test_startup_error_names_the_exception_type_when_str_is_empty() -> None:
     assert "TimeoutError" in ex._startup_error_message(TimeoutError())
 
 
+# A fake ACP agent that completes the handshake, then accepts the prompt and
+# never answers it while staying alive with stdout open — the stall the idle
+# timeout exists for. It touches MARKER when the client cancels the turn.
+_STALL_AGENT = """import sys, json
+
+MARKER = @@MARKER@@
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": 1, "agentCapabilities": {}}
+    elif method == "session/new":
+        result = {"sessionId": "stall-1"}
+    elif method == "session/prompt":
+        # Accept the turn, then never answer it: the stall under test.
+        sys.stderr.write("WARN: provider request is not returning\\n")
+        sys.stderr.flush()
+        continue
+    elif method == "session/cancel":
+        if MARKER:
+            open(MARKER, "w").close()
+        continue
+    else:
+        continue
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\\n")
+    sys.stdout.flush()
+"""
+
+
+def _write_stall_agent(tmp_path: Path, *, marker: Path | None = None) -> str:
+    """Command for the stalling fake agent, optionally recording its cancel."""
+    agent_path = tmp_path / "stalling_agent.py"
+    agent_path.write_text(
+        _STALL_AGENT.replace("@@MARKER@@", repr(str(marker)) if marker is not None else "None")
+    )
+    return shlex.join([sys.executable, str(agent_path)])
+
+
+@pytest.mark.asyncio
+async def test_idle_prompt_turn_reports_why_it_stalled(tmp_path: Path) -> None:
+    """An unanswered prompt names the stall instead of a bare "Timeout".
+
+    Without this the operator cannot tell a hung model call from a child that
+    died quietly, and the agent's stderr — where the reason usually is — was
+    quoted for handshake failures only.
+    """
+    ex = AcpExecutor(AcpAgentConfig(command=_write_stall_agent(tmp_path), name="Stalling"))
+    errors: list[ExecutorError] = []
+    pending_after_error: set[int] = set()
+    with patch.object(acp_executor_module, "_PROMPT_TIMEOUT_SECONDS", 1.0):
+        try:
+            async for ev in ex.run_turn([{"role": "user", "content": "hi"}], [], ""):
+                if isinstance(ev, ExecutorError):
+                    errors.append(ev)
+                    pending_after_error = set(ex._pending)
+        finally:
+            await ex.close()
+
+    assert errors, "a silent prompt turn must surface an ExecutorError"
+    message = errors[0].message
+    assert "Timeout waiting for ACP response" in message
+    assert "no ACP message for 1s" in message, "the report must name the idle budget"
+    assert "session/prompt" in message, "it must name the request that never answered"
+    assert "Stalling" in message
+    assert "child still alive" in message
+    assert "provider request is not returning" in message, "the agent's stderr explains it"
+    assert pending_after_error == set(), "the abandoned request must not leak its future"
+
+
+@pytest.mark.asyncio
+async def test_stalled_prompt_turn_is_cancelled_for_the_agent(tmp_path: Path) -> None:
+    """A turn Omnigent gave up on is aborted, so the agent stops working it.
+
+    Left running, a failed turn kept executing tools in the background and the
+    next prompt queued behind it — so the stall repeated turn after turn.
+    """
+    marker = tmp_path / "cancelled"
+    ex = AcpExecutor(
+        AcpAgentConfig(command=_write_stall_agent(tmp_path, marker=marker), name="Stalling")
+    )
+    with patch.object(acp_executor_module, "_PROMPT_TIMEOUT_SECONDS", 1.0):
+        try:
+            async for _ev in ex.run_turn([{"role": "user", "content": "hi"}], [], ""):
+                pass
+            deadline = time.monotonic() + 5.0
+            while not marker.exists():
+                assert time.monotonic() < deadline, "the stalled turn was never cancelled"
+                await asyncio.sleep(0.05)
+        finally:
+            await ex.close()
+
+
 # ---------------------------------------------------------------------------
 # Process lifecycle: a torn-down executor must not strand the agent
 # ---------------------------------------------------------------------------
