@@ -1552,6 +1552,15 @@ class AgentSpec:  # type: ignore[explicit-any]  # params: dict[str, Any] field (
         ``sys_session_get_history`` / ``sys_session_get_info``)
         are always registered and are not affected by either
         opt-in.
+    :param peer_messaging: Authority for the agent to message a session
+        that is NOT its own child, via the ``session_id`` mode of
+        ``sys_session_send``. YAML key is ``peer_messaging:``
+        (top-level boolean, like ``spawn:``). **Defaults to
+        ``False``.** The target must belong to the same owner as the
+        calling session; the runner enforces that, and a per-session
+        send cap, at dispatch. It is its own flag — not folded into
+        ``spawn`` — because writing into a session outside the caller's
+        subtree is a distinct authority from driving its own children.
     :param agent_session_sharing: Authority for the agent to share the
         session it is running in, via ``sys_session_share``. YAML key is
         ``agent_session_sharing:`` (top-level, like ``spawn:``). This
@@ -1613,5 +1622,6 @@ class AgentSpec:  # type: ignore[explicit-any]  # params: dict[str, Any] field (
     terminals: dict[str, TerminalEnvSpec] | None = None
     timers: bool = False
     spawn: bool = False
+    peer_messaging: bool = False
     agent_session_sharing: SharePolicy = SharePolicy.NONE
     source_rel_dir: str | None = field(default=None, compare=False)

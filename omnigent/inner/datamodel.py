@@ -930,6 +930,10 @@ class AgentDef:
     # sub-agent types. Session reads are always on. YAML key:
     # ``spawn:``.
     spawn: bool = False
+    # Authority to message a session that is not the caller's own child
+    # (same owner only), via sys_session_send's session_id mode. YAML key:
+    # ``peer_messaging:``.
+    peer_messaging: bool = False
     # Authority for the agent to share the session it runs in, via
     # sys_session_share — the SOLE enabler of that tool (independent of
     # spawn / declared agents, and unrelated to server-API / CLI

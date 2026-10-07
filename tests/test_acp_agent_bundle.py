@@ -108,3 +108,27 @@ def test_acp_prompt_states_child_only_limit() -> None:
     errors the spec cannot prevent.
     """
     assert "child-only" in _ACP_AGENT_PROMPT
+
+
+def test_acp_bundle_grants_peer_messaging() -> None:
+    """The ACP template opts into peer messaging, and the parser keeps it.
+
+    Like ``spawn``, the flag defaults to False and an ACP row has no
+    authored spec that could set it, so a template edit that drops the
+    key silently returns every ACP agent to child-only sends.
+    """
+    text = _bundle_config_yaml("acp:cline", "cline")
+    assert yaml.safe_load(text)["peer_messaging"] is True
+    assert _parse_bundle_yaml(text).peer_messaging is True
+
+
+def test_acp_prompt_explains_peer_messages() -> None:
+    """The prompt says a peer message is another agent, not the user.
+
+    The receiving side is where the risk sits: a peer message arrives
+    with the user role, so an agent that was never told what the
+    ``[System: peer message ...]`` line means would read it as the
+    person it works for. Pins that sentence and the marker it refers to.
+    """
+    assert "[System: peer message from agent" in _ACP_AGENT_PROMPT
+    assert "not from the user" in _ACP_AGENT_PROMPT

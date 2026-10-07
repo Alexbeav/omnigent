@@ -28,8 +28,10 @@ import mimetypes
 import os
 import re
 import tempfile
+import time
 import uuid
 import weakref
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -326,6 +328,24 @@ _PUBLIC_USER_SENTINEL = "__public__"
 # anything else (incl. "none"/absent) is off.
 _SHARE_ENABLED_POLICIES = frozenset({"non-public", "public"})
 _SHARE_PUBLIC_POLICY = "public"
+
+# Peer messaging (spec ``peer_messaging: true``): the by-session-id mode of
+# sys_session_send may address a session outside the caller's subtree. Like
+# the sharing policy above, the server cannot see the flag, so the runner is
+# the gate.
+#
+# "Same owner" is judged by the permission the runner's own principal holds
+# on each session: owner level on both, or no level at all on a single-user
+# server that has no permission store. Mirrors the server's LEVEL_OWNER.
+_PEER_OWNER_PERMISSION_LEVEL = 4
+
+# Two agents that answer each other can loop with no person in between, and
+# every peer message costs the receiver a turn. Each calling session therefore
+# gets a rolling budget of peer sends; the default is deliberately small.
+_PEER_SEND_LIMIT_ENV = "OMNIGENT_PEER_SENDS_PER_HOUR"
+_DEFAULT_PEER_SEND_LIMIT = 20
+_PEER_SEND_WINDOW_SECONDS = 3600.0
+_peer_send_times: dict[str, deque[float]] = {}
 
 # Priority 5f.1: web_fetch — translates the LLM-facing query/url
 # arguments into a sys_session_send call against the built-in
@@ -2564,6 +2584,7 @@ async def _execute_subagent_tool(
             conversation_id=conversation_id,
             publish_event=publish_event,
             created_by=dispatch_created_by,
+            peer_messaging=getattr(agent_spec, "peer_messaging", False) is True,
         )
 
     # Named mode: (agent, title) spawn-or-continue.
@@ -3124,6 +3145,183 @@ async def _execute_subagent_tool(
     )
 
 
+def _peer_send_limit() -> int:
+    """
+    Peer sends one calling session may make per rolling hour.
+
+    Read on every call so an operator can change it without restarting
+    the runner. Anything that is not a positive integer falls back to
+    the default rather than silently lifting or closing the cap.
+
+    :returns: The budget, e.g. ``20``.
+    """
+    raw = os.environ.get(_PEER_SEND_LIMIT_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_PEER_SEND_LIMIT
+    try:
+        limit = int(raw)
+    except ValueError:
+        return _DEFAULT_PEER_SEND_LIMIT
+    return limit if limit > 0 else _DEFAULT_PEER_SEND_LIMIT
+
+
+def _peer_sends_in_window(conversation_id: str, *, now: float) -> deque[float]:
+    """
+    The caller's peer-send timestamps still inside the rolling window.
+
+    :param conversation_id: The calling session id.
+    :param now: Monotonic clock reading for this check.
+    :returns: The live timestamp queue for that session (pruned in place).
+    """
+    sends = _peer_send_times.setdefault(conversation_id, deque())
+    while sends and now - sends[0] >= _PEER_SEND_WINDOW_SECONDS:
+        sends.popleft()
+    return sends
+
+
+def _owns_session(snapshot: _JsonObject) -> bool:
+    """
+    Whether the runner's principal holds a session outright.
+
+    ``permission_level`` is the requesting principal's level on that
+    session. ``None`` means the server has no permission store: one
+    user, who holds everything. Anything below owner level (a session
+    someone merely shared with that user) does not count.
+
+    :param snapshot: A ``GET /v1/sessions/{id}`` body.
+    :returns: ``True`` for owner level or a single-user server.
+    """
+    level = snapshot.get("permission_level")
+    if level is None:
+        return True
+    return isinstance(level, int) and level >= _PEER_OWNER_PERMISSION_LEVEL
+
+
+async def _send_to_peer_session(
+    target_session_id: str,
+    message: str,
+    *,
+    server_client: httpx.AsyncClient,
+    conversation_id: str,
+    target_snapshot: _JsonObject,
+    created_by: str | None = None,
+) -> str:
+    """
+    Post a message into a session that is not the caller's child.
+
+    The peer branch of ``sys_session_send`` by session id, reached only
+    when the calling agent's spec sets ``peer_messaging: true``. Unlike a
+    child send this is a plain message: no child→parent mapping and no
+    work entry are registered, because the caller is not the target's
+    parent and must not start receiving its completions. A reply, if the
+    peer chooses to give one, comes back as a peer message of its own.
+
+    Refused when the two sessions are the same, when the runner's
+    principal does not own both, when the target is closed, or when the
+    caller has used up its rolling budget (see ``_peer_send_limit``).
+
+    The text is wrapped in a ``[System: peer message ...]`` line naming
+    the sending agent and session, so the receiver can tell it from a
+    person's message and knows where to answer.
+
+    :param target_session_id: The peer session id, e.g. ``"conv_abc123"``.
+    :param message: The message text to deliver.
+    :param server_client: HTTP client pointed at the Omnigent server.
+    :param conversation_id: The caller's own session id.
+    :param target_snapshot: The target's ``GET /v1/sessions/{id}`` body,
+        already fetched by the caller.
+    :param created_by: Human actor behind the calling turn, if known.
+    :returns: JSON handle on success; a JSON/text error otherwise.
+    """
+    if target_session_id == conversation_id:
+        return json.dumps(
+            {
+                "error": "peer_send_to_self",
+                "conversation_id": target_session_id,
+                "message": "a session cannot send a peer message to itself.",
+            }
+        )
+    try:
+        own = await server_client.get(f"/v1/sessions/{conversation_id}", timeout=30.0)
+    except Exception as exc:  # noqa: BLE001
+        return f"Error: sys_session_send failed to look up the calling session: {exc}"
+    if own.status_code != 200:
+        return f"Error: sys_session_send lookup of the calling session returned {own.status_code}"
+    own_data = _string_object_dict(own.json()) or {}
+    if not (_owns_session(own_data) and _owns_session(target_snapshot)):
+        return json.dumps(
+            {
+                "error": "session_out_of_tree",
+                "conversation_id": target_session_id,
+                "message": (
+                    "peer messaging reaches only sessions held by the same owner as "
+                    "the calling session."
+                ),
+            }
+        )
+    if is_session_closed(target_snapshot.get("labels"), target_snapshot.get("title")):
+        return json.dumps(
+            {
+                "error": "session_closed",
+                "conversation_id": target_session_id,
+                "message": "target session is closed; it cannot receive a peer message.",
+            }
+        )
+    limit = _peer_send_limit()
+    now = time.monotonic()
+    sends = _peer_sends_in_window(conversation_id, now=now)
+    if len(sends) >= limit:
+        return json.dumps(
+            {
+                "error": "peer_send_limit_reached",
+                "conversation_id": target_session_id,
+                "message": (
+                    f"this session has sent {len(sends)} peer messages in the last hour "
+                    f"(limit {limit}). Stop and report to the user instead of retrying."
+                ),
+            }
+        )
+
+    sender = (
+        _optional_string(own_data.get("sub_agent_name"))
+        or _optional_string(own_data.get("agent_name"))
+        or "agent"
+    )
+    sender_title = title_without_closed_marker(_optional_string(own_data.get("title")))
+    titled = f' ("{sender_title}")' if sender_title else ""
+    envelope = (
+        f"[System: peer message from agent {sender!r} in session {conversation_id}{titled}. "
+        "It was sent by another agent session, not by a person. To answer, call "
+        f"sys_session_send with session_id={conversation_id!r}.]\n\n{message}"
+    )
+    try:
+        resp = await _post_child_message_event(
+            server_client,
+            target_session_id,
+            content=[{"type": "input_text", "text": envelope}],
+            created_by=created_by,
+        )
+    except httpx.HTTPError as exc:
+        return f"Error: failed to send peer message: {type(exc).__name__}: {exc}"
+    if resp.status_code >= 400:
+        return f"Error: failed to send peer message: {resp.status_code} {resp.text[:200]}"
+    # Counted only once delivered: a refused or failed send costs the peer no turn.
+    sends.append(now)
+
+    return json.dumps(
+        {
+            "kind": "peer_message",
+            "conversation_id": target_session_id,
+            "status": "delivered",
+            "message": (
+                f"Peer message delivered to session {target_session_id}. Nothing is "
+                "tracked for it: no result will arrive through sys_read_inbox. If the "
+                "peer answers, the reply arrives in this session as a new message."
+            ),
+        }
+    )
+
+
 async def _send_to_existing_session(
     target_session_id: str,
     message: str,
@@ -3132,6 +3330,7 @@ async def _send_to_existing_session(
     conversation_id: str,
     publish_event: Callable[[str, _JsonObject], None] | None = None,
     created_by: str | None = None,
+    peer_messaging: bool = False,
 ) -> str:
     """
     Post a message to an existing direct-child session, return a handle.
@@ -3147,6 +3346,10 @@ async def _send_to_existing_session(
     ``running`` handle immediately — the completion lands in the parent's
     ``sys_read_inbox`` queue, matching named-mode send.
 
+    The one exception is ``peer_messaging``: with that grant a target
+    that is not a direct child is handed to ``_send_to_peer_session``
+    instead of being refused.
+
     The child's ``(agent, title)`` identity, carried by the handle, the
     launching tool result, and the completion wake notice, comes from
     the ``"<agent>:<title>"`` title when it has one, and otherwise from
@@ -3159,6 +3362,8 @@ async def _send_to_existing_session(
     :param server_client: HTTP client pointed at the Omnigent server.
     :param conversation_id: The caller's own session id — the required
         parent of the target.
+    :param peer_messaging: Whether the calling agent's spec sets
+        ``peer_messaging: true``.
     :returns: JSON handle on success; a JSON/text error otherwise.
     """
     from omnigent.runner import subagent_work as _subagent_work
@@ -3175,6 +3380,15 @@ async def _send_to_existing_session(
         return f"Error: sys_session_send lookup returned {snap.status_code}"
     snap_data = snap.json()
     if snap_data.get("parent_session_id") != conversation_id:
+        if peer_messaging:
+            return await _send_to_peer_session(
+                target_session_id,
+                message,
+                server_client=server_client,
+                conversation_id=conversation_id,
+                target_snapshot=snap_data,
+                created_by=created_by,
+            )
         return json.dumps(
             {
                 "error": "session_out_of_tree",
