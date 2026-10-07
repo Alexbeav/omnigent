@@ -161,6 +161,36 @@ async def test_peer_send_tracks_no_work_for_the_target() -> None:
 
 
 @pytest.mark.asyncio
+async def test_envelope_does_not_quote_an_envelope_as_the_sender_title() -> None:
+    """A reply must not carry the message it answers inside its own header.
+
+    A session first woken by a peer message is auto-titled with that
+    envelope. Seen on a live server: its reply then read "peer message
+    from agent 'beta' ... ("[System: peer message from agent 'alpha' ...")".
+    """
+    server = _FakeServer(
+        caller={"title": "[System: peer message from agent 'codex' in session conv_peer…"}
+    )
+
+    await _send(server, peer_messaging=True)
+
+    header = server.posted_text().split("\n\n", 1)[0]
+    assert header.count("[System:") == 1
+    assert '("' not in header
+
+
+@pytest.mark.asyncio
+async def test_envelope_quotes_only_the_start_of_a_long_title() -> None:
+    """An untitled session's title is its whole first message."""
+    server = _FakeServer(caller={"title": "x" * 500})
+
+    await _send(server, peer_messaging=True)
+
+    header = server.posted_text().split("\n\n", 1)[0]
+    assert f'("{"x" * 80}")' in header
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "caller_level,peer_level",
     [(_OWNER, _EDIT), (_EDIT, _OWNER), (_OWNER, 3)],

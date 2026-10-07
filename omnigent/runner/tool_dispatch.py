@@ -339,6 +339,11 @@ _SHARE_PUBLIC_POLICY = "public"
 # server that has no permission store. Mirrors the server's LEVEL_OWNER.
 _PEER_OWNER_PERMISSION_LEVEL = 4
 
+# How much of the sender's session title the envelope quotes. The title only
+# helps the receiver recognise the sender; an untitled session's title is its
+# whole first message, which must not ride along in full.
+_PEER_TITLE_MAX_CHARS = 80
+
 # Two agents that answer each other can loop with no person in between, and
 # every peer message costs the receiver a turn. Each calling session therefore
 # gets a rolling budget of peer sends; the default is deliberately small.
@@ -3288,7 +3293,11 @@ async def _send_to_peer_session(
         or "agent"
     )
     sender_title = title_without_closed_marker(_optional_string(own_data.get("title")))
-    titled = f' ("{sender_title}")' if sender_title else ""
+    # A session whose first message was itself a peer message is auto-titled
+    # with that envelope. Quoting it back would nest one envelope in the next.
+    if sender_title and sender_title.startswith("[System:"):
+        sender_title = None
+    titled = f' ("{sender_title[:_PEER_TITLE_MAX_CHARS]}")' if sender_title else ""
     envelope = (
         f"[System: peer message from agent {sender!r} in session {conversation_id}{titled}. "
         "It was sent by another agent session, not by a person. To answer, call "
