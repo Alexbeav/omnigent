@@ -2374,7 +2374,10 @@ async def test_idle_prompt_turn_reports_why_it_stalled(tmp_path: Path) -> None:
     ex = AcpExecutor(AcpAgentConfig(command=_write_stall_agent(tmp_path), name="Stalling"))
     errors: list[ExecutorError] = []
     pending_after_error: set[int] = set()
-    with patch.object(acp_executor_module, "_PROMPT_TIMEOUT_SECONDS", 1.0):
+    with (
+        patch.object(acp_executor_module, "_PROMPT_TIMEOUT_SECONDS", 1.0),
+        patch.object(acp_executor_module, "_CANCEL_TIMEOUT_SECONDS", 1.0),
+    ):
         try:
             async for ev in ex.run_turn([{"role": "user", "content": "hi"}], [], ""):
                 if isinstance(ev, ExecutorError):
@@ -2405,7 +2408,10 @@ async def test_stalled_prompt_turn_is_cancelled_for_the_agent(tmp_path: Path) ->
     ex = AcpExecutor(
         AcpAgentConfig(command=_write_stall_agent(tmp_path, marker=marker), name="Stalling")
     )
-    with patch.object(acp_executor_module, "_PROMPT_TIMEOUT_SECONDS", 1.0):
+    with (
+        patch.object(acp_executor_module, "_PROMPT_TIMEOUT_SECONDS", 1.0),
+        patch.object(acp_executor_module, "_CANCEL_TIMEOUT_SECONDS", 1.0),
+    ):
         try:
             async for _ev in ex.run_turn([{"role": "user", "content": "hi"}], [], ""):
                 pass
@@ -2415,6 +2421,209 @@ async def test_stalled_prompt_turn_is_cancelled_for_the_agent(tmp_path: Path) ->
                 await asyncio.sleep(0.05)
         finally:
             await ex.close()
+
+
+# A fake ACP agent that accepts a prompt and never answers it, but does what
+# ACP asks on session/cancel: it ends the in-flight prompt with a ``cancelled``
+# stop reason. The well-behaved half of the stall the idle timeout exists for.
+_CANCEL_CONFIRMING_AGENT = """import sys, json
+
+pending = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": 1, "agentCapabilities": {}}
+    elif method == "session/new":
+        result = {"sessionId": "cancel-1"}
+    elif method == "session/prompt":
+        pending = msg["id"]
+        continue
+    elif method == "session/cancel":
+        if pending is not None:
+            reply = {"jsonrpc": "2.0", "id": pending, "result": {"stopReason": "cancelled"}}
+            sys.stdout.write(json.dumps(reply) + "\\n")
+            sys.stdout.flush()
+            pending = None
+        continue
+    else:
+        continue
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\\n")
+    sys.stdout.flush()
+"""
+
+
+async def _stalled_turn_error(ex: AcpExecutor) -> tuple[ExecutorError, bool]:
+    """Run one turn that stalls; return its error and whether the child outlived it.
+
+    The child's liveness is sampled at the moment the error is yielded, which is
+    before the caller's ``close()`` would end it anyway.
+    """
+    seen: list[tuple[ExecutorError, bool]] = []
+    with (
+        patch.object(acp_executor_module, "_PROMPT_TIMEOUT_SECONDS", 1.0),
+        patch.object(acp_executor_module, "_CANCEL_TIMEOUT_SECONDS", 1.0),
+    ):
+        async for ev in ex.run_turn([{"role": "user", "content": "hi"}], [], ""):
+            if isinstance(ev, ExecutorError):
+                alive = ex._proc is not None and ex._proc.returncode is None
+                seen.append((ev, alive))
+    assert len(seen) == 1, "a stalled turn must end in exactly one ExecutorError"
+    return seen[0]
+
+
+@pytest.mark.asyncio
+async def test_stalled_turn_keeps_the_child_when_the_agent_confirms_the_cancel(
+    tmp_path: Path,
+) -> None:
+    """An agent that lets go of the prompt is free for the next one: keep it.
+
+    Killing it anyway would throw away a live session and its context for
+    nothing. Only an answer to the cancelled prompt counts as confirmation.
+    """
+    agent_path = tmp_path / "cancel_confirming_agent.py"
+    agent_path.write_text(_CANCEL_CONFIRMING_AGENT)
+    command = shlex.join([sys.executable, str(agent_path)])
+    ex = AcpExecutor(AcpAgentConfig(command=command, name="Polite"))
+    try:
+        error, child_alive = await _stalled_turn_error(ex)
+    finally:
+        await ex.close()
+
+    assert "agent confirmed session/cancel" in error.message
+    assert "child killed" not in error.message
+    assert child_alive, "a confirmed cancel must leave the child running"
+    assert error.retryable
+
+
+@pytest.mark.asyncio
+async def test_stalled_turn_stops_the_child_when_the_cancel_goes_unanswered(
+    tmp_path: Path,
+) -> None:
+    """An agent that never answers the cancel is still holding the prompt.
+
+    Left alive it refuses every later prompt as "already processing" — the
+    wedge that made one stall repeat for the rest of a session. Stopping it
+    is what lets the next turn start a fresh child.
+    """
+    ex = AcpExecutor(AcpAgentConfig(command=_write_stall_agent(tmp_path), name="Stalling"))
+    try:
+        error, child_alive = await _stalled_turn_error(ex)
+        stopped_for_good = ex._proc is None
+        session_forgotten = ex._session_id is None
+    finally:
+        await ex.close()
+
+    assert "agent never confirmed session/cancel" in error.message
+    assert "child killed so the next turn restarts it" in error.message
+    assert not child_alive, "an unanswered cancel must stop the child before the error is shown"
+    assert stopped_for_good
+    assert session_forgotten, "the dead child's session id must not be prompted again"
+
+
+# A fake ACP agent that refuses ``session/prompt`` as busy for its first
+# REFUSALS process lives, then answers by echoing the prompt text back. Each
+# start appends a line to COUNT, so a test can read how many children ran.
+_BUSY_AGENT = """import sys, json
+
+COUNT = @@COUNT@@
+REFUSALS = @@REFUSALS@@
+
+with open(COUNT, "a") as handle:
+    handle.write("start\\n")
+with open(COUNT) as handle:
+    life = sum(1 for _ in handle)
+
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    mid, method = msg.get("id"), msg.get("method")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid,
+              "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "busy-%d" % life}})
+    elif method == "session/prompt":
+        if life <= REFUSALS:
+            send({"jsonrpc": "2.0", "id": mid,
+                  "error": {"code": -32603, "message": "Agent is already processing a prompt"}})
+            continue
+        sid = msg["params"]["sessionId"]
+        text = msg["params"]["prompt"][0]["text"]
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": "life %d got: %s" % (life, text)}},
+        }})
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+"""
+
+
+def _write_busy_agent(tmp_path: Path, *, refusals: int) -> tuple[str, Path]:
+    """Command for the busy fake agent, and the file counting its starts."""
+    count = tmp_path / "starts"
+    agent_path = tmp_path / "busy_agent.py"
+    agent_path.write_text(
+        _BUSY_AGENT.replace("@@COUNT@@", repr(str(count))).replace("@@REFUSALS@@", str(refusals))
+    )
+    return shlex.join([sys.executable, str(agent_path)]), count
+
+
+@pytest.mark.asyncio
+async def test_busy_refusal_restarts_the_child_and_replays_the_turn(tmp_path: Path) -> None:
+    """A prompt refused as busy is retried once on a fresh child, unseen by the user.
+
+    The agent is still working a prompt Omnigent gave up on, and it ignores the
+    cancel for it, so nothing short of a restart clears it. The replay must
+    carry the system prompt again: the new child's session knows nothing.
+    """
+    command, count = _write_busy_agent(tmp_path, refusals=1)
+    ex = AcpExecutor(AcpAgentConfig(command=command, name="Busy"))
+    events = []
+    try:
+        async for ev in ex.run_turn([{"role": "user", "content": "do the thing"}], [], "SYSTEM-X"):
+            events.append(ev)
+    finally:
+        await ex.close()
+
+    assert not [e for e in events if isinstance(e, ExecutorError)], "the refusal must not surface"
+    done = [e for e in events if isinstance(e, TurnComplete)]
+    assert len(done) == 1
+    assert count.read_text().count("start") == 2, "exactly one restart"
+    assert "life 2 got:" in done[0].response, "the answer must come from the restarted child"
+    assert "do the thing" in done[0].response
+    assert "SYSTEM-X" in done[0].response, "a fresh child needs the system prompt replayed"
+
+
+@pytest.mark.asyncio
+async def test_second_busy_refusal_reaches_the_user(tmp_path: Path) -> None:
+    """A child that comes back busy fails the turn; it is not restarted in a loop."""
+    command, count = _write_busy_agent(tmp_path, refusals=99)
+    ex = AcpExecutor(AcpAgentConfig(command=command, name="Busy"))
+    events = []
+    try:
+        async for ev in ex.run_turn([{"role": "user", "content": "do the thing"}], [], ""):
+            events.append(ev)
+    finally:
+        await ex.close()
+
+    errors = [e for e in events if isinstance(e, ExecutorError)]
+    assert len(errors) == 1
+    assert "Agent is already processing" in errors[0].message
+    assert errors[0].retryable
+    assert not [e for e in events if isinstance(e, TurnComplete)]
+    assert count.read_text().count("start") == 2, "one replay, then stop"
 
 
 # ---------------------------------------------------------------------------
