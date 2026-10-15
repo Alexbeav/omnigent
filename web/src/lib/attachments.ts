@@ -43,6 +43,10 @@ const UNCOMPRESSED_IMAGE_LIMIT_MB = 5;
 // fallback for the image formats it can compress.
 const COMPRESSIBLE_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 
+function hasGenericMime(type: string): boolean {
+  return type === "" || type === "application/octet-stream";
+}
+
 export type AttachmentCategory = keyof typeof ATTACHMENT_SIZE_LIMITS_MB;
 
 /** Keep unnamed clipboard images consistent before and after upload. */
@@ -173,7 +177,7 @@ export function classifyAttachment(file: File): AttachmentCategory | null {
   if (FILESYSTEM_ATTACHMENT_EXTENSIONS.has(ext)) return "file";
   if (
     type.startsWith("image/") ||
-    ((type === "" || type === "application/octet-stream") && COMPRESSIBLE_IMAGE_EXTENSIONS.has(ext))
+    (hasGenericMime(type) && COMPRESSIBLE_IMAGE_EXTENSIONS.has(ext))
   ) {
     return "image";
   }
@@ -219,7 +223,10 @@ export function validateAttachments(files: File[]): AttachmentValidation {
     const limitMb =
       category === "image" &&
       !COMPRESSIBLE_IMAGE_MIMES.has(file.type || "") &&
-      !COMPRESSIBLE_IMAGE_EXTENSIONS.has(extensionOf(file.name || ""))
+      !(
+        hasGenericMime(file.type || "") &&
+        COMPRESSIBLE_IMAGE_EXTENSIONS.has(extensionOf(file.name || ""))
+      )
         ? UNCOMPRESSED_IMAGE_LIMIT_MB
         : ATTACHMENT_SIZE_LIMITS_MB[category];
     if (file.size > limitMb * 1024 * 1024) {

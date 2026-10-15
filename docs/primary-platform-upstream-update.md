@@ -70,7 +70,8 @@ The captured main-check snapshot included active checks; it is not a recorded al
 Local research evidence is under `.omnigent/verify/upstream-update-20261016/`.
 It includes pinned refs, both merge probes, patch equivalence, migration graphs,
 GitHub search results and the independent UI and compatibility audits.
-No candidate build, restored-database test, mixed-version test or provider turn ran for this investigation.
+The initial research pass ran no candidate build, restored-database test, mixed-version test or provider turn.
+The implementation record below contains the later qualification results.
 
 ## Enhancement disposition and PR sequence
 
@@ -80,7 +81,7 @@ No upstream issue, comment or PR was published during this investigation.
 
 | Group | Deployment treatment | Upstream treatment |
 | --- | --- | --- |
-| Image MIME fallback | Port the filename fallback for empty/generic MIME while retaining rejection of explicit conflicting types. | First small independent PR, with current attachment-suite proof. No exact title match surfaced in the searches; recheck before publishing. |
+| Image MIME fallback | Port the filename fallback for empty/generic MIME while retaining rejection of explicit conflicting types. | A focused branch on pinned main reproduces the bug, then passes 21 attachment tests. Open [#8391](https://github.com/omnigent-ai/omnigent/pull/8391) has equivalent fallback inside a broader redesign; coordinate before submitting. [#10045](https://github.com/omnigent-ai/omnigent/pull/10045) overlaps the same files. |
 | ACP agent readiness | Keep agent-specific `acp:<slug>` readiness and legacy-host unknown behavior. | Review overlap with open [#7544](https://github.com/omnigent-ai/omnigent/pull/7544). Its launch-gate alignment and our false-positive prevention need a semantic comparison. Avoid a duplicate PR. |
 | Peer messaging and native grants | Preserve our same-owner authorization, provenance, loop/rate controls, and pinned-agent behavior. | Coordinate with open [#7965](https://github.com/omnigent-ai/omnigent/pull/7965) and sibling-team [#4232](https://github.com/omnigent-ai/omnigent/pull/4232). Discuss API and defaults before proposing another implementation. |
 | Desktop panes and docking | Port ordered three-pane layout, draft/stream isolation, resizing, both docking directions, header actions and safe popouts. | Separate feature proposal and base layout PR. Review Canvas split-panel [#7431](https://github.com/omnigent-ai/omnigent/pull/7431) for shared layout ideas. |
@@ -223,4 +224,10 @@ Those setup failures do not count as feature regressions or passing evidence.
 Pre-commit initially identified two effect dependencies and missing optional tracing packages.
 The dependencies were corrected, and the lint environment now uses the frozen tracing extra.
 Windows terminal closure, an actual OS desktop drop and a whole-fleet refresh remain separate from these Linux checks.
+The first full source image passed two restored-database startups and rollback to the previous image.
+All 95 original conversations, 60,926 item bodies, 19 file records and two account records remained intact.
+Accounts access and anonymous rejection passed with a disposable cookie secret.
+All 94 exported external Python dependency versions matched, and all 454 JS/CSS files matched the tested local bundle.
+Review then tightened the image size rule: an explicit SVG MIME keeps the 5 MB limit even with a misleading PNG filename.
+The final image must include that follow-up and repeat the artifact rehearsal.
 No live server or host was upgraded by these qualification steps.

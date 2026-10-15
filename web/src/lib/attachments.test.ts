@@ -130,6 +130,13 @@ describe("validateAttachments", () => {
     expect(validateAttachments([png]).accepted).toEqual([png]);
   });
 
+  it("keeps an explicit non-compressible image MIME at the smaller limit", () => {
+    const misleadingSvg = makeFile("misleading.png", "image/svg+xml", 6 * MB);
+    const { accepted, errors } = validateAttachments([misleadingSvg]);
+    expect(accepted).toHaveLength(0);
+    expect(errors[0]).toContain("too large");
+  });
+
   it("caps non-compressible images (SVG) at the smaller limit", () => {
     // Under 5 MB: accepted. A raster PNG the same size would be fine too, but
     // SVG can't be compressed server-side, so it keeps the small cap.
