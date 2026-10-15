@@ -78,6 +78,11 @@ Then test cancellation, process restart, and explicit screenshot transfer separa
 
 ## Trying the code
 
+The updated UI is live at [the NAS server](http://172.16.1.8:8090).
+Reload the browser with **Ctrl+Shift+R** to load the new bundle.
+On a desktop, open a chat and use **Add pane…** at the bottom right twice to select two more chats.
+Use **Add > Files and images** in a composer to attach a picture.
+
 Use an isolated environment from [Verify Omnigent](../feature-map/skills/verify-omnigent/SKILL.md).
 Build this checkout, start its environment, and open the URL it reports.
 The linked feature notes contain focused test commands and manual checks.
@@ -95,9 +100,29 @@ Existing pinned custom definitions need an explicit `peer_messaging: true` updat
 
 ## Rollout boundary
 
-The code has not been deployed to the NAS server or the live host checkout.
-No database migration or authentication change is part of this patch.
-Build and pin a new server image from the reviewed branch, then update compatible hosts.
-Preserve the current image and data for rollback.
-Avoid restarting the host that owns active work until those sessions can tolerate a disconnect.
-Validate new native agent definitions with disposable chats before changing existing long-running sessions.
+The NAS server was updated on 2026-10-15 at Alex's request; OMP coordination was deferred.
+The live host checkout and host processes were not updated or restarted.
+New built-in native agent definitions were refreshed at server startup; existing sessions keep their pinned definitions.
+The runtime startup-instruction changes on hosts still need a later host update.
+
+| Deployment evidence | Result |
+| --- | --- |
+| Application source | `9b8bdd0dd8d73ab5cfe1e4ba3c9b61bb4098a3e6`, branch `feat/primary-platform`; server version remains `0.17.0`. |
+| Compose image | `registry.crosstalkis.com/omnigent-server:sha-9b8bdd0dd@sha256:4b66b4ab7d930b293f36caf46cede22c3a859a935369ed589193daef24f21e21` |
+| Image construction | Existing digest-pinned runtime plus committed application source and the verified web bundle; dependency manifests and SDKs are unchanged. The full Dockerfile build was stopped during slow dependency downloads. |
+| Isolated image rehearsal | Backup restored into a private Postgres container; new image startup and internal health passed, with 92 conversations and 59,904 items unchanged. |
+| Live cutover | 93 conversations and 60,013 items before and after; every original row identifier retained; schema unchanged at `mm1a2b3c4d5e`. Other chats added data between the earlier backup and cutover. |
+| NAS configuration | Compose pin committed locally in `homelab-ulduar` as `a21f0aa`; not pushed. Unrelated monitoring changes preserved. |
+| Served UI | All 70 entry JavaScript and CSS assets match the verified bundle by SHA-256; entry script is `index-Deb4mQkC.js`. |
+| Service checks | New server healthy, zero restarts, accounts auth preserved. Only the Omnigent server container changed; Postgres and all unrelated containers retained their identities and restart counts. Transit Vault remained healthy and unsealed. |
+| Cutover backup | `/volume1/docker/stacks/omnigent/backups/primary-platform-20261015-9b8bdd0dd/cutover.dump`, 54,749,058 bytes, SHA-256 `b74a0726dcd2c003f15ec75195a3de3981e5137782c08089e759cc2eee1dc9dd`. |
+
+The previous Compose file, image, rollout script and deployment JSON remain in that backup directory.
+Build recipes, logs, bundle hashes and container comparisons are under `.omnigent/verify/deployment/` locally.
+Rehearsal containers and their private network were removed; temporary NAS registry credentials were removed after the pull.
+Two rehearsal setup checks needed correction: Postgres readiness must use TCP to avoid its temporary initialization socket, and the internal Docker network required checking health inside the container.
+
+To roll back this server-only change, restore the saved Compose file and run
+`sudo /usr/local/bin/docker compose -f /volume1/docker/stacks/omnigent/docker-compose.yml up -d --no-deps omnigent`,
+then check `/health`. No database restore is needed for this patch, which has no migration.
+Validate fresh native agents with disposable chats before updating long-running sessions or hosts.
