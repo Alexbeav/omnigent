@@ -1,0 +1,203 @@
+# Omnigent primary platform work
+
+This record covers Alex's five requests from 2026-10-15 and the later child-chat visibility report.
+The starting revision is `e88754218` on `feature/session-orchestration-v0.17`.
+The integrated work is on the local branch `feat/primary-platform` in `~/Projects/omnigent-primary`.
+The live editable checkout remains `~/Projects/omnigent`.
+
+The next version is covered by the [upstream update and contribution plan](primary-platform-upstream-update.md).
+
+## Result by request
+
+| Request | Implemented or established | Limit |
+| --- | --- | --- |
+| Independent chat messaging | Generated native agents receive the existing same-owner peer grant. Native startup instructions identify messages from other agents. | Existing sessions retain pinned definitions. Deploy the changes and start or update agent definitions before live use. |
+| Web pictures | Shared validation accepts supported image filenames when browser MIME data is empty or generic. Sending uses an image content block. | The exact cause of the original interface report remains unconfirmed. Live vendor image turns were not tested. |
+| Three tall chats | Three desktop columns, per-pane model and effort controls, sidebar edge-drop, header drag popouts, resizing, separate drafts and sends, popout, and close/reopen. | Widths are not saved after reload. Actual OS desktop drops and popup placement depend on the browser. |
+| Background hosts | Browser connection instructions include `--background`; the guide includes WSL lifetime and the working PowerShell launch form. | Automatic startup after Windows login or reboot is not installed by this patch. |
+| OMP coordinating workers | Existing ACP relay already exposes child creation, sending, inbox, and cancellation. Fixed false availability when another ACP agent is configured. | OMP is configured on Windows Eagle, not this WSL runner. Coordinator placement and a three-worker live proof remain. |
+| Child visibility | The selected root's sidebar shows child titles, statuses, and navigation links. | The Agents panel remains the full tree view. |
+
+Details: [messaging](primary-platform-messaging.md), [images](primary-platform-attachments.md),
+[panes](primary-platform-panes.md), [background hosts](background-hosts.md), and [OMP](primary-platform-omp.md).
+
+## Work allocation
+
+Four Omnigent child chats investigated messaging, images, panes, and OMP in separate Git worktrees.
+The parent integrated the patches, added sidebar child links, reviewed failures and permissions, and ran combined checks.
+The worktrees under `../omnigent-worktrees/` retain their scoped work.
+
+## Combined evidence
+
+The verification environment uses private state and mock model endpoints.
+It does not use the running host's database or vendor credentials.
+
+| Check | Observed result |
+| --- | --- |
+| Web components for attachments, session state, connection dialogs, and panes | 1222 checks passed before the final header review. |
+| Final AppShell, pane container, and SideChatPane checks | 178 checks passed. |
+| Native grants, prompt composition, peer ownership, generated bundles, and isolated peer exchange | 134 checks passed; the later lifecycle parsing check passed in its focused suite. |
+| Peer lifecycle and shared native startup seam | 29 checks passed. |
+| Host readiness and creation preflight | 116 checks passed. |
+| ACP orchestration capability gates | 16 checks passed. |
+| Browser attachment flows, including picker, paste, drop, and image-only sends | 16 checks passed. |
+| Browser multi-chat journey | Passed: add, edge-drop, distinct drafts, correct send destination, resizing, popout, close/reopen, mobile collapse, and child visibility. |
+| Native image adapters and isolated image-to-model transport | Three checks passed. |
+| Existing detached-host and user-service CLI checks | 17 checks passed before the outage. |
+| Feature map contract | 131 checks passed after the final documentation changes. |
+
+The pre-commit checks passed, including Python and TypeScript type checks.
+The final verification manifest is `.omnigent/verify/primary-platform-verification.json`.
+Browser evidence is under `.omnigent/verify/pane-evidence/` and `.omnigent/verify/resume/image-evidence/`.
+These are local evidence, not product assets to commit.
+
+## Live observations
+
+Alex enabled both WSL idle settings and restarted the host through the PowerShell command.
+The settings were read back, and this same conversation resumed through the detached process.
+This establishes configuration presence and resumed access, not Windows reboot recovery.
+The homelab state and operational notes record the distinction.
+
+A disposable OMP child failed before a model turn because this WSL runner lacks the `oh-my-pi` ACP entry.
+Safe configuration inspection found the entry in Windows Eagle's configuration.
+No credential value was read or copied into this record.
+A catalog membership or a generic ACP-ready flag does not establish that a particular ACP agent can launch.
+
+## OMP architecture and next decision
+
+Alex selected OMP as the coordinator for separate Claude Code, Codex, and Cline chats.
+Use OMP's Omnigent MCP tools to create and drive those children.
+OMP's internal subagents and provider models are separate mechanisms.
+
+The smallest placement puts OMP and its three worker harnesses on the same host.
+The current child-creation tool inherits the parent's runner and has no per-child host selector.
+Keeping the coordinator on Windows while launching workers on WSL needs a separate placement design.
+Same-owner peer messages can contact existing sessions across hosts, but they are not tracked child tasks.
+
+After placement is chosen, create a disposable coordinator and ask each worker for a distinct token.
+Make sure that three distinct transcripts appear, replies arrive through the OMP inbox, and follow-ups keep each worker's identity.
+Then test cancellation, process restart, and explicit screenshot transfer separately.
+
+## Trying the code
+
+The updated UI is live at [the NAS server](http://172.16.1.8:8090).
+Reload the browser with **Ctrl+Shift+R** to load the new bundle.
+On a desktop, open a chat and use **Add pane…** in the header twice to select two more chats.
+Use **Add > Files and images** in a composer to attach a picture.
+
+Use an isolated environment from [Verify Omnigent](../feature-map/skills/verify-omnigent/SKILL.md).
+Build this checkout, start its environment, and open the URL it reports.
+The linked feature notes contain focused test commands and manual checks.
+
+For panes, open a chat and add a second through `Add pane…`.
+Drag a third sidebar row onto the marked chat edge.
+Type a distinct draft in each, send one, resize a divider, then close and reopen a pane.
+Use a pane's window button to request a separate window.
+A shared read-only chat must show no send composer.
+
+For pictures, use **Add > Files and images**, paste an image, and drop a file.
+Send one image without text and inspect the stored user bubble.
+For independent messaging, use fresh generated native agents and a disposable same-owner peer.
+Existing pinned custom definitions need an explicit `peer_messaging: true` update.
+
+## Follow-up: pane controls and dragging
+
+Alex requested the primary chat's model and reasoning controls in every ordinary pane.
+The provider stays fixed. Each pane reads its own model catalog, reported model and effort.
+The shared picker and explicit conversation targets prevent changes from reaching a neighboring chat.
+Host, permission and Codex Plan controls also belong to the pane.
+
+Drag a header or sidebar row to the marked right edge to request a separate window.
+Headers handle Escape, pointer cancellation and lost capture.
+An outside-viewport release is supported when the browser delivers it.
+The recorded Chromium release uses browser automation and does not establish real OS desktop-drop behavior.
+
+Ordinary panes also share queueing, steering, keyboard shortcuts and the Always steer preference.
+Queue flushes honor each conversation's live status, including a busy pane with a stale idle sidebar row.
+The add control now lives in the primary header. Sidebar drops place or move a chat on either side of any pane.
+The `paneOrder` query preserves visual order without changing the primary route.
+The outer docking target sits inside the separate window target so they do not overlap.
+
+The Claude bridge patch excludes diagnostic `api-request-blob` snapshots from transcript forwarding.
+These snapshots duplicated real user records and could expose native reminders.
+Display and copy extraction also hide complete or truncated reminder blocks.
+Stored rows and existing native history stay unchanged.
+New regressions cover both transcript readers and consecutive executor/bridge calls at the mocked terminal-paste boundary.
+This is not a real-provider end-to-end test. Existing Claude runners need a targeted reconnect to import the host-side parser fix.
+
+Follow-up verification completed on 2026-10-16 (local time).
+The three isolated Chromium journeys passed in 10.84 seconds against the final production build.
+They cover six pane-specific model/effort/permission updates and reload, scoped queue edit/remove/send-now/idle flush/bulk steer, left/right placement, resize, popout and cancellation.
+The queue journey keeps the sidebar idle while the Claude pane's live stream is busy.
+The primary draft remains unchanged and all mocked backend routes are accounted for.
+Store checks passed 585 tests; composer checks passed 361 tests; the other pane/shell/bubble component checks passed 192 tests.
+Python parser and feature-map checks passed 136 tests.
+Local evidence is under `.omnigent/verify/`, including `final-pane-browser.xml` and `pane-final-*.log`.
+The first deployment record below is historical; the follow-up deployment is recorded at the end of this note.
+
+## First rollout, 2026-10-15
+
+The NAS server was updated on 2026-10-15 at Alex's request; OMP coordination was deferred.
+The live host checkout and host processes were not updated or restarted.
+New built-in native agent definitions were refreshed at server startup; existing sessions keep their pinned definitions.
+The runtime startup-instruction changes on hosts still need a later host update.
+
+| Deployment evidence | Result |
+| --- | --- |
+| Application source | `9b8bdd0dd8d73ab5cfe1e4ba3c9b61bb4098a3e6`, branch `feat/primary-platform`; server version remains `0.17.0`. |
+| Compose image | `registry.crosstalkis.com/omnigent-server:sha-9b8bdd0dd@sha256:4b66b4ab7d930b293f36caf46cede22c3a859a935369ed589193daef24f21e21` |
+| Image construction | Existing digest-pinned runtime plus committed application source and the verified web bundle; dependency manifests and SDKs are unchanged. The full Dockerfile build was stopped during slow dependency downloads. |
+| Isolated image rehearsal | Backup restored into a private Postgres container; new image startup and internal health passed, with 92 conversations and 59,904 items unchanged. |
+| Live cutover | 93 conversations and 60,013 items before and after; every original row identifier retained; schema unchanged at `mm1a2b3c4d5e`. Other chats added data between the earlier backup and cutover. |
+| NAS configuration | Compose pin committed locally in `homelab-ulduar` as `a21f0aa`; not pushed. Unrelated monitoring changes preserved. |
+| Served UI | All 70 entry JavaScript and CSS assets match the verified bundle by SHA-256; entry script is `index-Deb4mQkC.js`. |
+| Service checks | New server healthy, zero restarts, accounts auth preserved. Only the Omnigent server container changed; Postgres and all unrelated containers retained their identities and restart counts. Transit Vault remained healthy and unsealed. |
+| Cutover backup | `/volume1/docker/stacks/omnigent/backups/primary-platform-20261015-9b8bdd0dd/cutover.dump`, 54,749,058 bytes, SHA-256 `b74a0726dcd2c003f15ec75195a3de3981e5137782c08089e759cc2eee1dc9dd`. |
+
+The previous Compose file, image, rollout script and deployment JSON remain in that backup directory.
+Build recipes, logs, bundle hashes and container comparisons are under `.omnigent/verify/deployment/` locally.
+Rehearsal containers and their private network were removed; temporary NAS registry credentials were removed after the pull.
+Two rehearsal setup checks needed correction: Postgres readiness must use TCP to avoid its temporary initialization socket, and the internal Docker network required checking health inside the container.
+
+To roll back this server-only change, restore the saved Compose file and run
+`sudo /usr/local/bin/docker compose -f /volume1/docker/stacks/omnigent/docker-compose.yml up -d --no-deps omnigent`,
+then check `/health`. No database restore is needed for this patch, which has no migration.
+Validate fresh native agents with disposable chats before updating long-running sessions or hosts.
+
+## Follow-up rollout, 2026-10-16
+
+The live server runs application `2050948e3ed0bd9a93fe81974fe3ed0a56b8d2ec` on `feat/primary-platform`,
+with image `registry.crosstalkis.com/omnigent-server:sha-2050948e3@sha256:821c003af23d7acbdde711061b29a8b539f4c533fc76625ee6e3be3dd667924a`.
+Version remains `0.17.0`, with unchanged dependencies and database schema.
+The container smoke check passed the actual diagnostic-request exclusion and confirmed the source identity and bundled UI.
+The digest was pushed and pulled before cutover; temporary NAS registry credentials were removed.
+The Windows Docker CLI required a GNU tar build context; the initial PAX archive was rejected before any image build.
+
+The quiescent database dump contains 95 conversations and 60,926 items.
+Every original row ID survived; post-cutover counts are identical and schema remains `mm1a2b3c4d5e`.
+Backup: `/volume1/docker/stacks/omnigent/backups/pane-followup-20261016-2050948e3/cutover.dump`, 56,316,001 bytes, SHA-256 `e9844fa6fc17b257ee9d86e9aac8e7373a7a7cc3c9af2cf412829de7e6d83212`.
+The previous Compose and image remain with the rollout script and deployment JSON in that directory.
+
+All 448 served JavaScript and CSS files match the verified production build; entry script `index-CHxJcFjo.js`.
+Accounts auth and server health pass; the server has zero restarts.
+Only `omnigent` changed. PostgreSQL and 28 unrelated containers kept their identities, start times and restart counts.
+Transit Vault remains initialized, healthy and unsealed.
+The Compose pin is local `homelab-ulduar` commit `f3e76cb92`; it is not pushed, and unrelated monitoring changes remain untouched.
+Artifacts are under `.omnigent/verify/pane-rollout/`.
+
+Host installations were not replaced. The live editable checkout already contains the Claude parser patch.
+The idle Claude session `189d5d7ce28b4b1ea7ac7d0938efafdf` was reconnected through
+`retry_session` (HTTP 202, `recovered=true`, `runner_relaunched`): runner `19983`
+exited and fresh runner `5166` started from the patched editable installation.
+The stale zygote rejected the changed graph; the host used direct-spawn fallback.
+Shared host `1683` and zygote `1686` remained running; no user or assistant items
+were added to that chat. Other existing coordinator runners can still create children
+with their old imported parser until those coordinators reconnect. A disposable child
+reused an old shared runner and reproduced duplication; it does not validate runner
+`5166`. A clean two-turn live-provider test on the new runner remains unproven.
+Existing polluted history remains unchanged.
+
+Reload [the live UI](http://172.16.1.8:8090) with **Ctrl+Shift+R**.
+Drag sidebar chats to the marked left/right targets, change a secondary pane's model and reasoning,
+and queue a follow-up while that pane works. Its send-now arrow or the default Ctrl/Command+Enter shortcut steers only that pane.
+The outer window target or header popout button opens a separate window. Browser policy controls OS desktop drops.

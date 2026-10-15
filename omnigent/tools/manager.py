@@ -447,6 +447,12 @@ class ToolManager:
           tombstone the children it creates); without declared
           sub-agents, send's schema omits the named-mode parameters.
 
+        ``peer_messaging: true`` is a third, independent opt-in. It
+        registers ``sys_session_send`` (``session_id`` mode) when neither
+        grant above did, and lets that mode address a session outside
+        the caller's subtree that the same owner holds. Nothing else
+        (close, create, model listing) comes with it.
+
         The spawn writes are child-only and ``sys_session_share`` is
         owner-authority-bounded, both enforced at dispatch/server level;
         the opt-ins control advertisement, not authority.
@@ -473,13 +479,24 @@ class ToolManager:
             )
 
         # send + close: opt-in via declared sub-agents or spawn: true.
-        if not (self._spec.tools.agents or self._spec.spawn):
+        # ``peer_messaging: true`` on its own registers send too, in its
+        # session_id mode only, so an agent can reach a peer session
+        # without holding any spawn grant.
+        can_dispatch = bool(self._spec.tools.agents or self._spec.spawn)
+        if not (can_dispatch or self._spec.peer_messaging):
             return
 
-        sub_specs = {sa.name: sa for sa in self._spec.sub_agents if sa.name is not None}
+        sub_specs = (
+            {sa.name: sa for sa in self._spec.sub_agents if sa.name is not None}
+            if can_dispatch
+            else {}
+        )
         self._tools[SysSessionSendTool.name()] = SysSessionSendTool(
             sub_specs=sub_specs,
+            peer_messaging=self._spec.peer_messaging,
         )
+        if not can_dispatch:
+            return
         self._tools[SysSessionCloseTool.name()] = SysSessionCloseTool()
         # Model awareness pairs with the dispatch grant: the per-worker
         # listing exists to pick a valid ``args.model`` for send.

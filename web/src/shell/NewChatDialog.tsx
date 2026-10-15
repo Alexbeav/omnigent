@@ -519,7 +519,7 @@ export function ConnectHostInstructions({
           </TabsList>
           <TabsContent value="local">
             <CliCommandBlock
-              command={`omni host --server ${quotedServerUrl}`}
+              command={`omni host --server ${quotedServerUrl} --background`}
               testIdPrefix="connect-host"
             />
           </TabsContent>
@@ -536,7 +536,7 @@ export function ConnectHostInstructions({
         </Tabs>
       ) : (
         <CliCommandBlock
-          command={`omni host --server ${quotedServerUrl}`}
+          command={`omni host --server ${quotedServerUrl} --background`}
           testIdPrefix="connect-host"
         />
       )}

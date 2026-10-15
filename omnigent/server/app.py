@@ -78,6 +78,7 @@ from omnigent.runtime import (
 )
 from omnigent.runtime.agent_cache import AgentCache
 from omnigent.runtime.harnesses.process_manager import HarnessProcessManager
+from omnigent.runtime.prompt import PEER_MESSAGE_INSTRUCTION
 from omnigent.server import managed_host_keepalive, session_live_state, shutdown_state
 from omnigent.server.auth import (
     AuthProvider,
@@ -1082,6 +1083,27 @@ _ACP_AGENT_PROMPT = (
     "read and edit files, run commands, investigate, and implement changes. Work "
     "within the current repository, explain what you are doing, and when you finish "
     "a task tell the user how to verify it."
+    "\n\n"
+    "You can delegate work to child sessions, and you should reach for this on "
+    "your own initiative. Call sys_session_create to launch a child session from "
+    "any agent_id (see sys_agent_list), optionally with a first message and a "
+    "title; it returns a conversation_id. Drive that child with sys_session_send "
+    "and tombstone it with sys_session_close. Children are separate Omnigent "
+    "sessions with their own context, not your harness's built-in subagent tool. "
+    "Creating is child-only: you cannot create a top-level or sibling session. "
+    "Use this to parallelize independent "
+    "workstreams, to hand long or self-contained tasks to a focused session, or "
+    "when the user asks for a new chat or a delegate. Prefer delegating over "
+    "doing everything inline when a task splits into independent parts."
+    "\n\n"
+    "You can also message a peer: sys_session_send with the session_id of a "
+    "session that is not your child (a sibling, your parent, or another chat of "
+    "the same user) delivers your text there, marked as coming from you. Use it "
+    "to ask another agent a question or hand it a result directly instead of "
+    "routing through a parent. A peer message is not a tracked task and returns "
+    "no result; an answer, if there is one, arrives as a new message that names "
+    "the peer session it came from, and you reply the same way."
+    "\n\n" + PEER_MESSAGE_INSTRUCTION
 )
 
 
@@ -1112,6 +1134,22 @@ def _build_acp_bundle(*, harness: str, name: str) -> bytes:
         "prompt": _ACP_AGENT_PROMPT,
         "executor": {"type": "omnigent", "config": {"harness": harness}},
         "os_env": {"type": "caller_process", "cwd": ".", "sandbox": {"type": "none"}},
+        # Top-level ``spawn:`` grants the session-orchestration writes
+        # (``sys_session_create`` / ``send`` / ``close``) on top of the
+        # always-on session reads. ACP rows are generated from this
+        # template rather than an authored spec, so without the key the
+        # parser default (False) silently strips the whole surface —
+        # leaving an ACP agent unable to delegate to a child session
+        # while a native agent like polly can. Session reads are ungated
+        # either way, so this widens writes only, and only for sessions
+        # that ask for them.
+        "spawn": True,
+        # Top-level ``peer_messaging:`` lets ``sys_session_send`` reach a
+        # session outside this one's subtree that the same owner holds,
+        # so two ACP agents can talk directly instead of through a
+        # parent. Same reason for seeding it here as ``spawn`` above: the
+        # row has no authored spec that could opt in.
+        "peer_messaging": True,
     }
     with tempfile.TemporaryDirectory() as tmpdir:
         source = Path(tmpdir) / "src"

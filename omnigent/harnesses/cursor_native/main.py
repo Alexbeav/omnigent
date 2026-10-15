@@ -380,6 +380,7 @@ def _materialize_cursor_agent_spec(tmpdir: Path) -> Path:
         ),
         "executor": {"harness": "cursor-native"},
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

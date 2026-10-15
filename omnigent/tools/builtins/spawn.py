@@ -83,6 +83,12 @@ class SysSessionSendTool(Tool):
       (``parent_session_id == caller``), so an orchestrator can
       only drive sessions inside its own subtree.
 
+    With the spec's ``peer_messaging: true`` grant, the by-session-id
+    mode also accepts a target that is not a child, provided the same
+    owner holds both sessions. That is a plain message into the peer,
+    marked with the sender: no work is tracked and no result is
+    delivered back (see ``_send_to_peer_session`` in the runner).
+
     Exactly one of ``(agent + title)`` or ``session_id`` must be
     given, always with ``args``.
 
@@ -159,14 +165,18 @@ class SysSessionSendTool(Tool):
             "calling sys_read_inbox to collect the result."
         )
 
-    def __init__(self, sub_specs: dict[str, AgentSpec]) -> None:
+    def __init__(self, sub_specs: dict[str, AgentSpec], *, peer_messaging: bool = False) -> None:
         """
         Initialize with the agent's available sub-agent specs.
 
         :param sub_specs: Name-to-AgentSpec mapping, e.g.
             ``{"researcher": AgentSpec(...)}``.
+        :param peer_messaging: Whether the spec opts into
+            ``peer_messaging: true``. Changes only what the schema
+            advertises; the runner enforces the grant at dispatch.
         """
         self._sub_specs = sub_specs
+        self._peer_messaging = peer_messaging
 
     def get_schema(self) -> dict[str, Any]:
         """
@@ -179,7 +189,25 @@ class SysSessionSendTool(Tool):
         :returns: Dict with ``"type": "function"`` and a
             ``"function"`` sub-dict.
         """
-        return _build_sys_session_send_schema(self._sub_specs)
+        return _build_sys_session_send_schema(self._sub_specs, peer_messaging=self._peer_messaging)
+
+
+# Appended to the tool description when the spec opts into
+# ``peer_messaging: true``. Says what a peer send is NOT (a tracked
+# dispatch) as plainly as what it is, because the surrounding text
+# promises a result via sys_read_inbox and a peer send delivers none.
+_PEER_MESSAGING_DESCRIPTION = (
+    " Peer messaging is enabled for you: session_id may also name a "
+    "session that is NOT your child, as long as the same owner holds it "
+    "(another top-level chat, a sibling, or your parent; find ids with "
+    "sys_session_list or ask the user). A peer message arrives in that "
+    "session as a new message marked with your agent name and session "
+    "id, and starts a turn there if it is idle. A peer send is not a "
+    "tracked dispatch: no result comes back through sys_read_inbox. If "
+    "the peer answers, its reply arrives here as a new message marked "
+    "as coming from that peer session; reply the same way. Peer sends "
+    "are capped per session, so do not use them to poll."
+)
 
 
 def _spec_opts_into_harness_override(spec: Any) -> bool:
@@ -212,6 +240,8 @@ def _spec_opts_into_harness_override(spec: Any) -> bool:
 
 def _build_sys_session_send_schema(
     sub_specs: dict[str, AgentSpec],
+    *,
+    peer_messaging: bool = False,
 ) -> dict[str, Any]:
     """
     Build the OpenAI function schema for ``sys_session_send``.
@@ -225,6 +255,9 @@ def _build_sys_session_send_schema(
     enum would be both unusable and invalid for some providers.
 
     :param sub_specs: Name-to-AgentSpec mapping; may be empty.
+    :param peer_messaging: When ``True``, the description and the
+        ``session_id`` parameter also advertise sending to a session
+        outside the caller's subtree.
     :returns: OpenAI function-format schema dict.
     """
     named_mode_properties: dict[str, Any] = {}
@@ -272,6 +305,25 @@ def _build_sys_session_send_schema(
             "output when its turn completes. To run multiple sessions "
             "in parallel, emit multiple sys_session_send tool_calls in "
             "the same response — they dispatch concurrently."
+        )
+    )
+    if peer_messaging:
+        description += _PEER_MESSAGING_DESCRIPTION
+    session_id_description = (
+        (
+            "By-session-id mode: post to an existing session, e.g. "
+            "'conv_abc123'. Either a direct child of the calling "
+            "session (e.g. one returned by sys_session_create) or, as "
+            "a peer message, another session the same owner holds. "
+            "Use instead of agent + title."
+        )
+        if peer_messaging
+        else (
+            "By-session-id mode: post to an existing "
+            "child session (e.g. one returned by "
+            "sys_session_create), e.g. 'conv_abc123'. "
+            "Must be a direct child of the calling "
+            "session. Use instead of agent + title."
         )
     )
     # ``args.harness`` is allowlist-gated (design D.4): advertise it only when
@@ -332,13 +384,7 @@ def _build_sys_session_send_schema(
                     **named_mode_properties,
                     "session_id": {
                         "type": "string",
-                        "description": (
-                            "By-session-id mode: post to an existing "
-                            "child session (e.g. one returned by "
-                            "sys_session_create), e.g. 'conv_abc123'. "
-                            "Must be a direct child of the calling "
-                            "session. Use instead of agent + title."
-                        ),
+                        "description": session_id_description,
                     },
                     "args": {
                         "anyOf": [

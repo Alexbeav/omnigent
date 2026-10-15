@@ -214,6 +214,7 @@ def _materialize_goose_agent_spec(tmpdir: Path) -> Path:
         ),
         "executor": {"harness": "goose-native"},
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

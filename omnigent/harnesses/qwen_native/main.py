@@ -212,6 +212,7 @@ def _materialize_qwen_agent_spec(tmpdir: Path) -> Path:
         ),
         "executor": {"harness": "qwen-native"},
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

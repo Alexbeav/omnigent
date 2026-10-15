@@ -32,6 +32,15 @@ task cancellation and assertions stay in the scenarios that own them.
 Keep it here: moving it to the adapter parent would change unrelated tests.
 The OpenTelemetry exporter fixture remains local to `test_usage.py`.
 
+Claude's `api-request-blob` records are provider request snapshots, not new
+messages. The transcript reader excludes them from mirrored history, including
+their native reminders. The renderer also hides `<system-reminder>` blocks in
+existing user messages without changing stored content or Claude's input.
+`../test_claude_native_request_blobs.py` covers both transcript readers, history
+reconstruction, and two consecutive submissions to the terminal paste boundary.
+Existing polluted store rows and reconstructed transcripts require a separate
+repair. This filter does not rewrite them.
+
 Run the forwarder suite with:
 
 ```sh

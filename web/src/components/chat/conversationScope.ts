@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
-import { useChatStore } from "@/store/chatStore";
+import { useChatStore, type ConversationState } from "@/store/chatStore";
+import { useConversationEntryState } from "@/hooks/useConversationEntryState";
 
 /**
  * The conversation a bubble subtree belongs to. `null` (the default) means the
@@ -23,4 +24,12 @@ export function useScopedConversationId(): string | null {
   const scoped = useContext(ConversationScopeContext);
   const active = useChatStore((s) => s.conversationId);
   return scoped ?? active;
+}
+
+/** Read configuration from this pane without projecting it onto the primary chat. */
+export function useScopedConversationState<T>(selector: (state: ConversationState) => T): T {
+  const scoped = useContext(ConversationScopeContext);
+  const active = useChatStore((state) => (scoped === null ? selector(state) : null));
+  const entry = useConversationEntryState(scoped);
+  return scoped === null ? (active as T) : selector(entry);
 }

@@ -257,6 +257,18 @@ executor:
 CLI flags such as `--harness qwen` and `--model <id>` can override or supply
 missing executor values.
 
+## Peer messages between sessions
+
+Set `peer_messaging: true` at the top level of a custom agent spec to let
+`sys_session_send` message independent sessions owned by the same user.
+Shared edit or manage access does not grant peer messaging.
+The receiver sees the sending agent and session in a marked message.
+Peer messages can start or steer a turn, and they do not grant user approval.
+
+Generated native chat agents and generated ACP agents enable this capability.
+Custom specs default to false, independently of the `spawn` capability.
+Existing sessions keep their resolved agent spec until they use an updated definition.
+
 ## Custom ACP agents
 
 `harness: acp:<slug>` runs any configured Agent Client Protocol server command.

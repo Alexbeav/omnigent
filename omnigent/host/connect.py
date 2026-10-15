@@ -5022,6 +5022,34 @@ def _generate_ucode_configs() -> None:
     )
 
 
+def _configure_utf8_stdio() -> None:
+    """
+    Force UTF-8 on stdout/stderr for this process tree.
+
+    Windows Python defaults these streams to the ANSI code page (Cp1252 or
+    Cp1253, for example). Every status line this host prints uses box-drawing
+    and check characters, so an unconfigured stream raises UnicodeEncodeError
+    on the first ``print`` and kills the process. That is what made the daemon
+    exit before it could report a successful connection. Keep ``errors``
+    lenient: a console that cannot render a glyph must degrade the glyph, not
+    abort the host.
+
+    The harnesses this host spawns inherit the interpreter, so configuring
+    here also covers Codex reading its own config file, which failed the same
+    way with a UnicodeDecodeError under the same code page. ``PYTHONUTF8`` is
+    set for grandchildren that spawn a fresh interpreter.
+
+    :returns: None.
+    """
+    os.environ.setdefault("PYTHONUTF8", "1")
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with contextlib.suppress(Exception):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def run_host_process(
     server_url: str,
     config_path: Path | None = None,
@@ -5053,6 +5081,7 @@ def run_host_process(
         loopback server that is gone). The actionable cause is printed
         to stderr first.
     """
+    _configure_utf8_stdio()
     host_log_path = configure_process_logging(
         "host",
         log_to_stderr=should_log_to_stderr() or sys.stderr.isatty(),

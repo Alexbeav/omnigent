@@ -167,8 +167,9 @@ class IntegrationDaemon:
 
         log_path, log_fh = open_process_log_file(self.name)
         env = {**env, PROCESS_LOG_FILE_ENV_VAR: str(log_path)}
-        # Detached: own session/process group (spawn_kwargs), stdin closed,
-        # stdout+stderr to the log file. Mirrors the host daemon spawn.
+        # Detached: own session/process group (daemon_spawn_kwargs) and, on
+        # Windows, its own console so it survives the launching terminal;
+        # stdin closed, stdout+stderr to the log file. Mirrors the host daemon.
         try:
             with child_logging_popen_kwargs(env) as logging_kwargs:
                 proc = subprocess.Popen(
@@ -178,7 +179,7 @@ class IntegrationDaemon:
                     stdin=subprocess.DEVNULL,
                     stdout=log_fh,
                     stderr=log_fh,
-                    **_proc.spawn_kwargs(),
+                    **_proc.daemon_spawn_kwargs(),
                     **logging_kwargs,
                 )
         finally:

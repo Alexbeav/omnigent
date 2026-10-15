@@ -37,6 +37,7 @@ import { HeaderConversationMenu } from "./HeaderConversationMenu";
 import { SessionActionMenuItem } from "@/components/SessionActionMenuItem";
 import { HeaderProjectTag } from "./HeaderProjectTag";
 import { HeaderTitle } from "./HeaderTitle";
+import { PermissionModeBadge } from "./PermissionModeBadge";
 import { UNTITLED_CONVERSATION_LABEL } from "./sidebarNav";
 import { PresenceAvatars } from "@/components/PresenceAvatars";
 import type { Agent } from "@/hooks/useAgents";
@@ -48,6 +49,7 @@ import { MOBILE_GLASS_SURFACE } from "./mobileGlass";
 import { TAB_BADGE_BASE } from "./railTabs";
 import { ViewModeMenuItems, ViewModeToggle } from "./ViewModeToggle";
 import { SidebarOpenButton } from "./SidebarOpenButton";
+import type { ReactNode } from "react";
 
 const RIGHT_PANEL_KEYS = [MOD_KEY, ALT_KEY, "]"] as const;
 
@@ -118,6 +120,8 @@ interface MobileSessionMenuProps {
  * stays in one place.
  */
 interface ChatHeaderProps {
+  /** Compact desktop controls for the multi-pane layout. */
+  paneControl?: ReactNode;
   /** Whether the left sidebar is open (hides the open-sidebar button). */
   sidebarOpen: boolean;
   /** Open the left sidebar. */
@@ -320,6 +324,7 @@ function PendingHeaderActions({ isMobile }: { isMobile: boolean }) {
  * All state lives in AppShell — this is a pure presentational component.
  */
 export function ChatHeader({
+  paneControl,
   sidebarOpen,
   onOpenSidebar,
   settingsMode = false,
@@ -587,24 +592,31 @@ export function ChatHeader({
             collapsed, the slot's traffic-light-clearance pads it past the
             window controls + title-bar cluster (index.css). */}
         {conversationId && (conversationTitle || titleLinkTo) && (
-          <ConversationBreadcrumb
-            conversationTitle={conversationTitle ?? UNTITLED_CONVERSATION_LABEL}
-            projectName={projectName}
-            projectIcon={projectIcon}
-            projectTag={projectTag ?? undefined}
-            titleSlot={titleSlot ?? undefined}
-            titleLinkTo={titleLinkTo}
-            isChildSession={isChildSession}
-            subAgentName={subAgentName}
-            boundAgent={boundAgent}
-            wrapperLabel={wrapperLabel}
-            actions={isMobile ? undefined : (conversationMenu ?? undefined)}
-            className="pr-1"
-          />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <ConversationBreadcrumb
+              conversationTitle={conversationTitle ?? UNTITLED_CONVERSATION_LABEL}
+              projectName={projectName}
+              projectIcon={projectIcon}
+              projectTag={projectTag ?? undefined}
+              titleSlot={titleSlot ?? undefined}
+              titleLinkTo={titleLinkTo}
+              isChildSession={isChildSession}
+              subAgentName={subAgentName}
+              boundAgent={boundAgent}
+              wrapperLabel={wrapperLabel}
+              actions={isMobile ? undefined : (conversationMenu ?? undefined)}
+              className="pr-1"
+            />
+            {/* Approval mode, next to the breadcrumb's host icon. Self-
+                contained (reads the chat store), so it renders nothing on
+                non-claude-native sessions and while the mode is unknown. */}
+            <PermissionModeBadge />
+          </div>
         )}
       </div>
 
       <div className="flex items-center gap-2 max-md:gap-0 max-md:empty:hidden">
+        {paneControl}
         {/* Other users currently viewing this session (presence).
             Self-contained — reads the chat store directly, renders
             nothing when the user is alone. */}

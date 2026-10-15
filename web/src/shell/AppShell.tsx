@@ -15,6 +15,7 @@ import { Outlet, useLocation, useParams, useRebasePath, useSearchParams } from "
 import { CANVAS_CONVERSATION_MIN_WIDTH, CanvasWorkspace } from "@/canvas/CanvasWorkspace";
 import { isCanvasPathname } from "@/canvas/canvasNavigation";
 import { useCanvasSidebar } from "@/canvas/useCanvasSidebar";
+import { ExternalLinkIcon } from "lucide-react";
 import { PROJECT_LABEL_KEY, type Conversation, useProjects } from "@/hooks/useConversations";
 import { conversationDisplayLabel, UNTITLED_CONVERSATION_LABEL } from "./sidebarNav";
 import { useSessionAgent } from "@/hooks/useAgents";
@@ -92,6 +93,7 @@ import {
   useWorkspaceEnvironment,
 } from "@/hooks/useWorkspaceChangedFiles";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import {
   isNativeWrapper as isNativeWrapperLabel,
   nativeCodingAgentForSubagentWrapper,
@@ -147,6 +149,13 @@ import { resolveDefaultShell } from "./preferredShell";
 import { WorkspacePanel } from "./WorkspacePanel";
 import { SessionRail } from "./SessionRail";
 import type { RightRailTab } from "./railTabs";
+import {
+  buildPanePopoutUrl,
+  ConversationPanes,
+  MAX_CHAT_PANES,
+  normalizePaneIds,
+  normalizePaneOrder,
+} from "./ConversationPanes";
 
 // Dev-only preview; lazy so the sample data never ships in production bundles.
 const ImportContextPreview = import.meta.env.DEV
@@ -351,6 +360,72 @@ export function AppShell() {
   // Live open fraction (0→1) while the iOS edge-swipe drags the sidebar; null
   // when not dragging. Drives the mobile overlay's finger-tracking transform.
   const [sidebarDragProgress, setSidebarDragProgress] = useState<number | null>(null);
+  const panesParam = searchParams.get("panes");
+  const paneOrderParam = searchParams.get("paneOrder");
+  const paneIds = useMemo(
+    () => normalizePaneIds(conversationId, panesParam),
+    [conversationId, panesParam],
+  );
+  const paneOrder = useMemo(
+    () => normalizePaneOrder(conversationId, paneIds, paneOrderParam),
+    [conversationId, paneIds, paneOrderParam],
+  );
+  const setPaneLayout = useCallback(
+    (ids: string[], order: string[]) => {
+      setSearchParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          if (ids.length > 0) next.set("panes", ids.join(","));
+          else next.delete("panes");
+          const defaultOrder = [conversationId, ...ids].filter(Boolean);
+          if (order.join(",") === defaultOrder.join(",")) next.delete("paneOrder");
+          else next.set("paneOrder", order.join(","));
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [conversationId, setSearchParams],
+  );
+  const placePane = useCallback(
+    (id: string, targetId: string, side: "left" | "right") => {
+      if (!conversationId || id === targetId) return;
+      const alreadyOpen = id === conversationId || paneIds.includes(id);
+      if (!alreadyOpen && paneIds.length >= MAX_CHAT_PANES - 1) return;
+      const nextIds = alreadyOpen
+        ? paneIds
+        : normalizePaneIds(conversationId, [...paneIds, id].join(","));
+      const nextOrder = normalizePaneOrder(conversationId, nextIds, paneOrder.join(",")).filter(
+        (paneId) => paneId !== id,
+      );
+      const targetIndex = nextOrder.indexOf(targetId);
+      if (targetIndex < 0) return;
+      nextOrder.splice(targetIndex + (side === "right" ? 1 : 0), 0, id);
+      setPaneLayout(nextIds, nextOrder);
+    },
+    [conversationId, paneIds, paneOrder, setPaneLayout],
+  );
+  const addPane = useCallback(
+    (id: string) => placePane(id, paneOrder.at(-1) ?? conversationId ?? "", "right"),
+    [conversationId, paneOrder, placePane],
+  );
+  const closePane = useCallback(
+    (id: string) => {
+      const nextIds = paneIds.filter((paneId) => paneId !== id);
+      setPaneLayout(
+        nextIds,
+        paneOrder.filter((paneId) => paneId !== id),
+      );
+    },
+    [paneIds, paneOrder, setPaneLayout],
+  );
+  const popoutPane = useCallback(
+    (id: string) => {
+      const url = buildPanePopoutUrl(window.location.href, id, rebasePath);
+      window.open(url, "_blank", "popup,noopener,noreferrer");
+    },
+    [rebasePath],
+  );
   // The iOS shell repurposes the left-edge swipe (normally back-navigation) to
   // drive the sidebar as an interactive drawer, streaming it over the native
   // bridge. begin/move track the finger (mobile overlay only — the desktop
@@ -2326,6 +2401,122 @@ export function AppShell() {
     focusWorkspaceTabs();
   }, [workspacePanelVisible, focusWorkspaceTabs]);
 
+  const paneChoices = (allConversations ?? []).filter(
+    (conversation) => conversation.id !== conversationId && !paneIds.includes(conversation.id),
+  );
+  const chatHeader = !extensionOwnsHeader && (
+    <ChatHeader
+      paneControl={
+        conversationId ? (
+          <div className="hidden shrink-0 items-center gap-1 md:flex">
+            {paneIds.length < MAX_CHAT_PANES - 1 && paneChoices.length > 0 && (
+              <label className="flex items-center">
+                <span className="sr-only">Add chat pane</span>
+                <select
+                  aria-label="Add chat pane"
+                  className="h-7 w-24 rounded-md border border-border bg-background px-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring xl:w-32"
+                  value=""
+                  onChange={(event) => {
+                    if (event.target.value) addPane(event.target.value);
+                  }}
+                >
+                  <option value="">Add pane…</option>
+                  {paneChoices.map((conversation) => (
+                    <option key={conversation.id} value={conversation.id}>
+                      {conversation.title ?? conversation.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Open primary chat in a new window"
+              onClick={() => popoutPane(conversationId)}
+            >
+              <ExternalLinkIcon className="size-4" />
+            </Button>
+          </div>
+        ) : null
+      }
+      // Real docked state — deliberately NOT `|| sidebarPeek`. Peek
+      // is a transient card floating over the collapsed layout (the
+      // docked sidebar stays w-0), so the header must keep its
+      // collapsed left slot. Treating peek as open relaid it out —
+      // the toggle unmounted and the breadcrumb slid left into its
+      // spot — shifting the title sideways the instant the peek card
+      // appeared. Left collapsed, the breadcrumb stays put beneath
+      // the floating card (and in the title-bar strip on mac).
+      sidebarOpen={sidebarOpen}
+      onOpenSidebar={(peek?: boolean) => {
+        if (peek) {
+          setSidebarPeek(true);
+          setSidebarOpen(false);
+        } else {
+          setSidebarOpen(true);
+          setSidebarPeek(false);
+        }
+      }}
+      isChildSession={isChildSession}
+      subAgentName={activeSession?.subAgentName ?? null}
+      conversationId={conversationId}
+      permissionLevel={permissionLevel}
+      actionConversation={actionConversation}
+      conversationTitle={headerConversationTitle}
+      projectName={headerProjectName}
+      projectIcon={headerProjectIcon}
+      titleLinkTo={headerTitleLinkTo}
+      boundAgent={boundAgent}
+      wrapperLabel={wrapperLabel}
+      canShare={canShare}
+      canFork={canClone}
+      shareDisabled={shareDisabled}
+      shareDisabledReason={shareDisabledReason}
+      onShare={() => setShareOpen(true)}
+      onFork={() => forkDialogContextValue.openForkDialog()}
+      hasAgentInfo={hasAgentInfo}
+      onAgentInfo={() => setAgentInfoOpen(true)}
+      hasHeaderMenu={hasHeaderMenu}
+      showFilesPanel={showFilesPanel}
+      hasRailContent={hasRailContent}
+      rightPanelOpen={rightPanelOpen}
+      onToggleRightPanel={toggleRightPanel}
+      pending={pendingConversation}
+      mobileMenu={{
+        fileViewerOpen,
+        panelOpen,
+        terminalFirst,
+        executionLogsOpen,
+        filesPanelOpen,
+        subagentsPanelOpen,
+        shellsPanelOpen,
+        githubPanelOpen,
+        sideChatsPanelOpen,
+        showSideChats,
+        hideTerminalsTab,
+        // Mobile: reachable when a shell exists OR the agent
+        // declares shell access (so the drawer's "+ New shell" row
+        // can create the first one). Desktop rail tab stays gated
+        // on an existing shell (railTabsAvailable.terminals).
+        showShellsTab: !hideTerminalsTab && (railTerminals.length > 0 || agentSupportsShells),
+        terminalsLength: railTerminals.length,
+        debugMode,
+        changedCount,
+        subagentsWorking,
+        agentCount,
+        onOpenFiles: openFilesPanel,
+        onOpenChanges: openChangesPanel,
+        onOpenShells: openShellsPanel,
+        onOpenSubagents: openSubagentsPanel,
+        onOpenGithub: openGithubPanel,
+        onOpenSideChats: openSideChatsPanel,
+        onOpenMainExecutionLog: openMainExecutionLog,
+      }}
+    />
+  );
+
   return (
     <FileViewerContext.Provider value={fileViewerContextValue}>
       <TerminalFirstContextProvider value={terminalFirstContextValue}>
@@ -2414,6 +2605,8 @@ export function AppShell() {
               dragProgress={sidebarDragProgress}
               onClose={handleSidebarClose}
               onOpenSearch={handleOpenSearch}
+              onSplitConversation={placePane}
+              onPopoutConversation={popoutPane}
             />
 
             {/* Content region (everything right of the sidebar): a relative
@@ -2449,84 +2642,27 @@ export function AppShell() {
                   } as CSSProperties
                 }
               >
-                {!extensionOwnsHeader && (
-                  <ChatHeader
-                    // Real docked state — deliberately NOT `|| sidebarPeek`. Peek
-                    // is a transient card floating over the collapsed layout (the
-                    // docked sidebar stays w-0), so the header must keep its
-                    // collapsed left slot. Treating peek as open relaid it out —
-                    // the toggle unmounted and the breadcrumb slid left into its
-                    // spot — shifting the title sideways the instant the peek card
-                    // appeared. Left collapsed, the breadcrumb stays put beneath
-                    // the floating card (and in the title-bar strip on mac).
-                    sidebarOpen={sidebarOpen}
-                    settingsMode={inSettings}
-                    onOpenSidebar={handleSidebarOpen}
-                    isChildSession={isChildSession}
-                    subAgentName={activeSession?.subAgentName ?? null}
-                    conversationId={conversationId}
-                    permissionLevel={permissionLevel}
-                    actionConversation={actionConversation}
-                    conversationTitle={headerConversationTitle}
-                    projectName={headerProjectName}
-                    projectIcon={headerProjectIcon}
-                    titleLinkTo={headerTitleLinkTo}
-                    boundAgent={boundAgent}
-                    wrapperLabel={wrapperLabel}
-                    canShare={canShare}
-                    canFork={canClone}
-                    forkDisabledReason={forkDisabledReason}
-                    shareDisabled={shareDisabled}
-                    shareDisabledReason={shareDisabledReason}
-                    onShare={() => setShareOpen(true)}
-                    onFork={() => forkDialogContextValue.openForkDialog()}
-                    hasAgentInfo={hasAgentInfo}
-                    onAgentInfo={() => setAgentInfoOpen(true)}
-                    hasHeaderMenu={hasHeaderMenu}
-                    showFilesPanel={showFilesPanel}
-                    hasRailContent={hasRailContent}
-                    rightPanelOpen={rightPanelOpen}
-                    onToggleRightPanel={toggleRightPanel}
-                    pending={pendingConversation}
-                    mobileMenu={{
-                      fileViewerOpen,
-                      panelOpen,
-                      terminalFirst,
-                      executionLogsOpen,
-                      filesPanelOpen,
-                      subagentsPanelOpen,
-                      shellsPanelOpen,
-                      githubPanelOpen,
-                      sideChatsPanelOpen,
-                      showSideChats,
-                      hideTerminalsTab,
-                      // Mobile: reachable when a shell exists OR the agent
-                      // declares shell access (so the drawer's "+ New shell" row
-                      // can create the first one). Desktop rail tab stays gated
-                      // on an existing shell (railTabsAvailable.terminals).
-                      showShellsTab:
-                        !hideTerminalsTab && (railTerminals.length > 0 || agentSupportsShells),
-                      terminalsLength: railTerminals.length,
-                      debugMode,
-                      changedCount,
-                      subagentsWorking,
-                      agentCount,
-                      onOpenFiles: openFilesPanel,
-                      onOpenChanges: openChangesPanel,
-                      onOpenShells: openShellsPanel,
-                      onOpenSubagents: openSubagentsPanel,
-                      onOpenGithub: openGithubPanel,
-                      onOpenSideChats: openSideChatsPanel,
-                      onOpenMainExecutionLog: openMainExecutionLog,
-                    }}
-                  />
-                )}
                 <main
                   className="relative flex min-h-0 min-w-0 flex-1 flex-col"
                   data-shell-header={extensionOwnsHeader ? "hidden" : "visible"}
                   data-session-id={conversationId}
                 >
-                  <Outlet />
+                  {conversationId ? (
+                    <ConversationPanes
+                      primary={<Outlet />}
+                      header={chatHeader}
+                      primaryId={conversationId}
+                      paneOrder={paneOrder}
+                      conversations={allConversations ?? []}
+                      onClose={closePane}
+                      onPopout={popoutPane}
+                    />
+                  ) : (
+                    <>
+                      {chatHeader}
+                      <Outlet />
+                    </>
+                  )}
                 </main>
 
                 {/* Debug-mode execution-logs rail — desktop only, hidden when a

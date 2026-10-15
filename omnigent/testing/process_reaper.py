@@ -23,7 +23,9 @@ Entry point: :func:`reap_leaked_omnigent_processes`.
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
+import time
 from pathlib import Path
 
 import psutil
@@ -35,6 +37,36 @@ _REAP_TIMEOUT_S = 10.0
 # Post-SIGKILL wait: KILL is not ignorable, so survivors vanish fast; a
 # short bound keeps total teardown near the TERM grace, not double it.
 _KILL_WAIT_S = 5.0
+
+
+def _process_is_alive(proc: psutil.Process) -> bool:
+    """Return whether an owned process still runs, treating zombies as exited."""
+    try:
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+    except psutil.Error:
+        return True
+
+
+def _wait_procs(
+    processes: list[psutil.Process], timeout: float
+) -> tuple[list[psutil.Process], list[psutil.Process]]:
+    """Wait for owned processes, with a narrow fallback for unsupported pidfds."""
+    try:
+        return psutil.wait_procs(processes, timeout=timeout)
+    except OSError as exc:
+        if exc.errno != errno.EINVAL:
+            raise
+    deadline = time.monotonic() + timeout
+    alive = list(processes)
+    while alive and time.monotonic() < deadline:
+        alive = [proc for proc in alive if _process_is_alive(proc)]
+        if alive:
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+    alive = [proc for proc in alive if _process_is_alive(proc)]
+    alive_pids = {proc.pid for proc in alive}
+    return [proc for proc in processes if proc.pid not in alive_pids], alive
 
 
 def _proc_argv(proc: psutil.Process) -> list[str]:
@@ -151,11 +183,11 @@ def reap_leaked_omnigent_processes(
     for proc in leaked:
         with contextlib.suppress(psutil.Error, OSError):
             proc.terminate()
-    _, alive = psutil.wait_procs(leaked, timeout=timeout)
+    _, alive = _wait_procs(leaked, timeout)
     for proc in alive:
         with contextlib.suppress(psutil.Error, OSError):
             proc.kill()
-    _, survivors = psutil.wait_procs(alive, timeout=_KILL_WAIT_S)
+    _, survivors = _wait_procs(alive, _KILL_WAIT_S)
     survivor_pids = {proc.pid for proc in survivors}
     reaped = [cmd for pid, cmd in cmdline_by_pid.items() if pid not in survivor_pids]
     return reaped, [cmdline_by_pid[pid] for pid in survivor_pids]

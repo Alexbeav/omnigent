@@ -9,6 +9,8 @@ equivalents:
 * :func:`spawn_kwargs` — the ``Popen``/``create_subprocess_exec`` keyword args
   that put a child in its own group/session (so signals don't leak to the
   parent and the whole tree can be torn down).
+* :func:`daemon_spawn_kwargs` — the same, plus Windows ``DETACHED_PROCESS``, for
+  long-lived background daemons that must survive the launching terminal.
 * :func:`terminate_tree` / :func:`kill_tree` — recursively stop a process and
   all of its descendants, using the process-group fast path on POSIX and
   :mod:`psutil` walking on every platform.
@@ -91,6 +93,15 @@ _owned_process_identities: weakref.WeakKeyDictionary[object, dict[int, float]] =
 _CENSUS_MAX_ITERATIONS = 3
 _CENSUS_MAX_SECONDS = 0.05
 
+# Windows only. DETACHED_PROCESS gives the child a brand-new console instead of
+# inheriting the parent's, which is what lets it outlive the terminal that
+# launched it. CREATE_NEW_PROCESS_GROUP alone does NOT do this: the child still
+# shares the parent's console, so closing that terminal (or the shell exiting)
+# delivers CTRL_CLOSE_EVENT / console teardown to it and the daemon dies.
+# Resolved via getattr so this module still imports on POSIX, where the flag
+# does not exist.
+_DETACHED_PROCESS = int(getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+
 
 class SpawnKwargs(TypedDict, total=False):
     """Platform-specific process-group arguments accepted by subprocess APIs."""
@@ -127,12 +138,42 @@ def spawn_kwargs() -> SpawnKwargs:
     so the child is in its own Ctrl-C group and can be torn down independently
     of the parent console.
 
+    This does NOT make the child survive the parent's console being closed on
+    Windows — use :func:`daemon_spawn_kwargs` for anything that must outlive
+    the launching terminal.
+
     Pass via ``**spawn_kwargs()`` to :class:`subprocess.Popen` or
     :func:`asyncio.create_subprocess_exec`.
     """
     if IS_POSIX:
         return {"start_new_session": True}
     return {"creationflags": _CREATE_NEW_PROCESS_GROUP}
+
+
+def daemon_spawn_kwargs() -> SpawnKwargs:
+    """
+    Keyword args for a child that must outlive the launching terminal.
+
+    Same group/session isolation as :func:`spawn_kwargs`, plus — on Windows —
+    ``DETACHED_PROCESS``, so the child gets its own console rather than
+    inheriting the parent's. Without it, closing the terminal that ran the
+    launch tears down the shared console and kills the "background" daemon
+    with it: the process is in its own Ctrl-C group, but still attached to the
+    console being destroyed.
+
+    Use this for long-lived background daemons (the host daemon, the local
+    server, integration daemons) and NOT for harness/executor children, which
+    are supervised through their parent's pipes and should die with it.
+
+    :returns: Mapping to merge into a child ``Popen`` call, e.g.
+        ``{"start_new_session": True}`` on POSIX or
+        ``{"creationflags": CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS}`` on
+        Windows.
+    """
+    kwargs = spawn_kwargs()
+    if not IS_POSIX:
+        kwargs["creationflags"] = _CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS
+    return kwargs
 
 
 def remember_process_group(process: _ProcessLike) -> None:

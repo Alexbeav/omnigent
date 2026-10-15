@@ -10893,6 +10893,100 @@ describe("chatStore — session configuration scope", () => {
     expect(useChatStore.getState().codexApprovalMode).toBe("");
   });
 
+  it("keeps split-pane model, effort and permission writes on their own conversation", async () => {
+    const pane = "conv_scoped_config";
+    const primary = "conv_scoped_primary";
+    seedSession(pane, []);
+    seedSession(primary, []);
+    withSnapshot(pane, {
+      labels: {
+        "omnigent.wrapper": "claude-code-native-ui",
+        "omnigent.claude_native.permission_mode": "default",
+      },
+      model_override: "opus",
+      reasoning_effort: "high",
+    });
+    await useChatStore.getState().switchTo(pane);
+    await useChatStore.getState().switchTo(primary);
+    const before = useChatStore.getState();
+    const fetchSnapshot = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === `/v1/sessions/${pane}` && init?.method === "PATCH") {
+        const body = JSON.parse(init.body as string) as Record<string, unknown>;
+        return mockResponse({
+          id: pane,
+          agent_id: "agent_xyz",
+          status: "idle",
+          created_at: 0,
+          items: [],
+          model_override: "sonnet",
+          labels: {
+            "omnigent.wrapper": "claude-code-native-ui",
+            "omnigent.claude_native.permission_mode": body.permission_mode ?? "default",
+          },
+        });
+      }
+      return fetchSnapshot(input, init);
+    });
+    fetchMock.mockClear();
+
+    await before.setModel("sonnet", { conversationId: pane });
+    await before.setEffort("low", pane);
+    await before.setClaudePermissionMode("auto", pane);
+
+    expect(patchCallsFor(primary)).toEqual([]);
+    expect(patchCallsFor(pane)).toEqual([
+      { model_override: "sonnet" },
+      { reasoning_effort: "low" },
+      { permission_mode: "auto" },
+    ]);
+    expect(conversationRegistry.peek(pane)?.getState()).toMatchObject({
+      sessionModelOverride: "sonnet",
+      sessionReasoningEffort: "low",
+      claudePermissionMode: "auto",
+    });
+    expect(useChatStore.getState()).toMatchObject({
+      conversationId: primary,
+      sessionModelOverride: before.sessionModelOverride,
+      sessionReasoningEffort: before.sessionReasoningEffort,
+      claudePermissionMode: before.claudePermissionMode,
+    });
+  });
+
+  it("keeps split-pane approval, plan and routing changes out of the primary chat", async () => {
+    const pane = "conv_scoped_codex";
+    const primary = "conv_scoped_primary";
+    seedSession(pane, []);
+    seedSession(primary, []);
+    withSnapshot(pane, { labels: { "omnigent.wrapper": "codex-native-ui" } });
+    await useChatStore.getState().switchTo(pane);
+    await useChatStore.getState().switchTo(primary);
+    const before = useChatStore.getState();
+    fetchMock.mockClear();
+
+    await before.setCodexApprovalMode("approve-for-me", pane);
+    await before.setCodexPlanMode(true, pane);
+    await before.setCostControlMode("on", pane);
+
+    expect(patchCallsFor(primary)).toEqual([]);
+    expect(patchCallsFor(pane)).toEqual([
+      { approval_mode: "approve-for-me" },
+      { collaboration_mode: "plan" },
+      { cost_control_mode_override: "on" },
+    ]);
+    expect(conversationRegistry.peek(pane)?.getState()).toMatchObject({
+      codexApprovalMode: "approve-for-me",
+      codexPlanMode: true,
+      costControlModeOverride: "on",
+    });
+    expect(useChatStore.getState()).toMatchObject({
+      conversationId: primary,
+      codexApprovalMode: before.codexApprovalMode,
+      codexPlanMode: before.codexPlanMode,
+      costControlModeOverride: before.costControlModeOverride,
+    });
+  });
+
   it("PATCHes Codex approval mode and settles from the returned label", async () => {
     seedSession("conv_approval_toggle", []);
     withSnapshot("conv_approval_toggle", { labels: { "omnigent.wrapper": "codex-native-ui" } });
@@ -17397,6 +17491,29 @@ describe("chatStore — background cross-session flush", () => {
         return { id, text };
       });
 
+  it.each(["claude-native", "codex-native", "claude-sdk", "openai-agents"])(
+    "keeps a busy %s pane queued when the sidebar still reports idle",
+    async (sessionHarness) => {
+      seedConversationsCache([conv("conv_active", "idle"), conv("conv_bg", "idle")]);
+      bindConversationForTest("conv_bg", {
+        sessionHarness,
+        boundAgentId: "agent_xyz",
+        sessionStatus: "running",
+        status: "idle",
+      });
+      bindConversationForTest("conv_active");
+      useChatStore.setState({
+        queuedMessages: [{ queueId: "q_1", text: "wait", conversationId: "conv_bg" }],
+      });
+
+      useChatStore.getState().flushBackgroundQueues();
+      await tick();
+
+      expect(eventPosts()).toEqual([]);
+      expect(useChatStore.getState().queuedMessages.map((m) => m.text)).toEqual(["wait"]);
+    },
+  );
+
   it("flushes an idle non-active conversation's head via postEvent", async () => {
     // Viewing conv_active; conv_bg is idle in the sidebar cache with a queue.
     seedConversationsCache([conv("conv_active", "running"), conv("conv_bg", "idle")]);
@@ -17572,6 +17689,45 @@ describe("chatStore — background cross-session flush", () => {
     expect(useChatStore.getState().queuedMessages).toEqual([]);
   });
 
+  it("posts a MIME-less picture as an image block", async () => {
+    seedConversationsCache([conv("conv_active", "running"), conv("conv_bg", "idle")]);
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/sessions/conv_bg/resources/files") && init?.method === "POST") {
+        return mockResponse({
+          id: "file_bg_no_mime",
+          name: "shot.png",
+          metadata: { filename: "shot.png", bytes: 4, created_at: 0 },
+        });
+      }
+      return defaultFetchHandler(input, init);
+    });
+    const file = new File(["png!"], "shot.png");
+    useChatStore.setState({
+      conversationId: "conv_active",
+      queuedMessages: [
+        { queueId: "q_1", text: "see this", conversationId: "conv_bg", files: [file] },
+      ],
+    });
+
+    useChatStore.getState().flushBackgroundQueues();
+    await tick();
+    await tick();
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith("/v1/sessions/conv_bg/events") &&
+        (init as RequestInit | undefined)?.method === "POST",
+    );
+    expect(post).toBeDefined();
+    const content = JSON.parse((post![1] as RequestInit).body as string).data.content;
+    expect(content[0]).toEqual({
+      type: "input_image",
+      file_id: "file_bg_no_mime",
+      filename: "shot.png",
+    });
+  });
+
   it("re-queues the message when the attachment upload fails", async () => {
     // A failure in the upload phase must re-queue + cool down exactly like a
     // failed POST — the guard spans upload and post together.
@@ -17667,7 +17823,7 @@ describe("chatStore — background cross-session flush", () => {
     });
   });
 
-  it("serializes a background flush behind an in-flight foreground send to the SAME conversation", async () => {
+  it("keeps a navigated-away conversation queued until its foreground turn becomes idle", async () => {
     // The navigate-away race: a send() for conv_a is still in flight (its
     // /events POST held open) when the user switches away and conv_a's
     // remaining queue hands off to the background flush. Both POST paths take a
@@ -17719,9 +17875,14 @@ describe("chatStore — background cross-session flush", () => {
     await tick();
     expect(delivered).toEqual(["fg-msg"]);
 
-    // Release the foreground POST → the background POST is free to deliver.
+    // Acknowledging the POST does not finish the turn. The live stream must
+    // report idle before a background queue may deliver its next message.
     releaseForeground();
     await fg;
+    await tick();
+    expect(delivered).toEqual(["fg-msg"]);
+    conversationRegistry.peek("conv_a")!.setState({ status: "idle", sessionStatus: "idle" });
+    useChatStore.getState().flushBackgroundQueues();
     await tick();
     await tick();
     expect(delivered).toEqual(["fg-msg", "bg-msg"]);

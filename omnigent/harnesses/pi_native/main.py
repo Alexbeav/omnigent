@@ -299,6 +299,7 @@ def _materialize_pi_agent_spec(tmpdir: Path) -> Path:
         ),
         "executor": {"harness": "pi-native"},
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

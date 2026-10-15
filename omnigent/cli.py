@@ -3174,7 +3174,10 @@ def _spawn_host_daemon_process(
                 stdin=subprocess.DEVNULL,
                 stdout=log_fh,
                 stderr=log_fh,
-                **_proc.spawn_kwargs(),
+                # This daemon must outlive the terminal that launched it, so
+                # detach from that console (Windows DETACHED_PROCESS) rather
+                # than merely taking a new Ctrl-C group.
+                **_proc.daemon_spawn_kwargs(),
                 **logging_kwargs,
             )
     except OSError:
@@ -7484,7 +7487,7 @@ def _materialize_harness_launcher_file(
             raise click.ClickException("An ephemeral ACP agent requires the acp harness.")
         # Embed all fields that affect spawn so the remote server sees the same
         # agent config as the client. Preserve session_id_mode, send_model,
-        # omnigent_mcp, env_passthrough, and model.
+        # omnigent_mcp, permission_mode, env_passthrough, and model.
         agent_dict: dict[str, object] = {
             "name": acp_agent.name,
             "command": acp_agent.command,
@@ -7497,6 +7500,8 @@ def _materialize_harness_launcher_file(
             agent_dict["send_model"] = acp_agent.send_model
         if not acp_agent.omnigent_mcp:
             agent_dict["omnigent_mcp"] = acp_agent.omnigent_mcp
+        if acp_agent.permission_mode != "auto":
+            agent_dict["permission_mode"] = acp_agent.permission_mode
         if acp_agent.env_passthrough:
             agent_dict["env_passthrough"] = list(acp_agent.env_passthrough)
         executor["acp_agent"] = agent_dict

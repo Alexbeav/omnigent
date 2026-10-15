@@ -53,6 +53,7 @@ import math
 import os
 import secrets
 import shlex
+import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -172,6 +173,21 @@ if not math.isfinite(_PROMPT_TIMEOUT_SECONDS) or _PROMPT_TIMEOUT_SECONDS <= 0:
 # Idle timeout for the initial ACP handshake (initialize / session setup).
 _INIT_TIMEOUT_SECONDS = 30.0
 
+# Budget for the best-effort ``session/cancel`` sent after a stalled prompt turn.
+# The child is already silent and a wedged one may have stopped draining stdin,
+# so this write must never be able to hang a turn that is already failing.
+_CANCEL_TIMEOUT_SECONDS = 5.0
+
+# How an agent refuses a prompt while it is still working an earlier one. Cline
+# words it "Agent is already processing a prompt"; matched as a substring so a
+# trailing detail does not hide it.
+_AGENT_BUSY_MARKER = "Agent is already processing"
+
+# Prompt attempts per turn: the first, plus one replay on a restarted child when
+# the agent refused the first as busy. Never more, so a child that comes back
+# busy again fails the turn instead of being restarted in a loop.
+_PROMPT_ATTEMPTS = 2
+
 # Agent stderr kept for diagnostics: how many trailing lines to retain, how many
 # to quote in a turn error, and the per-line cap (a chatty CLI can emit one
 # enormous line, and the error goes in a UI toast).
@@ -263,6 +279,35 @@ class AcpAgentConfig:
 
 class _AcpModelSwitchError(RuntimeError):
     """A rejected model selection, before the ACP prompt is sent."""
+
+
+class _AcpTurnAborted(Exception):
+    """A turn that has to end before any prompt is sent.
+
+    Carries the terminal event out of :meth:`AcpExecutor._prepare_turn_session`,
+    which cannot yield it: ``run_turn`` yields ``error`` and stops.
+    """
+
+    def __init__(self, error: ExecutorError) -> None:
+        super().__init__(error.message)
+        self.error = error
+
+
+@dataclass
+class _PromptTurnOutcome:
+    """How one ``session/prompt`` attempt ended.
+
+    Filled in by :meth:`AcpExecutor._await_prompt` instead of being yielded, so
+    ``run_turn`` can choose between reporting the ending and replaying the turn.
+
+    :param terminal: The ``TurnComplete`` or ``ExecutorError`` the attempt ended
+        with. ``None`` only while the attempt is still running.
+    :param agent_busy: The agent refused the prompt because it is still working
+        an earlier one — the one ending worth a restart and a replay.
+    """
+
+    terminal: ExecutorEvent | None = None
+    agent_busy: bool = False
 
 
 class _AcpRequestError(Exception):
@@ -436,6 +481,27 @@ def _resolve_cwd(cwd: str | None, *, session_id: str | None = None) -> str:
         ) from None
 
 
+def _summarize_inbound(msg: _AcpJsonObject) -> str:
+    """One-line label for an inbound ACP frame, for stall diagnostics.
+
+    A stall report needs to say how far the agent got: ``session/update
+    (tool_call)`` means it died mid-tool, whereas nothing past the handshake
+    means the model call never returned.
+    """
+    method = msg.get("method")
+    if isinstance(method, str) and method:
+        if method == _CLIENT_NOTIFICATION_SESSION_UPDATE:
+            params = msg.get("params")
+            update = params.get("update") if isinstance(params, dict) else None
+            kind = update.get("sessionUpdate") if isinstance(update, dict) else None
+            if isinstance(kind, str) and kind:
+                return f"{method}({kind})"
+        return method
+    if msg.get("id") is not None:
+        return f"response id={msg['id']}"
+    return "frame"
+
+
 class AcpExecutor(Executor):
     """Executor that drives any ACP agent over JSON-RPC 2.0 on stdio."""
 
@@ -495,6 +561,11 @@ class AcpExecutor(Executor):
         # stderr ("no API key", "unknown flag"), and that text is the whole
         # diagnosis; without it the turn error names only the stalled RPC.
         self._recent_stderr: deque[str] = deque(maxlen=_STDERR_RING_LINES)
+        # When the agent last spoke and what it said. A turn that goes idle is
+        # otherwise indistinguishable from one where the child died quietly, so
+        # the stall report needs the last frame it managed to emit.
+        self._last_inbound_at: float | None = None
+        self._last_inbound_summary: str = "none"
         # Serializes stdin writes: run_turn (prompt / request replies) and the
         # adapter's interrupt_session() write from different tasks.
         self._write_lock = asyncio.Lock()
@@ -647,17 +718,163 @@ class AcpExecutor(Executor):
         diagnosis — and the log file so the full traceback is findable.
         """
         detail = describe_exception(exc)
-        if self._recent_stderr:
-            tail = " | ".join(list(self._recent_stderr)[-_STDERR_QUOTED_LINES:])
-            # Cap here too, not just per line in the reader: this string ends up
-            # in a UI toast, and the ring can hold several long lines.
-            if len(tail) > _STDERR_QUOTED_LIMIT:
-                tail = tail[:_STDERR_QUOTED_LIMIT] + "...[truncated]"
+        tail = self._stderr_tail()
+        if tail:
             detail = f"{detail}; {self._config.name} stderr: {tail}"
         log_path = current_process_log_path()
         if log_path is not None:
             detail = f"{detail} (harness log: {display_log_path(log_path)})"
         return detail
+
+    def _stderr_tail(self) -> str:
+        """The agent's trailing stderr, capped for a turn error (empty if silent)."""
+        if not self._recent_stderr:
+            return ""
+        tail = " | ".join(list(self._recent_stderr)[-_STDERR_QUOTED_LINES:])
+        # Cap here too, not just per line in the reader: this string ends up in a
+        # UI toast, and the ring can hold several long lines.
+        if len(tail) > _STDERR_QUOTED_LIMIT:
+            tail = tail[:_STDERR_QUOTED_LIMIT] + "...[truncated]"
+        return tail
+
+    def _stall_diagnostics(self, req_id: int) -> str:
+        """Explain why a prompt turn went idle, from the client's side.
+
+        An idle timeout looks identical whether the model call hung inside the
+        agent, the agent stopped reading its own transcript, or the child died
+        without closing stdout — so report every signal that separates them,
+        including the agent's own stderr (drained throughout the turn, but until
+        now quoted only for handshake failures).
+        """
+        parts = [f"no ACP message for {_PROMPT_TIMEOUT_SECONDS:g}s"]
+        if self._last_inbound_at is None:
+            parts.append("agent silent since the prompt was sent")
+        else:
+            age = time.monotonic() - self._last_inbound_at
+            parts.append(f"last ACP message {self._last_inbound_summary} {age:.0f}s ago")
+        process = self._proc
+        if process is None:
+            parts.append("child never started")
+        elif process.returncode is None:
+            parts.append("child still alive")
+        else:
+            parts.append(f"child exited rc={process.returncode}")
+        reader = self._reader_task
+        if reader is None:
+            parts.append("stdout reader absent")
+        elif not reader.done():
+            parts.append("stdout reader reading")
+        elif reader.cancelled():
+            parts.append("stdout reader cancelled")
+        else:
+            failure = reader.exception()
+            state = describe_exception(failure) if failure else "returned"
+            parts.append(f"stdout reader stopped: {state}")
+        parts.append(f"pending {_AGENT_METHOD_SESSION_PROMPT} id={req_id}")
+        tail = self._stderr_tail()
+        if tail:
+            parts.append(f"agent stderr: {tail}")
+        return "; ".join(parts)
+
+    async def _abort_stalled_turn(self, session_id: str) -> None:
+        """Best-effort ``session/cancel`` for a prompt turn that went idle.
+
+        ACP's own abort, so the agent stops the stalled prompt instead of
+        wedging the session for the next turn. Bounded and swallowed: the child
+        is already silent and the turn is already failing, so a cancel that
+        cannot be delivered must not add a second failure.
+        """
+        try:
+            await asyncio.wait_for(
+                self.interrupt_session(session_id), timeout=_CANCEL_TIMEOUT_SECONDS
+            )
+        except Exception as exc:  # noqa: BLE001 — the turn is failing already
+            logger.debug("acp[%s] cancel after stall failed: %s", self._config.name, exc)
+
+    async def _cancel_prompt(self, session_id: str, req_id: int) -> bool:
+        """Cancel an abandoned prompt and say whether the agent let go of it.
+
+        Sends ``session/cancel`` and then waits, within the same budget, for the
+        agent to end the in-flight ``session/prompt`` — which a well-behaved agent
+        does with a ``cancelled`` stop reason. Only that answer proves the agent
+        is free for the next prompt; a cancel that was merely written proves
+        nothing about an agent that has stopped listening.
+
+        The request is dropped from ``_pending`` either way, so an abandoned
+        turn never leaves its future behind.
+
+        :param session_id: The ACP session the prompt belongs to.
+        :param req_id: The JSON-RPC id of the abandoned ``session/prompt``.
+        :returns: ``True`` when the agent answered the prompt after the cancel
+            (or had already answered it); ``False`` when it stayed silent.
+        """
+        fut = self._pending.get(req_id)
+        if fut is None:
+            # Already answered: the reader resolved and removed it between the
+            # deadline check and here. The agent is not holding the prompt.
+            return True
+        await self._abort_stalled_turn(session_id)
+        try:
+            # Shielded so a timeout leaves the future for the reader to find
+            # and discard, rather than cancelling it under the reader's feet.
+            await asyncio.wait_for(asyncio.shield(fut), timeout=_CANCEL_TIMEOUT_SECONDS)
+            confirmed = True
+        except Exception:  # noqa: BLE001 — silence and a failed read both mean "not confirmed"
+            confirmed = False
+        self._pending.pop(req_id, None)
+        return confirmed
+
+    async def _stop_readers(self) -> None:
+        """Cancel the child's stdout and stderr reader tasks and wait them out."""
+        if self._reader_task:
+            self._reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._reader_task
+            self._reader_task = None
+        if self._stderr_task:
+            self._stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._stderr_task
+            self._stderr_task = None
+
+    async def _terminate_child(self) -> None:
+        """Terminate the agent subprocess tree and forget the handle."""
+        if self._proc:
+            with contextlib.suppress(Exception):
+                self._proc.stdin.close()  # type: ignore[union-attr]
+            try:
+                # Tree-aware: the handle is the sandbox launcher, not the
+                # agent it forked. A bare terminate() orphans the agent.
+                _proc.terminate_tree(self._proc)
+                await asyncio.wait_for(self._proc.wait(), timeout=5)
+            except Exception:  # noqa: BLE001
+                with contextlib.suppress(Exception):
+                    _proc.kill_tree(self._proc)
+            finally:
+                self._proc = None
+
+    async def _stop_process(self) -> None:
+        """Stop the agent subprocess but keep the executor usable.
+
+        The restartable half of :meth:`close`: the next prompt attempt finds no
+        live child, starts a fresh one and replays the thread into its new
+        session. The MCP relay and the OS environment belong to the executor,
+        not to one child, so they stay up.
+
+        Whatever the dead child left behind goes with it: requests it will never
+        answer, and queued frames that a later drain would otherwise answer to
+        the *new* child.
+        """
+        self._reset_session_state()
+        await self._stop_readers()
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.cancel()
+        self._pending.clear()
+        while not self._queue.empty():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._queue.get_nowait()
+        await self._terminate_child()
 
     async def _read_stderr(self) -> None:
         """Continuously drain the agent's stderr, logging each line at debug.
@@ -713,6 +930,8 @@ class AcpExecutor(Executor):
                     )
                     continue
 
+                self._last_inbound_at = time.monotonic()
+                self._last_inbound_summary = _summarize_inbound(msg)
                 msg_id = msg.get("id")
                 # Match a response by "id + no method": the agent's own requests
                 # (session/request_permission) also carry an id, so the method
@@ -1781,64 +2000,58 @@ class AcpExecutor(Executor):
             _AGENT_METHOD_SET_MODEL,
         )
 
-    async def run_turn(
-        self,
-        messages: list[Message],
-        tools: list[ToolSpec],
-        system_prompt: str,
-        config: ExecutorConfig | None = None,
-    ) -> AsyncIterator[ExecutorEvent]:
-        """Run one turn of the agent loop via ACP.
+    async def _prepare_turn_session(self, config: ExecutorConfig | None) -> str:
+        """Start the agent if needed and return the session id to prompt.
 
-        Sends ``session/prompt`` and yields streaming events (text, reasoning,
-        tool-call cards) as the agent works, answering any
-        ``session/request_permission`` mid-turn, until the final response
-        (``stopReason``) arrives — then yields ``TurnComplete`` with usage.
+        Called once per prompt attempt: a retry after restarting the child has to
+        re-handshake and re-apply the turn's model instead of prompting a session
+        id the new process never issued.
 
-        ``tools`` (Omnigent's builtin tool schemas) are captured for the Omnigent
-        MCP relay set up at ``session/new`` — the agent still runs its OWN tools.
-        When ``omnigent_mcp`` is ``False`` the relay is disabled, so the schemas
-        serve no purpose and are discarded immediately rather than stored.
+        :raises _AcpTurnAborted: A configured model could not be selected. The
+            turn must end with the carried error and no prompt may be sent.
         """
-        # Only keep builtin tools when the relay is enabled — they exist solely
-        # to back the MCP relay. Storing them when the relay is disabled would
-        # let stale data accidentally reach the session/prompt path (#4917).
-        self._omnigent_tools = (tools or []) if self._config.omnigent_mcp else []
-        try:
-            if self._proc is None or self._proc.returncode is not None:
-                await self._start_process()
-            await self._ensure_initialized()
-            session_id = await self._ensure_session()
-        except Exception as exc:  # noqa: BLE001
-            yield ExecutorError(message=self._startup_error_message(exc), retryable=False)
-            return
+        if self._proc is None or self._proc.returncode is not None:
+            await self._start_process()
+        await self._ensure_initialized()
+        session_id = await self._ensure_session()
 
         # Apply a ``/model`` pick to the live session before prompting, so the
         # switch takes effect on this turn with the transcript intact.
         requested_model = config.model if config is not None else None
         try:
             await self._apply_model_override(session_id, requested_model)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if self._config.available_models:
                 if not isinstance(exc, _AcpModelSwitchError):
                     # A transport failure leaves the actual selection uncertain.
                     self._active_model = None
-                yield ExecutorError(
-                    message=f"ACP model selection failed: {describe_exception(exc)}. "
-                    "No prompt was sent; retry or select another configured model.",
-                    retryable=True,
-                    preserve_session=(
-                        isinstance(exc, (_AcpModelSwitchError, TimeoutError))
-                        and self._proc is not None
-                        and self._proc.returncode is None
-                        and self._reader_task is not None
-                        and not self._reader_task.done()
-                    ),
-                )
-                return
+                raise _AcpTurnAborted(
+                    ExecutorError(
+                        message=f"ACP model selection failed: {describe_exception(exc)}. "
+                        "No prompt was sent; retry or select another configured model.",
+                        retryable=True,
+                        preserve_session=(
+                            isinstance(exc, (_AcpModelSwitchError, TimeoutError))
+                            and self._proc is not None
+                            and self._proc.returncode is None
+                            and self._reader_task is not None
+                            and not self._reader_task.done()
+                        ),
+                    )
+                ) from exc
             self._model_switch_supported = False
             logger.warning("acp[%s] model switch failed: %s", self._config.name, exc)
+        return session_id
 
+    def _build_prompt_blocks(
+        self, messages: list[Message], system_prompt: str
+    ) -> list[_AcpJsonObject]:
+        """Prompt blocks for this turn, replaying history when the session is fresh.
+
+        The freshness latch is read here rather than passed in: it flips as the
+        blocks are built, and a retry on a restarted child has to see it clear
+        again so the new (context-free) session gets the thread.
+        """
         # A fresh ACP session holds no prior context. Captured before the latch
         # flips so we know whether to replay history into this turn.
         fresh_session = not self._system_prompt_sent
@@ -1885,8 +2098,10 @@ class AcpExecutor(Executor):
         if user_text or not image_blocks:
             prompt_blocks.append({"type": "text", "text": user_text})
         prompt_blocks.extend(image_blocks)
+        return prompt_blocks
 
-        # Drain stale items from a prior turn; answer any leftover server request.
+    async def _drain_stale_requests(self) -> None:
+        """Drop leftover frames from a prior turn, answering any stale request."""
         while not self._queue.empty():
             try:
                 stale = self._queue.get_nowait()
@@ -1895,28 +2110,53 @@ class AcpExecutor(Executor):
             if isinstance(stale, dict) and stale.get("id") is not None and stale.get("method"):
                 await self._respond_to_agent_request(stale)
 
-        self._rpc_id += 1
-        req_id = self._rpc_id
+    async def _await_prompt(
+        self,
+        session_id: str,
+        req_id: int,
+        fut: asyncio.Future[_AcpJsonObject],
+        outcome: _PromptTurnOutcome,
+    ) -> AsyncIterator[ExecutorEvent]:
+        """Stream one ``session/prompt`` attempt until it ends.
+
+        Yields the turn's streaming events; the terminal event (``TurnComplete``
+        or ``ExecutorError``) is recorded on ``outcome`` instead of being yielded,
+        so ``run_turn`` can still retry the one recoverable ending.
+        """
         loop = asyncio.get_event_loop()
-        fut: asyncio.Future[_AcpJsonObject] = loop.create_future()
-        self._pending[req_id] = fut
-
-        await self._send(
-            {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "method": _AGENT_METHOD_SESSION_PROMPT,
-                "params": {"sessionId": session_id, "prompt": prompt_blocks},
-            }
-        )
-
         deadline = loop.time() + _PROMPT_TIMEOUT_SECONDS
         accumulated_text: list[str] = []
 
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                yield ExecutorError(message="Timeout waiting for ACP response", retryable=True)
+                diagnostics = self._stall_diagnostics(req_id)
+                logger.warning(
+                    "acp[%s] prompt turn stalled (session %s): %s [command: %s]",
+                    self._config.name,
+                    session_id,
+                    diagnostics,
+                    self._config.command,
+                )
+                # The turn is about to be reported as failed, so the agent must
+                # stop working it: a prompt left running keeps executing tools
+                # after Omnigent has given up on it, and every later prompt is
+                # refused with "Agent is already processing" — the wedge that let
+                # one stall repeat for the rest of a session.
+                if await self._cancel_prompt(session_id, req_id):
+                    diagnostics = f"{diagnostics}; agent confirmed session/cancel"
+                else:
+                    await self._stop_process()
+                    diagnostics = (
+                        f"{diagnostics}; agent never confirmed session/cancel — child "
+                        "killed so the next turn restarts it"
+                    )
+                outcome.terminal = ExecutorError(
+                    message=(
+                        f"Timeout waiting for ACP response — {self._config.name}: {diagnostics}"
+                    ),
+                    retryable=True,
+                )
                 return
 
             # Complete only once the future is resolved AND the queue is drained,
@@ -1927,17 +2167,25 @@ class AcpExecutor(Executor):
                 except Exception as exc:
                     logger.exception("ACP process response retrieval failed")
                     self._reset_session_state()
-                    yield ExecutorError(message=f"ACP process error: {exc}", retryable=True)
+                    outcome.terminal = ExecutorError(
+                        message=f"ACP process error: {exc}", retryable=True
+                    )
                     return
                 if "error" in response:
                     error_msg = response["error"].get("message", "Unknown ACP error")
                     if "Session not found" in error_msg:
                         self._reset_session_state()
-                    yield ExecutorError(message=error_msg, retryable=True)
+                    if _AGENT_BUSY_MARKER in error_msg:
+                        # The agent is still holding an earlier prompt. Its
+                        # refusal is recoverable — ``run_turn`` restarts the child
+                        # and replays the turn — so flag it rather than only
+                        # reporting it as the end of the turn.
+                        outcome.agent_busy = True
+                    outcome.terminal = ExecutorError(message=error_msg, retryable=True)
                     return
                 result = response.get("result", {}) if isinstance(response, dict) else {}
                 usage = self._usage_with_active_model(result) if isinstance(result, dict) else None
-                yield TurnComplete(response="".join(accumulated_text), usage=usage)
+                outcome.terminal = TurnComplete(response="".join(accumulated_text), usage=usage)
                 return
 
             try:
@@ -1963,6 +2211,81 @@ class AcpExecutor(Executor):
 
             # Inbound message = progress; reset the idle deadline.
             deadline = loop.time() + _PROMPT_TIMEOUT_SECONDS
+
+    async def run_turn(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        system_prompt: str,
+        config: ExecutorConfig | None = None,
+    ) -> AsyncIterator[ExecutorEvent]:
+        """Run one turn of the agent loop via ACP.
+
+        Sends ``session/prompt`` and yields streaming events (text, reasoning,
+        tool-call cards) as the agent works, answering any
+        ``session/request_permission`` mid-turn, until the final response
+        (``stopReason``) arrives — then yields ``TurnComplete`` with usage.
+
+        ``tools`` (Omnigent's builtin tool schemas) are captured for the Omnigent
+        MCP relay set up at ``session/new`` — the agent still runs its OWN tools.
+        When ``omnigent_mcp`` is ``False`` the relay is disabled, so the schemas
+        serve no purpose and are discarded immediately rather than stored.
+        """
+        # Only keep builtin tools when the relay is enabled — they exist solely
+        # to back the MCP relay. Storing them when the relay is disabled would
+        # let stale data accidentally reach the session/prompt path (#4917).
+        self._omnigent_tools = (tools or []) if self._config.omnigent_mcp else []
+
+        for attempt in range(_PROMPT_ATTEMPTS):
+            try:
+                session_id = await self._prepare_turn_session(config)
+            except _AcpTurnAborted as aborted:
+                yield aborted.error
+                return
+            except Exception as exc:  # noqa: BLE001 — startup boundary: report, never crash
+                yield ExecutorError(message=self._startup_error_message(exc), retryable=False)
+                return
+
+            prompt_blocks = self._build_prompt_blocks(messages, system_prompt)
+
+            # Drain stale items from a prior turn; answer any leftover server request.
+            await self._drain_stale_requests()
+
+            self._rpc_id += 1
+            req_id = self._rpc_id
+            loop = asyncio.get_event_loop()
+            fut: asyncio.Future[_AcpJsonObject] = loop.create_future()
+            self._pending[req_id] = fut
+
+            await self._send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "method": _AGENT_METHOD_SESSION_PROMPT,
+                    "params": {"sessionId": session_id, "prompt": prompt_blocks},
+                }
+            )
+
+            outcome = _PromptTurnOutcome()
+            async for event in self._await_prompt(session_id, req_id, fut, outcome):
+                yield event
+
+            if not outcome.agent_busy or attempt + 1 >= _PROMPT_ATTEMPTS:
+                assert outcome.terminal is not None, "a prompt attempt must end terminally"
+                yield outcome.terminal
+                return
+
+            # The agent refused the prompt because it is still working an earlier
+            # one Omnigent already gave up on. Nothing on this side can clear
+            # that — the prompt holding it is not ours to await, and the agent
+            # ignores the ACP cancel for it — so restart the child and replay the
+            # turn rather than hand the user a failure they cannot act on.
+            logger.warning(
+                "acp[%s] agent still busy with an earlier prompt; restarting it and "
+                "replaying the turn",
+                self._config.name,
+            )
+            await self._stop_process()
 
     async def interrupt_session(self, session_key: str) -> bool:  # noqa: ARG002 — one ACP session per process
         """Abort the running turn via the ACP ``session/cancel`` notification.
@@ -1995,30 +2318,9 @@ class AcpExecutor(Executor):
         # Tear down the Omnigent MCP relay HTTP server + its bridge dir first.
         with contextlib.suppress(Exception):
             self._mcp.close()
-        if self._reader_task:
-            self._reader_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._reader_task
-            self._reader_task = None
-        if self._stderr_task:
-            self._stderr_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._stderr_task
-            self._stderr_task = None
+        await self._stop_readers()
         if self._os_environment is not None:
             with contextlib.suppress(Exception):
                 self._os_environment.close()
             self._os_environment = None
-        if self._proc:
-            with contextlib.suppress(Exception):
-                self._proc.stdin.close()  # type: ignore[union-attr]
-            try:
-                # Tree-aware: the handle is the sandbox launcher, not the
-                # agent it forked. A bare terminate() orphans the agent.
-                _proc.terminate_tree(self._proc)
-                await asyncio.wait_for(self._proc.wait(), timeout=5)
-            except Exception:  # noqa: BLE001
-                with contextlib.suppress(Exception):
-                    _proc.kill_tree(self._proc)
-            finally:
-                self._proc = None
+        await self._terminate_child()

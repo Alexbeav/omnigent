@@ -8,6 +8,7 @@ no server, no daemon.
 
 from __future__ import annotations
 
+import errno
 import subprocess
 import sys
 import time
@@ -187,6 +188,26 @@ def test_reap_escalates_to_kill(data_dir: Path) -> None:
         # Give the child a beat to install its SIGTERM handler.
         time.sleep(1.0)
         reaped, survivors = reap_leaked_omnigent_processes(data_dir, timeout=2)
+        assert any("omnigent-daemon-marker" in cmd for cmd in reaped)
+        assert survivors == []
+        child.wait(timeout=10)
+        assert child.poll() is not None
+    finally:
+        _kill_quietly(child)
+
+
+def test_reap_polls_when_pidfd_wait_is_unsupported(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WSL ``pidfd_open(EINVAL)`` falls back without hiding a live survivor."""
+    child = _spawn(_SLEEP_CHILD, "omnigent-daemon-marker", f"{data_dir}/chat.db")
+
+    def _unsupported_pidfd(*args, **kwargs):
+        raise OSError(errno.EINVAL, "pidfd unsupported")
+
+    monkeypatch.setattr(psutil, "wait_procs", _unsupported_pidfd)
+    try:
+        reaped, survivors = reap_leaked_omnigent_processes(data_dir, timeout=10)
         assert any("omnigent-daemon-marker" in cmd for cmd in reaped)
         assert survivors == []
         child.wait(timeout=10)

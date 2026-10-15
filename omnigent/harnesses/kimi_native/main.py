@@ -217,6 +217,7 @@ def _materialize_kimi_agent_spec(tmpdir: Path) -> Path:
         ),
         "executor": {"harness": "kimi-native"},
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

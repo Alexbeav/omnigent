@@ -379,6 +379,22 @@ def test_auth_aware_native_harness_launch_gate_stays_binary_only(
     assert harness_is_configured("opencode-native") is True
 
 
+def test_custom_acp_readiness_preserves_agent_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    from omnigent.onboarding import acp_auth
+    from omnigent.onboarding.acp_auth import AcpAgentEntry
+
+    monkeypatch.setattr(
+        acp_auth,
+        "acp_agents",
+        lambda: [AcpAgentEntry(slug="cline", name="Cline", command="cline --acp")],
+    )
+    assert harness_is_configured("acp:cline") is True
+    assert harness_is_configured("acp:oh-my-pi") is False
+    report = configured_harness_map()
+    assert report["acp:cline"] is True
+    assert "acp:oh-my-pi" not in report
+
+
 def test_configured_harness_map_covers_all_spellings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

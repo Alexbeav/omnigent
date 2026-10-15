@@ -5772,7 +5772,7 @@ describe("Composer config gear", () => {
     expect(calls).toEqual(["model", "effort"]);
   });
 
-  it("leaves no lingering error indicator when a session config update fails", async () => {
+  it("surfaces a session config update failure after re-enabling the picker", async () => {
     const setModel = vi.fn().mockRejectedValue(new Error("Host stopped responding"));
     const options = [
       { id: "opus", model: "opus", displayName: "Opus" },
@@ -5797,7 +5797,9 @@ describe("Composer config gear", () => {
     await waitFor(() =>
       expect(screen.getByTestId("composer-agent-edit")).not.toHaveAttribute("data-disabled"),
     );
-    expect(screen.queryByTestId("composer-config-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("composer-config-error")).toHaveAccessibleName(
+      "Couldn't update configuration: Host stopped responding",
+    );
     expect(screen.queryByText("Host stopped responding")).not.toBeInTheDocument();
   });
 

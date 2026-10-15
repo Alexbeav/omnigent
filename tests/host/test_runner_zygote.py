@@ -22,6 +22,7 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -211,7 +212,8 @@ def test_deferred_graph_keeps_the_zygote_single_threaded() -> None:
             "_import_runner_graph()",
             "_import_deferred_graph()",
             "print(threading.active_count())",
-            "has_sdk = importlib.util.find_spec('databricks.sdk') is not None",
+            "has_parent = importlib.util.find_spec('databricks') is not None",
+            "has_sdk = has_parent and importlib.util.find_spec('databricks.sdk') is not None",
             "print(not has_sdk or 'databricks.sdk.config' in sys.modules)",
         ]
     )
@@ -984,6 +986,28 @@ def test_source_stamps_ignore_metadata_only_changes(tmp_path) -> None:
     assert _source_files_match(stamps)
 
 
+def test_source_stamp_capture_ignores_access_time_change(monkeypatch, tmp_path) -> None:
+    """A read-induced access-time update does not invalidate its own baseline."""
+    source = tmp_path / "module.py"
+    source.write_text("VALUE = 1\n")
+    real_fstat = os.fstat
+    calls = 0
+
+    def _fstat_with_moving_atime(fd: int):
+        nonlocal calls
+        stat = real_fstat(fd)
+        calls += 1
+        if calls != 2:
+            return stat
+        values = {name: getattr(stat, name) for name in dir(stat) if name.startswith("st_")}
+        values["st_atime_ns"] += 1
+        return SimpleNamespace(**values)
+
+    monkeypatch.setattr(_zygote.os, "fstat", _fstat_with_moving_atime)
+
+    assert _source_file_stamps([source]) is not None
+
+
 def test_source_stamp_capture_fails_closed_for_missing_file(tmp_path) -> None:
     """An unreadable baseline is represented as incomplete rather than omitted."""
     assert _source_file_stamps([tmp_path / "missing.py"]) is None
@@ -1079,7 +1103,16 @@ def test_fork_refused_after_source_change_with_stale_build_info(
         build=(1000.0, "stale-sha"),
         sources=_source_file_stamps([source]),
     )
+    assert graph_stamp.sources is not None
+    original = graph_stamp.sources[0]
     source.write_text("new = True\n")
+    os.utime(source, ns=(source.stat().st_atime_ns, original.modified_ns))
+    rewritten = source.stat()
+    assert (rewritten.st_mtime_ns, rewritten.st_size, rewritten.st_ino) == (
+        original.modified_ns,
+        original.size,
+        original.inode,
+    )
 
     daemon, daemon_peer = socket.socketpair()
     conn, peer = socket.socketpair()

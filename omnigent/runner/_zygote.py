@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import hashlib
 import importlib.util
 import json
 import os
@@ -95,12 +96,13 @@ _CHILD_TELEMETRY_FLUSH_TIMEOUT_S = 2.0
 
 @dataclass(frozen=True)
 class _SourceFileStamp:
-    """Metadata identifying one package source file."""
+    """Identity and content fingerprint for one package source file."""
 
     path: Path
     modified_ns: int
     size: int
     inode: int
+    digest: bytes
 
 
 @dataclass(frozen=True)
@@ -145,7 +147,7 @@ def _disk_build_stamp(package_dir: Path | None = None) -> tuple[float, str] | No
 
 
 def _source_file_stamps(paths: Iterable[Path]) -> tuple[_SourceFileStamp, ...] | None:
-    """Capture file metadata, returning ``None`` if the baseline is incomplete."""
+    """Capture source identity and content, or ``None`` for an incomplete baseline."""
     stamps: list[_SourceFileStamp] = []
     try:
         unique_paths = sorted(set(paths))
@@ -153,15 +155,35 @@ def _source_file_stamps(paths: Iterable[Path]) -> tuple[_SourceFileStamp, ...] |
         return None
     for path in unique_paths:
         try:
-            stat = path.stat()
+            with path.open("rb") as source:
+                before = os.fstat(source.fileno())
+                digest = hashlib.file_digest(source, "sha256").digest()
+                after = os.fstat(source.fileno())
         except OSError:
+            return None
+        before_change = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        after_change = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if before_change != after_change:
             return None
         stamps.append(
             _SourceFileStamp(
                 path=path,
-                modified_ns=stat.st_mtime_ns,
-                size=stat.st_size,
-                inode=stat.st_ino,
+                modified_ns=after.st_mtime_ns,
+                size=after.st_size,
+                inode=after.st_ino,
+                digest=digest,
             )
         )
     return tuple(stamps)
@@ -176,7 +198,7 @@ def _package_source_stamps(
 
 
 def _source_files_match(stamps: tuple[_SourceFileStamp, ...] | None) -> bool:
-    """Return whether every package source still matches its boot metadata."""
+    """Return whether every package source still matches its boot fingerprint."""
     if stamps is None:
         return False
     if not stamps:

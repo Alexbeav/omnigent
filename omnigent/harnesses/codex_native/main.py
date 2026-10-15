@@ -622,6 +622,7 @@ def _materialize_codex_agent_spec(
         # them as sub-agent sessions. The relay derives its advertised
         # tool set from this spec via ToolManager.
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",
@@ -640,22 +641,19 @@ def _materialize_codex_agent_spec(
 
 
 def _wrapper_spec_raw_instructions(spec_path: Path) -> str | None:
-    """Resolve raw author instructions from the wrapper's agent spec.
+    """Resolve startup instructions from the wrapper's agent spec.
 
     Reuses :func:`omnigent.spec.load` (the same loader
     :func:`~omnigent.cli._bundle` and the server use for both an agent-image
-    directory and a standalone single-file YAML) so the value matches exactly
-    what ``AgentSpec.instructions`` resolves to — including the
-    ``instructions:`` file precedence over ``prompt:`` — rather than
-    re-reading the raw YAML ad hoc.
+    directory and a standalone single-file YAML). The startup composer keeps
+    author text and adds stable peer provenance when the spec enables it.
 
     :param spec_path: The generated/current wrapper agent spec (a
         standalone YAML file or an agent-image directory).
-    :returns: The verbatim instructions text, or ``None`` if unresolvable
-        or absent/whitespace-only. Best-effort: a malformed spec must not
-        block the terminal launch, so load failures degrade to ``None``.
+    :returns: Startup instructions, or ``None`` if unresolvable or empty.
+        Best-effort: a malformed spec must not block the terminal launch.
     """
-    from omnigent.runtime.prompt import raw_author_instructions
+    from omnigent.runtime.prompt import native_startup_instructions
     from omnigent.spec import load as load_agent_spec
 
     try:
@@ -667,7 +665,7 @@ def _wrapper_spec_raw_instructions(spec_path: Path) -> str | None:
             exc_info=True,
         )
         return None
-    return raw_author_instructions(spec)
+    return native_startup_instructions(spec)
 
 
 def _run_with_local_server(

@@ -627,6 +627,7 @@ def _materialize_devin_agent_spec(tmpdir: Path, *, model: str | None = None) -> 
         ),
         "executor": executor,
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

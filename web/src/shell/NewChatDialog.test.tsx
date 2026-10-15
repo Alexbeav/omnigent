@@ -5623,7 +5623,7 @@ describe("NewChatLandingScreen", () => {
 
     expect(screen.getByTestId("connect-host-dialog")).toBeTruthy();
     expect(screen.getByTestId("connect-host-command")).toHaveTextContent(
-      `omni host --server '${window.location.origin}/api?profile=dev&glob=*'`,
+      `omni host --server '${window.location.origin}/api?profile=dev&glob=*' --background`,
     );
 
     const lakeboxTab = screen.getByRole("tab", { name: "Databricks Lakebox" });

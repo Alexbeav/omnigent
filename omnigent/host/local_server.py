@@ -838,7 +838,9 @@ def _spawn_local_server(port: int, base_path: str) -> _SpawnedLocalServer:
                 env=child_env,
                 stdout=log_fh,
                 stderr=log_fh,
-                **_proc.spawn_kwargs(),
+                # The local server is a background daemon and must survive the
+                # terminal that started it (see daemon_spawn_kwargs).
+                **_proc.daemon_spawn_kwargs(),
                 **logging_kwargs,
             )
     finally:
