@@ -131,9 +131,9 @@ The primary draft remains unchanged and all mocked backend routes are accounted 
 Store checks passed 585 tests; composer checks passed 361 tests; the other pane/shell/bubble component checks passed 192 tests.
 Python parser and feature-map checks passed 136 tests.
 Local evidence is under `.omnigent/verify/`, including `final-pane-browser.xml` and `pane-final-*.log`.
-The first deployment record below is historical; the follow-up deployment will be recorded separately.
+The first deployment record below is historical; the follow-up deployment is recorded at the end of this note.
 
-## Rollout boundary
+## First rollout, 2026-10-15
 
 The NAS server was updated on 2026-10-15 at Alex's request; OMP coordination was deferred.
 The live host checkout and host processes were not updated or restarted.
@@ -161,3 +161,41 @@ To roll back this server-only change, restore the saved Compose file and run
 `sudo /usr/local/bin/docker compose -f /volume1/docker/stacks/omnigent/docker-compose.yml up -d --no-deps omnigent`,
 then check `/health`. No database restore is needed for this patch, which has no migration.
 Validate fresh native agents with disposable chats before updating long-running sessions or hosts.
+
+## Follow-up rollout, 2026-10-16
+
+The live server runs application `2050948e3ed0bd9a93fe81974fe3ed0a56b8d2ec` on `feat/primary-platform`,
+with image `registry.crosstalkis.com/omnigent-server:sha-2050948e3@sha256:821c003af23d7acbdde711061b29a8b539f4c533fc76625ee6e3be3dd667924a`.
+Version remains `0.17.0`, with unchanged dependencies and database schema.
+The container smoke check passed the actual diagnostic-request exclusion and confirmed the source identity and bundled UI.
+The digest was pushed and pulled before cutover; temporary NAS registry credentials were removed.
+The Windows Docker CLI required a GNU tar build context; the initial PAX archive was rejected before any image build.
+
+The quiescent database dump contains 95 conversations and 60,926 items.
+Every original row ID survived; post-cutover counts are identical and schema remains `mm1a2b3c4d5e`.
+Backup: `/volume1/docker/stacks/omnigent/backups/pane-followup-20261016-2050948e3/cutover.dump`, 56,316,001 bytes, SHA-256 `e9844fa6fc17b257ee9d86e9aac8e7373a7a7cc3c9af2cf412829de7e6d83212`.
+The previous Compose and image remain with the rollout script and deployment JSON in that directory.
+
+All 448 served JavaScript and CSS files match the verified production build; entry script `index-CHxJcFjo.js`.
+Accounts auth and server health pass; the server has zero restarts.
+Only `omnigent` changed. PostgreSQL and 28 unrelated containers kept their identities, start times and restart counts.
+Transit Vault remains initialized, healthy and unsealed.
+The Compose pin is local `homelab-ulduar` commit `f3e76cb92`; it is not pushed, and unrelated monitoring changes remain untouched.
+Artifacts are under `.omnigent/verify/pane-rollout/`.
+
+Host installations were not replaced. The live editable checkout already contains the Claude parser patch.
+The idle Claude session `189d5d7ce28b4b1ea7ac7d0938efafdf` was reconnected through
+`retry_session` (HTTP 202, `recovered=true`, `runner_relaunched`): runner `19983`
+exited and fresh runner `5166` started from the patched editable installation.
+The stale zygote rejected the changed graph; the host used direct-spawn fallback.
+Shared host `1683` and zygote `1686` remained running; no user or assistant items
+were added to that chat. Other existing coordinator runners can still create children
+with their old imported parser until those coordinators reconnect. A disposable child
+reused an old shared runner and reproduced duplication; it does not validate runner
+`5166`. A clean two-turn live-provider test on the new runner remains unproven.
+Existing polluted history remains unchanged.
+
+Reload [the live UI](http://172.16.1.8:8090) with **Ctrl+Shift+R**.
+Drag sidebar chats to the marked left/right targets, change a secondary pane's model and reasoning,
+and queue a follow-up while that pane works. Its send-now arrow or the default Ctrl/Command+Enter shortcut steers only that pane.
+The outer window target or header popout button opens a separate window. Browser policy controls OS desktop drops.
