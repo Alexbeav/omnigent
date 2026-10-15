@@ -24,6 +24,8 @@ The fix makes the shared client classifier use `.png`, `.jpg`, `.jpeg`,
 uses that same classifier to choose `input_image`. A specific conflicting MIME,
 such as `video/mp4` on `clip.png`, still fails client validation and then server
 validation if a caller bypasses the client.
+An explicit non-compressible image MIME also keeps the 5 MB size limit.
+A misleading raster filename does not raise that limit.
 
 ## Entry points
 

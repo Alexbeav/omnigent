@@ -1,9 +1,9 @@
 # Upstream update and contribution plan
 
-Status: implementation in progress, approved by Alex on 2026-10-16.
+Status: v0.18.0 server deployed on 2026-10-16 after Alex approved the stable target.
 The isolated branch is `upgrade/v0.18-primary` in `~/Projects/omnigent-upgrade`.
-Qualification and deployment results are recorded below as they complete.
-The deployed application remains `2050948e3` from [the primary platform work](primary-platform-plan.md).
+Qualification and deployment results are recorded below.
+The deployed application is `38f30aa96`, preserving [the primary platform work](primary-platform-plan.md).
 
 ## Recommended targets
 
@@ -102,14 +102,14 @@ An absent symbol or a different patch ID alone does not establish a missing beha
 
 | Fork commits | Behavior to retain or replace | Current disposition |
 | --- | --- | --- |
-| `9e7908fb3`, `da86edcfc` | Generated ACP spawn grant and delegation guidance. | Port remaining behavior after inspecting current bundle composition. |
-| `304bbdf8a` | ACP permission-mode precedence and policy behavior. | Existing Alex PR [#7375](https://github.com/omnigent-ai/omnigent/pull/7375) remains open; upstream also contains `ccaa42e92`. Compare the code and tests, then retain only the residual difference. |
-| `92f35bbf2` | UTF-8 host/config reads on Windows. | Compare upstream legacy-encoding fixes, then port only unmet cases. |
-| `93eff9b2f` | Approval-mode header badge. | Preserve the visible behavior while integrating current header controls. |
-| `e20cbf347` | Docker build-context exclusions. | Compare upstream Dockerfile-specific ignore rules. Keep classic-builder support only if still required and tested with the actual build inputs. |
-| `a6544e17e` | Windows detached daemon survival after terminal closure. | Preserve behavior and verify it on Windows; a POSIX test does not establish Windows console survival. |
-| `8a6e5c511`, `e88754218` | ACP stalled-turn diagnostics, cancellation and wedged-session recovery. | Port tests first against the changed executor; retain only missing behavior. |
-| `3c4b9c031`, `fb9a4172d`, `495202339` | Same-owner peer delivery, bounded attribution, title safety and exchange proof. | Retain in the deployment fork while coordinating the upstream API separately. |
+| `9e7908fb3`, `da86edcfc` | Generated ACP spawn grant and delegation guidance. | Retained; native grants, bundle composition, prompt and readiness checks pass (138 tests). |
+| `304bbdf8a` | ACP permission-mode precedence and policy behavior. | Retained agent-spec precedence alongside upstream `ccaa42e92`; DENY/ASK behavior passes in the 294-test backend set. Existing Alex [#7375](https://github.com/omnigent-ai/omnigent/pull/7375) remains the contribution path. |
+| `92f35bbf2` | UTF-8 host/config reads on Windows. | Retained the explicit UTF-8 reads; focused process/permission checks pass. Actual v0.18 Windows-path execution remains unproven. |
+| `93eff9b2f` | Approval-mode header badge. | Retained in the current header; focused UI tests, lint, type checking and browser pane journeys pass. |
+| `e20cbf347` | Docker build-context exclusions. | Retained root exclusions alongside upstream rules. The complete source build passes on BuildKit; classic-engine behavior was not rerun. |
+| `a6544e17e` | Windows detached daemon survival after terminal closure. | Retained daemon-only flags. Actual Windows console closure remains separate from the passing Linux checks. |
+| `8a6e5c511`, `e88754218` | ACP stalled-turn diagnostics, cancellation and wedged-session recovery. | Retained diagnostics, bounded cancellation and one-time replay while keeping upstream deleted-directory handling; backend checks pass. |
+| `3c4b9c031`, `fb9a4172d`, `495202339` | Same-owner peer delivery, bounded attribution, title safety and exchange proof. | Retained; authorization, provenance, loop/rate contracts and a separate process message-and-reply journey pass. Coordinate the upstream API separately. |
 | `12b5f67d2` | Old release-version edits. | Superseded by the target version. Do not port these edits. |
 
 Alex also has open [#7370](https://github.com/omnigent-ai/omnigent/pull/7370) for absolute Windows workspaces.
@@ -194,7 +194,7 @@ The old `0.17.0` version edits were discarded in favor of all five v0.18 manifes
 The broader upstream Claude fix and its tests replace the narrower request-blob guard.
 Feature-map conflicts retain upstream browser test locations and the fork feature notes.
 The ACP executor keeps the upstream deleted-directory guard and the fork's stall, cancellation and one-time recovery behavior.
-Frontend conflicts are resolved. Final artifact qualification is in progress. Host recovery checks pass.
+Frontend conflicts are resolved. Final artifact qualification and the server cutover pass. Host recovery checks pass.
 
 Completed evidence so far:
 
@@ -229,5 +229,46 @@ All 95 original conversations, 60,926 item bodies, 19 file records and two accou
 Accounts access and anonymous rejection passed with a disposable cookie secret.
 All 94 exported external Python dependency versions matched, and all 454 JS/CSS files matched the tested local bundle.
 Review then tightened the image size rule: an explicit SVG MIME keeps the 5 MB limit even with a misleading PNG filename.
-The final image must include that follow-up and repeat the artifact rehearsal.
-No live server or host was upgraded by these qualification steps.
+The final image includes that follow-up and repeats the artifact rehearsal successfully.
+The following section records the later live server change.
+
+## Live server deployment, 2026-10-16
+
+The final application is `38f30aa96e9dfa01ebef8b6d09e2e19a2696fd23`.
+The image pin is `registry.crosstalkis.com/omnigent-server:sha-38f30aa96@sha256:c0b9ea754533c54c5c8c0293007cd429c829051efbaf6b6ddd0236ac789b7cd0`.
+The server and both sibling SDKs report `0.18.0`.
+The image uses the complete upstream Docker recipe with all 94 external runtime requirements frozen and checked.
+All 454 served JS/CSS files match the final tested local bundle.
+The final UI proof passed nine pane/attachment journeys and six picker/paste/drop image-send journeys.
+
+The rollback-aware cutover stopped and recreated only `omnigent`.
+It retained all 96 conversations and 61,863 original item IDs with zero missing originals.
+One new item arrived after restart, and the schema stayed at `mm1a2b3c4d5e`.
+Accounts access, anonymous rejection and the active chat's history read pass.
+The server is healthy with zero restarts; Postgres and 30 other containers retained their IDs, starts and restart counts.
+Transit Vault remains healthy and unsealed.
+
+Backup and rollback package: `/volume1/docker/stacks/omnigent/backups/upgrade-v018-20261016-38f30aa96/`.
+The verified quiescent dump is 58,222,044 bytes, SHA-256 `e35abf564b5183502a8cbb9f4bc002c0fef78742fb09e74cdd6de14be62c9a22`.
+The saved Compose pins the previous `2050948e3` image.
+The isolated rehearsal established rollback with this unchanged schema.
+The live Compose pin is committed locally on the NAS as `eb7825598` and is not pushed.
+The unrelated monitoring edit remains untouched.
+
+The existing shared host, zygote, installed host packages and coordinator runners remain unchanged during active work.
+Fresh isolated candidate providers pass ordinary two-turn checks, but that does not refresh existing production adapters.
+A unique temporary v0.18 host then ran fresh Claude and Codex chats against the production server.
+Both completed two real subscription turns, and each exact user prompt appeared once without reminder pollution.
+Both proof chats were archived, and the owned host process was stopped.
+The server exposes no supported unmanaged-host deletion API, so its offline canary row remains.
+That proof covers ordinary follow-ups on the same idle runner, not native transcript recovery after process replacement.
+A full fleet refresh, actual Windows console closure, real OS desktop drops and OMP acceptance remain outside this server result.
+The current host presence and operational authority remain in the homelab Infrastructure-State note.
+
+Reload with Ctrl+Shift+R, dock a chat on each side, and change the model and reasoning in one secondary pane.
+Queue and steer a follow-up there, then attach an image through the picker or clipboard.
+The primary pane's draft and model must remain unchanged.
+
+The first focused upstream candidate is `contrib/image-mime-fallback` on pinned main, committed as `97a57e7f0`.
+Its 21 attachment tests pass after reproducing the original failure.
+Open #8391 has direct semantic overlap, so no duplicate PR is published.
