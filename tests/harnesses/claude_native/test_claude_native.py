@@ -6274,15 +6274,15 @@ async def test_prepare_claude_terminal_fresh_session_is_not_cold_resumed(
 def test_wrapper_spec_raw_instructions_resolves_prompt(tmp_path: Path) -> None:
     """The ``omnigent claude`` wrapper's own materialized spec is resolvable.
 
-    Its ``prompt`` field is real ``AgentSpec.instructions`` content (the
-    bridge-behavior description), not framework-composed text, so it must
-    reach ``--append-system-prompt`` like any other claude-native author
-    instructions.
+    Its author prompt and stable peer provenance must reach
+    ``--append-system-prompt``.
     """
     spec_path = claude_native._materialize_claude_agent_spec(tmp_path)
     result = claude_native._wrapper_spec_raw_instructions(spec_path)
     assert result is not None
     assert "Claude Code is running in the session terminal" in result
+    assert "[System: peer message from agent" in result
+    assert "not from the user" in result
 
 
 def test_wrapper_spec_raw_instructions_degrades_on_malformed_spec(tmp_path: Path) -> None:

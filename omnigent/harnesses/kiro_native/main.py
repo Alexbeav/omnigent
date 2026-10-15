@@ -255,6 +255,7 @@ def _materialize_kiro_agent_spec(tmpdir: Path, *, model: str | None = None) -> P
         ),
         "executor": executor,
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

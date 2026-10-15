@@ -42,7 +42,15 @@ def reported_harness_availability(
 
     if not harness or harness == "auto" or not readiness:
         return None, None
-    canonical = canonicalize_harness(harness) or harness
+    if harness.startswith("acp:"):
+        canonical = harness
+        if canonical not in readiness:
+            if readiness.get("acp") is False or any(key.startswith("acp:") for key in readiness):
+                return False, "unconfigured"
+            # Older hosts report only whether any ACP agent is configured.
+            return None, None
+    else:
+        canonical = canonicalize_harness(harness) or harness
     value = readiness.get(canonical)
     if value is True:
         return True, None

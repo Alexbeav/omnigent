@@ -13,12 +13,14 @@ from omnigent.runner.subagent_work import (
 from omnigent.runtime.mcp_tool_result import encode_mcp_image_result
 from omnigent.runtime.prompt import (
     EMBEDDED_BROWSER_PRIORITY_INSTRUCTION,
+    PEER_MESSAGE_INSTRUCTION,
     SUBAGENT_WAKE_NOTICE_INSTRUCTION,
     SUBAGENT_WAKE_NOTICE_SHAPE,
     append_framework_instructions,
     build_instructions,
     build_instructions_nullable,
     history_to_input_items,
+    native_startup_instructions,
     raw_author_instructions,
 )
 from omnigent.spec import AgentSpec
@@ -32,6 +34,7 @@ def _spec(
     *,
     agents: tuple[str, ...] = (),
     spawn: bool = False,
+    peer_messaging: bool = False,
     builtins: tuple[str, ...] = (),
 ) -> AgentSpec:
     """
@@ -47,6 +50,7 @@ def _spec(
                 builtins=[SimpleNamespace(name=name) for name in builtins],
             ),
             spawn=spawn,
+            peer_messaging=peer_messaging,
         ),
     )
 
@@ -398,6 +402,22 @@ def test_embedded_browser_guidance_included_for_every_agent() -> None:
     assert build_instructions(authored, None, []) == (
         f"Agent prompt\n\n{EMBEDDED_BROWSER_PRIORITY_INSTRUCTION}"
     )
+
+
+def test_peer_messaging_adds_sender_provenance_instruction() -> None:
+    peer = AgentSpec(spec_version=1, instructions="Agent prompt", peer_messaging=True)
+    ordinary = AgentSpec(spec_version=1, instructions="Agent prompt")
+
+    assert PEER_MESSAGE_INSTRUCTION in build_instructions(peer, None, [])
+    assert PEER_MESSAGE_INSTRUCTION not in build_instructions(ordinary, None, [])
+
+
+def test_native_startup_instructions_add_stable_peer_provenance() -> None:
+    peer = AgentSpec(spec_version=1, instructions="Agent prompt", peer_messaging=True)
+    ordinary = AgentSpec(spec_version=1, instructions="Agent prompt")
+
+    assert native_startup_instructions(peer) == f"Agent prompt\n\n{PEER_MESSAGE_INSTRUCTION}"
+    assert native_startup_instructions(ordinary) == "Agent prompt"
 
 
 def test_embedded_browser_guidance_names_registered_tools() -> None:

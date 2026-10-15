@@ -3264,7 +3264,10 @@ async def _send_to_peer_session(
                 ),
             }
         )
-    if is_session_closed(target_snapshot.get("labels"), target_snapshot.get("title")):
+    if is_session_closed(
+        _string_mapping(target_snapshot.get("labels")),
+        _optional_string(target_snapshot.get("title")),
+    ):
         return json.dumps(
             {
                 "error": "session_closed",

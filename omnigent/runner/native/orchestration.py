@@ -7054,28 +7054,23 @@ def _claude_native_model_from_spec(agent_spec: AgentSpec | ResolvedSpec | None) 
 def _native_startup_raw_instructions_from_spec(
     agent_spec: AgentSpec | ResolvedSpec | None,
 ) -> str | None:
-    """Read raw author instructions for a native harness's startup-additive channel.
+    """Read stable instructions for a native harness startup channel.
 
     Shared by claude-native's ``--append-system-prompt`` and codex-native's
-    ``developer_instructions``. Returns the verbatim ``AgentSpec.instructions``
-    text only — never the fully framework-composed per-turn string. Terminal
-    launch is not tied to any one turn, while the composed string is
-    assembled per conversation for the turn about to run (late-bound
-    framework text like ``SHARED_SESSION_AUTHORSHIP_INSTRUCTION`` is
-    selected per conversation), so a startup channel carrying one turn's
-    composition would address every later turn with it.
+    ``developer_instructions``. Returns author text plus stable spec-level peer
+    provenance. It excludes late-bound per-turn framework text because startup
+    instructions apply to every later turn.
 
     :param agent_spec: Agent spec object, or a resolved wrapper carrying a
         ``spec`` attribute. ``None`` means no spec was available.
-    :returns: The original resolved instructions text, or ``None`` when
-        absent/whitespace-only.
+    :returns: Startup instructions, or ``None`` when no text applies.
     """
-    from omnigent.runtime.prompt import raw_author_instructions
+    from omnigent.runtime.prompt import native_startup_instructions
 
     spec = agent_spec.spec if isinstance(agent_spec, ResolvedSpec) else agent_spec
     if spec is None:
         return None
-    return raw_author_instructions(spec)
+    return native_startup_instructions(spec)
 
 
 def _cursor_native_model_from_spec(agent_spec: AgentSpec | ResolvedSpec | None) -> str | None:

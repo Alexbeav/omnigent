@@ -27,7 +27,9 @@ and steers messages while the agent is busy.
   marked and the choice persists.
 - `slash-menu`: typing `/` opens commands and skills with keyboard navigation.
 - `attachments`: attach button, paste, and drop onto the transcript; chips can
-  be removed. State: unsupported file type rejected without losing the message.
+  be removed. States: unsupported file type rejected without losing the
+  message; common raster pictures with a missing or generic browser MIME type
+  still use the image path.
 - `send-shortcut`: Enter or Mod+Enter, chosen in settings; only one gesture sends.
 - `queue-and-steer`: messages sent while the agent is busy wait in a queue and
   can be steered into the running turn.
@@ -116,7 +118,11 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
 - **`attachments`:**
   `tests/e2e_ui/chat/test_composer_attachments.py::test_attach_then_remove_file`,
   `tests/e2e_ui/chat/test_composer_attachments.py::test_file_dropped_on_the_transcript_attaches`,
-  `tests/e2e_ui/chat/test_composer_attachments.py::test_landing_rejects_unsupported_type_and_keeps_message`
+  `tests/e2e_ui/chat/test_composer_attachments.py::test_landing_rejects_unsupported_type_and_keeps_message`.
+  The shared unit boundary covers MIME-less pictures and paste:
+  `web/src/lib/attachments.test.ts`,
+  `web/src/hooks/useComposerAttachments.test.tsx`, and
+  `web/src/store/chatStore.test.ts`.
 - **`send-shortcut`:**
   `tests/e2e_ui/chat/test_composer_submit_shortcut.py::test_submit_with_mod_enter_persists_and_is_the_only_send_gesture`
 - **`queue-and-steer`:**
@@ -157,3 +163,7 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
   terminal command actually landed before blaming the mirror.
 - The mock environment configures Claude and Codex only. Other harnesses'
   catalogs need real CLIs or credentials.
+- ACP image delivery depends on the agent's initialize capability. An agent
+  must advertise `promptCapabilities.image`; otherwise it receives an image
+  marker, not the image bytes. See `docs/primary-platform-attachments.md` for
+  the tested native and ACP paths.

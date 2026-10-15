@@ -317,6 +317,7 @@ def _materialize_antigravity_agent_spec(tmpdir: Path) -> Path:
         # ``_ensure_comment_relay_started``) derives its advertised
         # ``sys_session_*`` write surface from this ``spawn: true`` gate.
         "spawn": True,
+        "peer_messaging": True,
         # Without an ``os_env`` block the runner's filesystem APIs 404 (see
         # ``_require_os_env`` in ``omnigent/runner/app.py``). agy already
         # operates on the user's workspace with full filesystem access, so

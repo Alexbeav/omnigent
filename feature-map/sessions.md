@@ -9,6 +9,11 @@ the header menu), and each place is a separate entry point.
 
 ## Sub-features
 
+- `child-discovery`: the selected root session expands a list of child chats
+  with their status and direct links in the sidebar.
+
+- `multi-pane`: desktop can show three sessions side by side with separate transcripts and composers; mobile keeps one pane.
+
 - `pin`: pinned sessions move to their own section and back.
 - `rename`: from the row, the header menu, or the header title; long titles are
   limited.
@@ -83,6 +88,13 @@ create or select a closable Browser soft tab automatically.
 recent sessions. Continue pressing Tab (or Shift+Tab) to cycle, release Control
 to switch, or press Escape to cancel.
 
+**Desktop chat panes:** open a session, then choose another session with
+`Add pane…`. You can also drag a sidebar session to the marked chat edge. Use
+the external-link button to open a session in a separate browser window.
+
+**Child chats:** expand the child-chat list beneath the selected session in
+the sidebar, then choose a child. The Agents panel still shows the full tree.
+
 ## Driving it with the repro environment
 
 Preconditions: a running instance (`verify-env start`, then `verify-env
@@ -97,6 +109,17 @@ verify-env run -- python -m pytest <test> --ui-skip-build --video=on \
 Tests that stop a runner, restart the server, or read the database cannot run
 through `verify-env run`. They are marked "own environment" below; run them with
 plain `uv run pytest`, which starts a private server for the test.
+
+- **`child-discovery`:** `web/src/shell/SidebarChildSessions.test.tsx` checks
+  child status, navigation context, and closed-child filtering.
+  `tests/browser_ui/chat/test_conversation_panes.py::test_three_chat_columns_resize_independently`
+  shows the sidebar list in an isolated browser.
+
+- **`multi-pane`:** `web/src/shell/ConversationPanes.test.tsx` covers the pane
+  limit, duplicate removal, and accessible add control. Manually open three
+  chats, keep a different draft and scroll position in each, resize each pane,
+  use sidebar edge-drop, and use popout. At a viewport below 768 pixels, only
+  the primary chat must remain visible.
 
 - **`pin`:**
   `tests/e2e_ui/sessions/test_sidebar_pin_unpin.py::test_unpin_moves_session_back_to_recent`
@@ -196,6 +219,9 @@ plain `uv run pytest`, which starts a private server for the test.
   tabs; all should be signed out.
 
 ## Gotchas
+
+- Secondary panes are desktop-only. Browser security makes outside-window drag
+  unreliable, so popout uses an explicit button instead.
 
 - Browser storage sharing is limited to one desktop window and app run;
   restarting the app clears it. Closing an individual tab does not.

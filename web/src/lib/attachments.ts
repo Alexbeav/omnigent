@@ -38,6 +38,11 @@ const COMPRESSIBLE_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp
 // IMAGE_UNCOMPRESSED_UPLOAD_BYTES on the server.
 const UNCOMPRESSED_IMAGE_LIMIT_MB = 5;
 
+// Browsers can leave File.type empty (or generic) for files selected from
+// network drives and some OS photo providers. Mirrors the server's filename
+// fallback for the image formats it can compress.
+const COMPRESSIBLE_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+
 export type AttachmentCategory = keyof typeof ATTACHMENT_SIZE_LIMITS_MB;
 
 /** Keep unnamed clipboard images consistent before and after upload. */
@@ -166,7 +171,12 @@ export function classifyAttachment(file: File): AttachmentCategory | null {
 
   // Match the server even when a browser mislabels a ZIP as text/plain.
   if (FILESYSTEM_ATTACHMENT_EXTENSIONS.has(ext)) return "file";
-  if (type.startsWith("image/")) return "image";
+  if (
+    type.startsWith("image/") ||
+    ((type === "" || type === "application/octet-stream") && COMPRESSIBLE_IMAGE_EXTENSIONS.has(ext))
+  ) {
+    return "image";
+  }
   if (type === "application/pdf" || ext === ".pdf") return "pdf";
   if (
     type.startsWith("text/") ||
@@ -207,7 +217,9 @@ export function validateAttachments(files: File[]): AttachmentValidation {
     // Non-compressible images (SVG, …) can't be shrunk server-side, so they
     // keep the smaller cap; compressible raster images get the large cap.
     const limitMb =
-      category === "image" && !COMPRESSIBLE_IMAGE_MIMES.has(file.type || "")
+      category === "image" &&
+      !COMPRESSIBLE_IMAGE_MIMES.has(file.type || "") &&
+      !COMPRESSIBLE_IMAGE_EXTENSIONS.has(extensionOf(file.name || ""))
         ? UNCOMPRESSED_IMAGE_LIMIT_MB
         : ATTACHMENT_SIZE_LIMITS_MB[category];
     if (file.size > limitMb * 1024 * 1024) {

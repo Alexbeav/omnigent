@@ -81,7 +81,7 @@ export function buildReconnectCommand({
   // dialog AND remains valid when pasted into a shell.
   const quotedServerUrl = quoteShellArgument(serverUrl);
   if (state === "host_offline") {
-    return ["omnigent host \\", `  --server ${quotedServerUrl}`].join("\n");
+    return ["omnigent host --background \\", `  --server ${quotedServerUrl}`].join("\n");
   }
   // Every native TUI wrapper resumes through its own verb (`omnigent devin
   // --resume …`), and the verb is the registry key — the generic

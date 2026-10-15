@@ -8,6 +8,7 @@ import type * as ChatStoreModule from "@/store/chatStore";
 import { useChatStore, type ChatState } from "@/store/chatStore";
 import { conversationRegistry } from "@/store/conversationRegistry";
 import { SideChatPane } from "./SideChatPane";
+import { clearSessionDrafts, getSessionDraft } from "@/lib/sessionDrafts";
 
 vi.mock("@/store/chatStore", async (importOriginal) => ({
   ...(await importOriginal<typeof ChatStoreModule>()),
@@ -16,9 +17,16 @@ vi.mock("@/store/chatStore", async (importOriginal) => ({
 
 vi.mock("@/components/composer/ComposerAddMenu", () => ({ ComposerAddMenu: () => null }));
 vi.mock("@/components/ComposerMicButton", () => ({ ComposerMicButton: () => null }));
-const sessionLabels = vi.hoisted(() => ({ current: {} as Record<string, string> }));
+const sessionLabels = vi.hoisted(() => ({
+  current: {} as Record<string, string>,
+  permissionLevel: null as number | null,
+}));
 vi.mock("@/hooks/useSession", () => ({
-  useSession: () => ({ session: { labels: sessionLabels.current }, isLoading: false, error: null }),
+  useSession: () => ({
+    session: { labels: sessionLabels.current, permissionLevel: sessionLabels.permissionLevel },
+    isLoading: false,
+    error: null,
+  }),
 }));
 vi.mock("@/hooks/useWorkingLabelTick", () => ({ useWorkingLabelTick: () => 0 }));
 
@@ -34,7 +42,9 @@ const renderPane = (ui: ReactNode) =>
   });
 
 beforeEach(() => {
+  clearSessionDrafts();
   sessionLabels.current = {};
+  sessionLabels.permissionLevel = null;
   conversationRegistry.clear();
   send.mockReset().mockResolvedValue(undefined);
   vi.spyOn(sessionsApi, "interrupt").mockResolvedValue({ queued: true });
@@ -64,6 +74,132 @@ afterEach(() => {
   conversationRegistry.clear();
   useChatStore.setState(initialStoreState);
   localStorage.clear();
+  clearSessionDrafts();
+});
+
+it("keeps an ordinary pane draft across unmount", () => {
+  const first = renderPane(<SideChatPane childId={childId} showFullHistory />);
+  fireEvent.change(screen.getByTestId("side-chat-input"), {
+    target: { value: "draft for this pane" },
+  });
+  expect(getSessionDraft(childId)?.text).toBe("draft for this pane");
+  first.unmount();
+
+  renderPane(<SideChatPane childId={childId} showFullHistory />);
+  expect(screen.getByTestId("side-chat-input")).toHaveValue("draft for this pane");
+});
+
+describe("side-chat attachments", () => {
+  const fileDrag = (files: File[]) => ({
+    types: ["Files"],
+    files,
+  });
+
+  it("attaches a pasted image and sends it only to the pane conversation", () => {
+    act(() => conversationRegistry.acquire(childId).setState({ sessionStatus: "idle" }));
+    renderPane(<SideChatPane childId={childId} showFullHistory />);
+    const image = new File(["png"], "pasted.png", { type: "image/png" });
+    const pasted = fireEvent.paste(screen.getByTestId("side-chat-input"), {
+      clipboardData: {
+        items: [{ kind: "file", getAsFile: () => image }],
+      },
+    });
+
+    expect(pasted).toBe(false);
+    expect(screen.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
+    fireEvent.click(screen.getByTestId("side-chat-send"));
+    expect(send).toHaveBeenCalledExactlyOnceWith("", "agent_side", [image], {
+      pinnedConversationId: childId,
+    });
+  });
+
+  it("validates pane-local drops and keeps them out of the primary surface", () => {
+    act(() => conversationRegistry.acquire(childId).setState({ sessionStatus: "idle" }));
+    renderPane(
+      <div>
+        <div data-testid="primary-surface" />
+        <SideChatPane childId={childId} showFullHistory />
+      </div>,
+    );
+    const target = screen.getByTestId("side-chat-drop-target");
+    const unsupported = new File(["video"], "clip.mp4", { type: "video/mp4" });
+
+    fireEvent.drop(target, { dataTransfer: fileDrag([unsupported]) });
+    expect(screen.getByTestId("side-chat-attachment-error")).toHaveTextContent(
+      '"clip.mp4" can\'t be attached',
+    );
+    expect(screen.queryByRole("button", { name: "Remove clip.mp4" })).toBeNull();
+
+    const image = new File(["png"], "generic.png", { type: "application/octet-stream" });
+    expect(
+      fireEvent.drop(screen.getByTestId("primary-surface"), {
+        dataTransfer: fileDrag([image]),
+      }),
+    ).toBe(true);
+    expect(screen.queryByRole("button", { name: "Remove generic.png" })).toBeNull();
+
+    fireEvent.drop(target, { dataTransfer: fileDrag([image]) });
+    expect(screen.getByRole("button", { name: "Remove generic.png" })).toBeVisible();
+    expect(screen.queryByTestId("side-chat-attachment-error")).toBeNull();
+    const picker = target.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(picker.accept).toContain(".zip");
+    expect(picker.accept).toContain(".docx");
+    expect(picker.accept).toContain(".sqlite3");
+  });
+
+  it("restores a failed send for stable retry without overwriting later edits", async () => {
+    act(() => conversationRegistry.acquire(childId).setState({ sessionStatus: "idle" }));
+    renderPane(<SideChatPane childId={childId} showFullHistory />);
+    const input = screen.getByTestId("side-chat-input");
+    const image = new File(["png"], "retry.png", { type: "image/png" });
+    fireEvent.change(input, { target: { value: "retry this" } });
+    fireEvent.paste(input, {
+      clipboardData: { items: [{ kind: "file", getAsFile: () => image }] },
+    });
+    fireEvent.click(screen.getByTestId("side-chat-send"));
+    expect(input).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Remove retry.png" })).toBeNull();
+
+    act(() =>
+      conversationRegistry.acquire(childId).setState({
+        failedSendDraft: {
+          conversationId: childId,
+          text: "retry this",
+          files: [image],
+          stableId: "stable_failed_send",
+        },
+      }),
+    );
+
+    await waitFor(() => expect(input).toHaveValue("retry this"));
+    expect(screen.getByRole("button", { name: "Remove retry.png" })).toBeVisible();
+    expect(conversationRegistry.acquire(childId).getState().pendingRetryStableId).toBe(
+      "stable_failed_send",
+    );
+    expect(conversationRegistry.acquire(childId).getState().restoredSendDraft).toMatchObject({
+      stableId: "stable_failed_send",
+      delivered: false,
+    });
+
+    fireEvent.change(input, { target: { value: "newer edit wins" } });
+    act(() =>
+      conversationRegistry.acquire(childId).setState({
+        restoredSendDraft: {
+          conversationId: childId,
+          text: "retry this",
+          files: [image],
+          stableId: "stable_failed_send",
+          delivered: true,
+        },
+      }),
+    );
+
+    await waitFor(() =>
+      expect(conversationRegistry.acquire(childId).getState().restoredSendDraft).toBeNull(),
+    );
+    expect(input).toHaveValue("newer edit wins");
+    expect(screen.getByRole("button", { name: "Remove retry.png" })).toBeVisible();
+  });
 });
 
 describe("side-chat working indicator", () => {
@@ -313,6 +449,14 @@ describe("side-chat interrupt", () => {
 });
 
 describe("side chat sealed by the server", () => {
+  it("keeps a shared read-only chat viewable without a composer or stop request", () => {
+    sessionLabels.permissionLevel = 1;
+    renderPane(<SideChatPane childId={childId} showFullHistory />);
+    expect(screen.getByText("You have read-only access to this chat.")).toBeInTheDocument();
+    expect(screen.queryByTestId("side-chat-input")).toBeNull();
+    expect(sessionsApi.stopSession).not.toHaveBeenCalled();
+  });
+
   it("is read-only once the server marks the child closed", () => {
     sessionLabels.current = { "omnigent.closed": "true" };
     renderPane(<SideChatPane childId={childId} />);

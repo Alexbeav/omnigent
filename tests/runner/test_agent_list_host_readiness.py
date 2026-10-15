@@ -5,7 +5,24 @@ import json
 import httpx
 import pytest
 
+from omnigent.harness_availability import harness_launch_availability
 from omnigent.runner.tool_dispatch import execute_tool
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [
+        ({"acp": True, "acp:cline": True}, (False, "unconfigured")),
+        ({"acp": True, "acp:oh-my-pi": True}, (True, None)),
+        ({"acp": False}, (False, "unconfigured")),
+        ({"acp": True}, (None, None)),
+        ({}, (None, None)),
+    ],
+)
+def test_custom_acp_agent_does_not_inherit_another_agents_readiness(
+    report: dict[str, bool], expected: tuple[bool | None, str | None]
+) -> None:
+    assert harness_launch_availability("acp:oh-my-pi", report) == expected
 
 
 @pytest.mark.asyncio

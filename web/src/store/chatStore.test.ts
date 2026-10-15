@@ -16252,6 +16252,45 @@ describe("chatStore — background cross-session flush", () => {
     expect(useChatStore.getState().queuedMessages).toEqual([]);
   });
 
+  it("posts a MIME-less picture as an image block", async () => {
+    seedConversationsCache([conv("conv_active", "running"), conv("conv_bg", "idle")]);
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/sessions/conv_bg/resources/files") && init?.method === "POST") {
+        return mockResponse({
+          id: "file_bg_no_mime",
+          name: "shot.png",
+          metadata: { filename: "shot.png", bytes: 4, created_at: 0 },
+        });
+      }
+      return defaultFetchHandler(input, init);
+    });
+    const file = new File(["png!"], "shot.png");
+    useChatStore.setState({
+      conversationId: "conv_active",
+      queuedMessages: [
+        { queueId: "q_1", text: "see this", conversationId: "conv_bg", files: [file] },
+      ],
+    });
+
+    useChatStore.getState().flushBackgroundQueues();
+    await tick();
+    await tick();
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith("/v1/sessions/conv_bg/events") &&
+        (init as RequestInit | undefined)?.method === "POST",
+    );
+    expect(post).toBeDefined();
+    const content = JSON.parse((post![1] as RequestInit).body as string).data.content;
+    expect(content[0]).toEqual({
+      type: "input_image",
+      file_id: "file_bg_no_mime",
+      filename: "shot.png",
+    });
+  });
+
   it("re-queues the message when the attachment upload fails", async () => {
     // A failure in the upload phase must re-queue + cool down exactly like a
     // failed POST — the guard spans upload and post together.

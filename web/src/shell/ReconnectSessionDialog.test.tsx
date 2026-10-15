@@ -72,6 +72,7 @@ describe("buildReconnectCommand", () => {
       state: "host_offline",
     });
     expect(cmd).toContain("omnigent host");
+    expect(cmd).toContain("--background");
     expect(cmd).toContain("--server 'https://example.databricksapps.com'");
     // The --profile flag was removed from the CLI; emitting it here would
     // hand users a command that errors with "No such option".

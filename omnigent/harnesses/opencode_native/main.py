@@ -98,6 +98,7 @@ def _materialize_opencode_agent_spec(
         # sub-agent sessions. The relay derives its advertised tool set from
         # this spec via ToolManager.
         "spawn": True,
+        "peer_messaging": True,
         "os_env": {
             "type": "caller_process",
             "cwd": ".",

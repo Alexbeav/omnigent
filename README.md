@@ -378,6 +378,12 @@ To suppress the automatic browser tab, use `omni host --no-open` or set
 --background` and `omni start`. Sign-in may still open a browser; use
 `--non-interactive` in scripts to fail if sign-in is required.
 
+To connect to an existing server and return to your terminal, run
+`omni host --server 'https://your-server.example' --background`.
+The detached host can run after you close the terminal while its operating environment remains active.
+See [background hosts](docs/background-hosts.md) for startup services and
+the limits when a foreground host already runs.
+
 A session can also start itself: the **Automations** page runs an agent on a
 recurring schedule. See the [automations guide](https://github.com/omnigent-ai/omnigent/blob/main/docs/AUTOMATIONS.md)
 for the schedule format, the REST API, and the current limits.

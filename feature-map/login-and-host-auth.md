@@ -52,6 +52,8 @@ and `disable`.
 
 **Web:** a harness that needs sign-in is marked in the harness picker, and a
 session whose host went offline offers reconnect (see [sessions](./sessions.md)).
+Host connection and reconnection commands include `--background`.
+See [background hosts](../docs/background-hosts.md) for reuse and startup limits.
 
 **Desktop:** Connect on the setup screen (or the server selector) to an OIDC
 server; relaunching the app, New Window, deep links, and switching servers on a

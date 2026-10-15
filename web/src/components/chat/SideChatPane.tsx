@@ -22,13 +22,22 @@ import {
   shouldShowWorkingIndicator,
   stripGatedSubagentRoutingChips,
 } from "@/components/chat/chatBubbleParts";
-import { ChatComposer, ComposerSendButton } from "@/components/composer/ChatComposer";
+import {
+  ChatComposer,
+  ComposerFeedbackRow,
+  ComposerSendButton,
+} from "@/components/composer/ChatComposer";
 import { ComposerAddMenu } from "@/components/composer/ComposerAddMenu";
 import { ComposerMicButton } from "@/components/ComposerMicButton";
 import { ComposerAttachments } from "@/components/ComposerAttachments";
 import { ReplyDraftBlocks } from "@/components/composer/ReplyDraftBlocks";
 import { Button } from "@/components/ui/button";
-import { useChatStore, ensureConversationStreamed } from "@/store/chatStore";
+import {
+  useChatStore,
+  ensureConversationStreamed,
+  committedItemProvesDelivery,
+  type ChatState,
+} from "@/store/chatStore";
 import { useConversationEntryState } from "@/hooks/useConversationEntryState";
 import { useDictationInsert } from "@/hooks/useDictationInsert";
 import { useSession } from "@/hooks/useSession";
@@ -36,6 +45,12 @@ import { usesNativeSideChatFork } from "@/lib/sideChat";
 import { serializeReplyDraft } from "@/lib/replyDraft";
 import { interrupt, stopSession } from "@/lib/sessionsApi";
 import { ConversationScopeContext } from "@/components/chat/conversationScope";
+import { getSessionDraft, setSessionDraft } from "@/lib/sessionDrafts";
+import { conversationRegistry } from "@/store/conversationRegistry";
+import { useComposerAttachments } from "@/hooks/useComposerAttachments";
+import { useFileDropTarget } from "@/hooks/useFileDropTarget";
+import { FileDropOverlay } from "@/components/FileDropOverlay";
+import { isEditorLevel } from "@/lib/permissionsApi";
 
 /** A `pending:` tab has no child session yet; its first send creates the fork. */
 function isPendingSideChat(id: string): boolean {
@@ -96,18 +111,23 @@ export function SideChatPane({
   childId,
   onStart,
   readOnly: restoredReadOnly = false,
+  showFullHistory = false,
 }: {
   childId: string;
   onStart?: (text: string) => Promise<void>;
   /** A dead, restored Codex side chat: show the transcript but no composer, and
    *  stop its session. Defaults to false (a live, sendable side chat). */
   readOnly?: boolean;
+  /** Render an ordinary session in a split pane instead of hiding forked history. */
+  showFullHistory?: boolean;
 }) {
   const pending = isPendingSideChat(childId);
   const [starting, setStarting] = useState(false);
   // The server seals a side chat whose fork died with its runner.
   const { session } = useSession(pending ? null : childId);
-  const readOnly = restoredReadOnly || session?.labels?.["omnigent.closed"] === "true";
+  const lacksWriteAccess = !isEditorLevel(session?.permissionLevel ?? null);
+  const readOnly =
+    restoredReadOnly || session?.labels?.["omnigent.closed"] === "true" || lacksWriteAccess;
   // Open the child's stream once (real tabs only) so it hydrates and streams
   // here. The store guards a double-bind and re-binds a failed entry, so
   // re-mounts / tab switches / retries are cheap.
@@ -117,11 +137,17 @@ export function SideChatPane({
   // A restored, read-only Codex side chat is a dead ephemeral fork; stop its
   // session once (best-effort) so nothing lingers server-side.
   useEffect(() => {
-    if (readOnly && !pending && !killedSideChats.has(childId)) {
+    if (
+      readOnly &&
+      !lacksWriteAccess &&
+      !showFullHistory &&
+      !pending &&
+      !killedSideChats.has(childId)
+    ) {
       killedSideChats.add(childId);
       void stopSession(childId).catch(() => {});
     }
-  }, [readOnly, pending, childId]);
+  }, [readOnly, lacksWriteAccess, showFullHistory, pending, childId]);
 
   // A real tab reads the child entry; a pending tab has none (null → empty).
   const state = useConversationEntryState(pending ? null : childId);
@@ -136,6 +162,8 @@ export function SideChatPane({
     boundAgentId,
     loadingConversation,
     conversationLoadError,
+    failedSendDraft,
+    restoredSendDraft,
   } = state;
 
   // Hide the forked-in history: snapshot the item ids present once hydration
@@ -143,7 +171,7 @@ export function SideChatPane({
   // GENERIC forks only — they copy the parent transcript. A native Codex child
   // already holds only its own turns (context lives in the native thread), so
   // filtering there would wrongly hide the side chat's first question.
-  const filterHistory = !usesNativeSideChatFork(sessionHarness);
+  const filterHistory = !showFullHistory && !usesNativeSideChatFork(sessionHarness);
   // Load the persisted boundary when the child changes (mount / rekey); the
   // in-mount ref avoids re-reading storage every render and tracks whether we've
   // actually observed a load run, so we don't capture a boundary on the initial
@@ -275,8 +303,14 @@ export function SideChatPane({
           ) : isEmpty ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
               <MessagesSquareIcon className="size-6 text-muted-foreground" />
-              <p className="text-ui font-medium text-foreground">Side chat</p>
-              <p className="max-w-[36ch] text-sm text-muted-foreground">{EMPTY_STATE_BODY}</p>
+              <p className="text-ui font-medium text-foreground">
+                {showFullHistory ? "Chat" : "Side chat"}
+              </p>
+              <p className="max-w-[36ch] text-sm text-muted-foreground">
+                {showFullHistory
+                  ? "Send a message to continue this conversation."
+                  : EMPTY_STATE_BODY}
+              </p>
             </div>
           ) : (
             <div className="flex flex-col gap-4">
@@ -297,7 +331,9 @@ export function SideChatPane({
         <div className="shrink-0 px-3 pt-3 pb-5">
           {readOnly ? (
             <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-center text-sm text-muted-foreground">
-              This side chat has ended and can’t be continued.
+              {lacksWriteAccess
+                ? "You have read-only access to this chat."
+                : "This side chat has ended and can’t be continued."}
             </p>
           ) : (
             <SideChatComposer
@@ -309,6 +345,10 @@ export function SideChatPane({
               pending={pending}
               starting={starting}
               onStart={onStart ? startSideChat : undefined}
+              ordinarySession={showFullHistory}
+              failedSendDraft={failedSendDraft}
+              restoredSendDraft={restoredSendDraft}
+              committedBlocks={blocks}
             />
           )}
         </div>
@@ -333,6 +373,10 @@ function SideChatComposer({
   pending,
   starting,
   onStart,
+  ordinarySession,
+  failedSendDraft,
+  restoredSendDraft,
+  committedBlocks,
 }: {
   childId: string;
   agentId: string | null;
@@ -342,16 +386,36 @@ function SideChatComposer({
   pending: boolean;
   starting: boolean;
   onStart?: (text: string) => Promise<void>;
+  ordinarySession: boolean;
+  failedSendDraft: ChatState["failedSendDraft"];
+  restoredSendDraft: ChatState["restoredSendDraft"];
+  committedBlocks: ChatState["blocks"];
 }) {
   const send = useChatStore((s) => s.send);
   const queryClient = useQueryClient();
   const clearSideChatDraft = useChatStore((s) => s.clearSideChatDraft);
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const initialDraft = !pending && ordinarySession ? getSessionDraft(childId) : undefined;
+  const [text, setText] = useState(initialDraft?.text ?? "");
+  const {
+    files,
+    attachmentError,
+    addFiles,
+    removeFile,
+    replaceFiles,
+    onPaste,
+    clearError,
+    clear: clearAttachments,
+  } = useComposerAttachments({ initialFiles: initialDraft?.files ?? [] });
   const [autoSend, setAutoSend] = useState<string | null>(null);
   const [interrupting, setInterrupting] = useState(false);
+  const [dropTarget, setDropTarget] = useState<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textRef = useRef(text);
+  textRef.current = text;
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const isDragActive = useFileDropTarget(pending ? null : dropTarget, addFiles);
   const voiceSnapshotRef = useRef("");
   const dictation = useDictationInsert(text, setText, textareaRef);
   // A pending tab opened by "Ask in side chat" carries the selection to quote.
@@ -364,13 +428,70 @@ function SideChatComposer({
   // just populate). Consumed once on mount; the send waits until the child's
   // agent binding is known. Live tabs only (a pending tab has no child yet).
   useEffect(() => {
-    if (pending) return;
+    if (pending || ordinarySession) return;
     const draft = useChatStore.getState().sideChatDrafts[childId];
     if (draft) {
       clearSideChatDraft(childId);
       setAutoSend(draft);
     }
-  }, [pending, childId, clearSideChatDraft]);
+  }, [pending, ordinarySession, childId, clearSideChatDraft]);
+  useEffect(() => {
+    if (!ordinarySession || pending) return;
+    setSessionDraft(childId, { text, files });
+  }, [ordinarySession, pending, childId, text, files]);
+  useEffect(() => {
+    if (failedSendDraft === null || failedSendDraft.conversationId !== childId) return;
+    const entry = conversationRegistry.peek(childId);
+    if (entry === undefined) return;
+    if (committedItemProvesDelivery(committedBlocks, failedSendDraft)) {
+      entry.setState({ failedSendDraft: null });
+      return;
+    }
+    entry.setState({
+      failedSendDraft: null,
+      pendingRetryStableId: failedSendDraft.stableId ?? null,
+    });
+    if (textRef.current.trim() !== "" || filesRef.current.length > 0) {
+      entry.setState({ pendingRetryStableId: null });
+      return;
+    }
+    setText(failedSendDraft.text);
+    replaceFiles(failedSendDraft.files);
+    if (failedSendDraft.stableId) {
+      entry.setState({
+        restoredSendDraft: {
+          conversationId: failedSendDraft.conversationId,
+          stableId: failedSendDraft.stableId,
+          text: failedSendDraft.text,
+          files: failedSendDraft.files,
+          replyDraft: failedSendDraft.replyDraft,
+          serverRefused: failedSendDraft.serverRefused,
+          delivered: false,
+        },
+      });
+    }
+    if (ordinarySession) {
+      setSessionDraft(childId, { text: failedSendDraft.text, files: failedSendDraft.files });
+    }
+    textareaRef.current?.focus();
+  }, [childId, committedBlocks, failedSendDraft, ordinarySession, replaceFiles]);
+  useEffect(() => {
+    if (
+      restoredSendDraft === null ||
+      !restoredSendDraft.delivered ||
+      restoredSendDraft.conversationId !== childId
+    ) {
+      return;
+    }
+    conversationRegistry.peek(childId)?.setState({ restoredSendDraft: null });
+    const filesUnedited =
+      filesRef.current.length === restoredSendDraft.files.length &&
+      filesRef.current.every((file) => restoredSendDraft.files.includes(file));
+    if (textRef.current !== restoredSendDraft.text || !filesUnedited) return;
+    setText("");
+    clearAttachments();
+    if (ordinarySession) setSessionDraft(childId, { text: "", files: [] });
+  }, [childId, restoredSendDraft, ordinarySession, clearAttachments]);
   // Re-read the labels so a side chat the server just sealed turns read-only.
   const refreshLabels = useCallback(
     () => void queryClient.invalidateQueries({ queryKey: ["session", childId] }),
@@ -411,24 +532,26 @@ function SideChatComposer({
     if (busy || (trimmed.length === 0 && files.length === 0) || agentId === null) return;
     setText("");
     const outgoing = files;
-    setFiles([]);
+    clearAttachments();
+    if (ordinarySession) setSessionDraft(childId, { text: "", files: [] });
     void send(trimmed, agentId, outgoing.length > 0 ? outgoing : undefined, {
       pinnedConversationId: childId,
     }).finally(refreshLabels);
   };
 
   return (
-    <>
+    <div ref={setDropTarget} className="relative" data-testid="side-chat-drop-target">
+      {isDragActive && dropTarget ? <FileDropOverlay container={dropTarget} /> : null}
       {!pending && (
         <input
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,application/pdf,text/*,application/json"
+          accept="image/*,application/pdf,text/*,application/json,.zip,.docx,.xlsx,.pptx,.db,.sqlite,.sqlite3"
           className="hidden"
           onChange={(event) => {
             if (event.target.files) {
-              setFiles((prev) => [...prev, ...Array.from(event.target.files ?? [])]);
+              addFiles(Array.from(event.target.files ?? []));
               event.target.value = "";
             }
           }}
@@ -439,8 +562,12 @@ function SideChatComposer({
         input={{
           ref: textareaRef,
           value: text,
-          onChange: (event) => setText(event.target.value),
-          placeholder: "Ask a side question...",
+          onChange: (event) => {
+            setText(event.target.value);
+            if (attachmentError !== null) clearError();
+          },
+          onPaste: pending ? undefined : onPaste,
+          placeholder: ordinarySession ? "Message this chat..." : "Ask a side question...",
           disabled: !ready,
           "data-testid": "side-chat-input",
           onKeyDown: (event, intent) => {
@@ -462,13 +589,16 @@ function SideChatComposer({
                 onRemove={() => clearSideChatDraft(childId)}
               />
             ),
-          attachments:
-            !pending && files.length > 0 ? (
-              <ComposerAttachments
-                files={files}
-                onRemove={(index) => setFiles((prev) => prev.filter((_, i) => i !== index))}
-              />
-            ) : undefined,
+          attachments: !pending ? (
+            <>
+              {files.length > 0 && <ComposerAttachments files={files} onRemove={removeFile} />}
+              {attachmentError !== null && (
+                <ComposerFeedbackRow tone="error" data-testid="side-chat-attachment-error">
+                  {attachmentError}
+                </ComposerFeedbackRow>
+              )}
+            </>
+          ) : undefined,
         }}
         actions={{
           leading: pending ? null : (
@@ -508,6 +638,6 @@ function SideChatComposer({
           ),
         }}
       />
-    </>
+    </div>
   );
 }

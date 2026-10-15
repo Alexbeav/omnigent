@@ -127,7 +127,7 @@ import type {
   SessionStatus,
 } from "@/lib/types";
 import { uploadFile } from "@/lib/filesApi";
-import { attachmentKey } from "@/lib/attachments";
+import { attachmentKey, classifyAttachment } from "@/lib/attachments";
 import type { ActiveResponse } from "./types";
 import { supportsEffortControl } from "@/lib/sessionCapabilities";
 import { claudePermissionModeFromSession } from "@/lib/claudePermissionMode";
@@ -1605,9 +1605,10 @@ async function uploadFileBlock(sessionId: string, file: File): Promise<ContentBl
   const cached = uploadedFileBlockCache.get(file)?.get(sessionId);
   if (cached !== undefined) return cached;
   const uploaded = await uploadFile(sessionId, file);
-  const block: ContentBlock = file.type.startsWith("image/")
-    ? { type: "input_image", file_id: uploaded.id, filename: uploaded.filename }
-    : { type: "input_file", file_id: uploaded.id, filename: uploaded.filename };
+  const block: ContentBlock =
+    classifyAttachment(file) === "image"
+      ? { type: "input_image", file_id: uploaded.id, filename: uploaded.filename }
+      : { type: "input_file", file_id: uploaded.id, filename: uploaded.filename };
   let bySession = uploadedFileBlockCache.get(file);
   if (bySession === undefined) {
     bySession = new Map<string, ContentBlock>();

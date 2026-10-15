@@ -2,6 +2,7 @@ import { filterSessionScope } from "@/lib/sessionVisibility";
 import { getCurrentUserId } from "@/lib/identity";
 import { PinCapacityContext, SidebarConfigContext } from "@/lib/sidebarConfig";
 import { useSidebarDisplayPagination } from "@/hooks/useSidebarDisplayPagination";
+import { SidebarChildSessions } from "./SidebarChildSessions";
 import { useSidebarData, useSidebarView, type SidebarListQuery } from "@/hooks/useSidebarData";
 import { useArchivedSessions } from "@/hooks/useScopeCache";
 import { InfiniteScrollSentinel, type AutoLoadBudget } from "@/components/InfiniteScrollSentinel";
@@ -394,6 +395,8 @@ interface SidebarProps {
    * Whether the sidebar is peeking.
    */
   peek?: boolean;
+  /** Add a dragged session beside the active chat. Desktop only. */
+  onSplitConversation?: (conversationId: string) => void;
 }
 
 /**
@@ -592,6 +595,7 @@ function SidebarImpl({
   dragProgress = null,
   onOpenSearch,
   peek,
+  onSplitConversation,
 }: SidebarProps) {
   const sidebarData = useSidebarData();
   const branding = useBranding();
@@ -1256,6 +1260,7 @@ function SidebarImpl({
                     onDeselectAll={deselectAll}
                     onExitSelectionMode={exitSelectionMode}
                     getVisibleIdsRef={getVisibleIdsRef}
+                    onSplitConversation={onSplitConversation}
                   />
                 ) : (
                   <p role="status" className="px-2 py-1 text-muted-foreground text-sm">
@@ -1288,6 +1293,28 @@ function SidebarImpl({
 // bind) don't re-render the whole sidebar — its props are stable per switch
 // (AppShell stabilizes the callbacks with useCallback).
 export const Sidebar = memo(SidebarImpl);
+
+function ChatSplitDropZone({ left }: { left: number }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: "chat-split-edge",
+    data: { type: "chat-split" },
+  });
+  return createPortal(
+    <div
+      ref={setNodeRef}
+      style={{ left }}
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "pointer-events-auto fixed top-0 bottom-0 z-[70] hidden w-12 items-center justify-center border-r-2 border-dashed bg-primary/5 text-xs font-medium [writing-mode:vertical-rl] md:flex",
+        isOver && "border-primary bg-primary/15 text-primary",
+      )}
+    >
+      Drop to split chat
+    </div>,
+    getEmbedRoot() ?? document.body,
+  );
+}
 
 /**
  * Auto-loading pagination control. An IntersectionObserver fetches the next
@@ -1570,6 +1597,7 @@ interface ConversationListProps {
   onDeselectAll: () => void;
   onExitSelectionMode: () => void;
   getVisibleIdsRef: RefObject<() => string[]>;
+  onSplitConversation?: (conversationId: string) => void;
 }
 
 function ConversationList({
@@ -1592,6 +1620,7 @@ function ConversationList({
   onDeselectAll,
   onExitSelectionMode,
   getVisibleIdsRef,
+  onSplitConversation,
 }: ConversationListProps) {
   // Row-invariant values resolved once here and shared with rows via context
   // (see IsMobileContext etc.), so each row doesn't run its own copy.
@@ -1966,6 +1995,10 @@ function ConversationList({
       const dragged = activeDrag;
       setActiveDrag(null);
       if (!dragged) return;
+      if (event.over?.data.current?.type === "chat-split") {
+        onSplitConversation?.(dragged.id);
+        return;
+      }
       const target = (event.over?.data.current as SidebarDropTarget | undefined) ?? null;
       const action = resolveSidebarDrop(
         { id: dragged.id, project: dragged.project, isPinned: dragged.isPinned },
@@ -1994,7 +2027,15 @@ function ConversationList({
         if (action.unpin) onTogglePinned(dragged.id);
       }
     },
-    [activeDrag, moveToProject, expandProject, onTogglePinned, projects, saveOrder],
+    [
+      activeDrag,
+      moveToProject,
+      expandProject,
+      onTogglePinned,
+      onSplitConversation,
+      projects,
+      saveOrder,
+    ],
   );
 
   const expandAllProjects = useCallback((allNames: string[]) => {
@@ -2240,6 +2281,11 @@ function ConversationList({
           setOverProject(null);
         }}
       >
+        {activeDrag && onSplitConversation && (
+          <ChatSplitDropZone
+            left={scrollContainerRef.current?.getBoundingClientRect().right ?? 0}
+          />
+        )}
         <RowEditHoldContext.Provider value={reportRowEditing}>
           <div
             className="flex flex-col gap-6"
@@ -4189,10 +4235,11 @@ function ConversationRowImpl({
     );
   }
 
-  return (
+  return [
     // Drag props on the <li> so the whole row is grabbable; `isDragging` dims
     // it. `setRowRef` merges the drag node ref with the scroll-into-view ref.
     <li
+      key="conversation"
       ref={setRowRef}
       data-sidebar-session-id={conversation.id}
       onMouseDown={(event) => {
@@ -4668,8 +4715,11 @@ function ConversationRowImpl({
           </DialogContent>
         )}
       </Dialog>
-    </li>
-  );
+    </li>,
+    isActive && !selectionMode && !isArchived ? (
+      <SidebarChildSessions key="children" conversationId={conversation.id} />
+    ) : null,
+  ];
 }
 
 // The `conversation` fields the row renders. The comparator below compares

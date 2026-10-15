@@ -243,7 +243,12 @@ def _harness_availability_core(harness: str) -> HarnessAvailability:
         try:
             from omnigent.onboarding.acp_auth import acp_agents
 
-            return bool(acp_agents())
+            entries = acp_agents()
+            return (
+                any(entry.slug == harness.removeprefix("acp:") for entry in entries)
+                if harness.startswith("acp:")
+                else bool(entries)
+            )
         except Exception:
             return False
     if canonical in _SDK_HARNESSES:
@@ -1083,7 +1088,14 @@ def configured_harness_map() -> dict[str, HarnessAvailability]:
         }
         availability_cache = {cache_key: future.result() for cache_key, future in futures.items()}
 
-    return {
+    result = {
         spelling: availability_cache[cache_key]
         for spelling, cache_key in cache_key_by_spelling.items()
     }
+    try:
+        from omnigent.onboarding.acp_auth import acp_agents
+
+        result.update({f"acp:{entry.slug}": True for entry in acp_agents()})
+    except Exception:
+        pass
+    return result

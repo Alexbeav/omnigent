@@ -300,8 +300,15 @@ async def test_peer_send_to_self_is_refused() -> None:
 
 
 @pytest.mark.asyncio
-async def test_peer_send_to_a_closed_session_is_refused() -> None:
-    server = _FakeServer(peer={"labels": {"omnigent.closed": "true"}})
+@pytest.mark.parametrize(
+    "peer",
+    [
+        {"labels": {"omnigent.closed": "true"}},
+        {"labels": None, "title": "review:closed:conv_peer"},
+    ],
+)
+async def test_peer_send_to_a_closed_session_is_refused(peer: dict[str, object]) -> None:
+    server = _FakeServer(peer=peer)
 
     out = await _send(server, peer_messaging=True)
 
