@@ -41,6 +41,12 @@ describe("classifyAttachment", () => {
     expect(classifyAttachment(makeFile("a.jpg", "image/jpeg"))).toBe("image");
   });
 
+  it("classifies common pictures by extension only when the MIME is missing or generic", () => {
+    expect(classifyAttachment(makeFile("screenshot.PNG", ""))).toBe("image");
+    expect(classifyAttachment(makeFile("photo.jpeg", "application/octet-stream"))).toBe("image");
+    expect(classifyAttachment(makeFile("clip.png", "video/mp4"))).toBeNull();
+  });
+
   it("classifies PDF by MIME or extension", () => {
     expect(classifyAttachment(makeFile("a.pdf", "application/pdf"))).toBe("pdf");
     // Some browsers report an empty type for PDFs — fall back to extension.
@@ -115,6 +121,18 @@ describe("validateAttachments", () => {
   it("rejects files over their per-type size limit", () => {
     const bigImage = makeFile("huge.png", "image/png", ATTACHMENT_SIZE_LIMITS_MB.image * MB + 1);
     const { accepted, errors } = validateAttachments([bigImage]);
+    expect(accepted).toHaveLength(0);
+    expect(errors[0]).toContain("too large");
+  });
+
+  it("uses the compressible image limit for a MIME-less PNG", () => {
+    const png = makeFile("huge.png", "", 6 * MB);
+    expect(validateAttachments([png]).accepted).toEqual([png]);
+  });
+
+  it("keeps an explicit non-compressible image MIME at the smaller limit", () => {
+    const misleadingSvg = makeFile("misleading.png", "image/svg+xml", 6 * MB);
+    const { accepted, errors } = validateAttachments([misleadingSvg]);
     expect(accepted).toHaveLength(0);
     expect(errors[0]).toContain("too large");
   });
