@@ -272,3 +272,45 @@ The primary pane's draft and model must remain unchanged.
 The first focused upstream candidate is `contrib/image-mime-fallback` on pinned main, committed as `97a57e7f0`.
 Its 21 attachment tests pass after reproducing the original failure.
 Open #8391 has direct semantic overlap, so no duplicate PR is published.
+
+## Host upgrades and silent sign-in startup, 2026-10-16
+
+Alex selected automatic startup at sign-in without a visible terminal or browser.
+Five idle hosts now run the qualified application `38f30aa96`, with Omnigent and both SDKs at `0.18.0`.
+Each retains its original production host ID and reports online.
+The server image and database were unchanged by this host rollout.
+
+| Host | Installed runtime and startup |
+| --- | --- |
+| Eagle native Windows | Separate frozen environment, enabled `OmnigentHostV018` sign-in task and hidden waiting WScript supervisor. |
+| Pegasus native Windows | Same isolated environment and task model as Eagle native Windows. |
+| Pegasus WSL | Separate frozen environment, existing enabled systemd user service with lingering, and hidden Windows keepalive task. |
+| Steam Deck | Updated uv tool from pinned source, enabled systemd user service with lingering and explicit Node PATH. |
+| Pacifica / macbook | Updated uv tool from pinned source, canonical `ai.omnigent.host` LaunchAgent, Node PATH and Intel `cryptography<49` constraint. |
+
+The native Windows hosts retain their old global v0.17 CLI and legacy task backups.
+Pegasus WSL retains its old global v0.13 CLI and saved unit.
+Read the selected service executable's package metadata rather than the legacy command on PATH.
+Pacifica's legacy plist is outside `LaunchAgents`, so it cannot create a duplicate at the next sign-in.
+The [Windows installer and rollback helpers](../deploy/hosts/windows-signin/README.md) preserve old checkouts and global tools.
+The [background-host guide](background-hosts.md) explains the platform startup models.
+
+Eagle WSL has a separate pinned v0.18 environment and an enabled hidden sign-in task.
+Its launcher's manual test returned success after detecting the healthy existing v0.17 daemon.
+The shared host and zygote remain alive, so this upgrade does not interrupt the active chat.
+The new environment activates after a cold start or an explicit idle handoff.
+No WSL systemd setting or existing SSH service changed.
+
+Rocky remains offline and was not upgraded.
+Its stale DNS and SSH address reaches the Windows laptop instead, proven through existing Windows SSH trust.
+No host key, DNS record or SSH configuration changed.
+The earlier Cline/OMP fleet acceptance remains deferred.
+
+Final read-only checks show all six reachable original hosts online and the server healthy.
+Package provenance, service ownership and Windows process chains were checked.
+The hidden launchers request window style 0, and the inspected processes have no main window handle.
+A physical sign-out/sign-in cycle and provider turns on the upgraded hosts remain untested.
+At the next convenient sign-in, make sure that no empty terminal or browser opens.
+Open Omnigent on the phone, make sure that the intended hosts return online, and send a small message through a configured provider.
+Private execution reports, rollback paths and sanitized checks are under `.omnigent/verify/host-upgrade-20261016/`.
+The homelab Infrastructure-State note and host-upgrade runbook remain the operational authority.

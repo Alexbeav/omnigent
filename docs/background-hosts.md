@@ -77,6 +77,28 @@ Use the WSL lifetime settings above for terminal independence and a Windows logi
 The task must select the correct WSL distribution and Linux user.
 Windows startup and WSL shutdown remain separate from a detached process.
 
+### Windows sign-in
+
+For a native Windows host, use the reviewed [silent sign-in helpers](../deploy/hosts/windows-signin/README.md).
+They install the qualified fork in a separate pinned checkout and environment, then create a hidden same-user logon task without storing a task password.
+The installer is a dry run unless `-Apply` is present; activation and immediate startup require `-Activate` and `-StartNow` explicitly.
+
+Use this command to review a later upgrade to the pinned fork instead of running a stock package upgrade:
+
+```powershell
+.\install-windows-host.ps1 -Server http://172.16.1.8:8090
+```
+
+### WSL startup models
+
+WSL with systemd can use the normal Linux user service and lingering.
+WSL without systemd needs a Windows-side launcher that enters the named distribution and runs the Linux host in the foreground; do not copy the native Windows installer for that job.
+
+A non-systemd WSL launcher must include the Linux Node directory in `PATH` and keep its foreground host attached to the waiting Windows task.
+If an older host is healthy, leave it running until an idle handoff or cold start.
+On a systemd WSL installation, a waiting Windows task can start the user service and hold the distribution open.
+These startup models avoid changing WSL systemd settings or forcing a WSL reboot while agents are active.
+
 ## Verification
 
 Start a background host in a terminal, then close that terminal.
