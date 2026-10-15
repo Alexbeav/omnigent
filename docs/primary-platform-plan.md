@@ -5,6 +5,8 @@ The starting revision is `e88754218` on `feature/session-orchestration-v0.17`.
 The integrated work is on the local branch `feat/primary-platform` in `~/Projects/omnigent-primary`.
 The live editable checkout remains `~/Projects/omnigent`.
 
+The next version is covered by the [upstream update and contribution plan](primary-platform-upstream-update.md).
+
 ## Result by request
 
 | Request | Implemented or established | Limit |
