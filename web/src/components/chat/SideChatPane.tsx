@@ -1,3 +1,7 @@
+import { QueuedMessagesStrip } from "@/pages/QueuedMessagesStrip";
+import { shouldQueueSend } from "@/lib/messageQueue";
+import { readAlwaysSteer } from "@/lib/alwaysSteerPreferences";
+import { readSubmitWithModEnter } from "@/lib/composerSendShortcutPreferences";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessagesSquareIcon, TriangleAlertIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +32,7 @@ import {
   ComposerSendButton,
 } from "@/components/composer/ChatComposer";
 import { ComposerAddMenu } from "@/components/composer/ComposerAddMenu";
+import { usePaneSessionControls } from "@/components/composer/usePaneSessionControls";
 import { ComposerMicButton } from "@/components/ComposerMicButton";
 import { ComposerAttachments } from "@/components/ComposerAttachments";
 import { ReplyDraftBlocks } from "@/components/composer/ReplyDraftBlocks";
@@ -391,7 +396,25 @@ function SideChatComposer({
   restoredSendDraft: ChatState["restoredSendDraft"];
   committedBlocks: ChatState["blocks"];
 }) {
+  const controls = usePaneSessionControls(ordinarySession && !pending ? childId : null);
   const send = useChatStore((s) => s.send);
+  const queuedMessages = useChatStore((s) => s.queuedMessages);
+  const paneState = useConversationEntryState(ordinarySession && !pending ? childId : null);
+  const submitWithModEnter = readSubmitWithModEnter();
+  const ownQueue = queuedMessages.filter((message) => message.conversationId === childId);
+  useEffect(() => {
+    if (ordinarySession && !pending && !controls.unreachable)
+      useChatStore.getState().maybeFlushQueuedHead(childId);
+  }, [
+    ordinarySession,
+    pending,
+    childId,
+    controls.unreachable,
+    paneState.status,
+    paneState.sessionStatus,
+    paneState.boundAgentId,
+    queuedMessages,
+  ]);
   const queryClient = useQueryClient();
   const clearSideChatDraft = useChatStore((s) => s.clearSideChatDraft);
   const initialDraft = !pending && ordinarySession ? getSessionDraft(childId) : undefined;
@@ -507,7 +530,16 @@ function SideChatComposer({
 
   const ready = pending ? !starting : agentId !== null;
   const canSend = text.trim().length > 0 || (!pending && files.length > 0);
-  const showInterrupt = !pending && busy;
+  const showInterrupt = !pending && busy && (!ordinarySession || !canSend);
+  const queuesSend =
+    ordinarySession &&
+    shouldQueueSend(
+      childId,
+      paneState.status,
+      paneState.sessionStatus,
+      queuedMessages,
+      readAlwaysSteer(),
+    );
 
   const interruptSideChat = () => {
     if (interrupting || !interruptReady) return;
@@ -529,14 +561,25 @@ function SideChatComposer({
       );
       return;
     }
-    if (busy || (trimmed.length === 0 && files.length === 0) || agentId === null) return;
+    if (
+      (busy && !ordinarySession) ||
+      (trimmed.length === 0 && files.length === 0) ||
+      agentId === null
+    )
+      return;
     setText("");
     const outgoing = files;
     clearAttachments();
     if (ordinarySession) setSessionDraft(childId, { text: "", files: [] });
-    void send(trimmed, agentId, outgoing.length > 0 ? outgoing : undefined, {
-      pinnedConversationId: childId,
-    }).finally(refreshLabels);
+    if (queuesSend) {
+      useChatStore
+        .getState()
+        .enqueueMessage(trimmed, outgoing.length > 0 ? outgoing : undefined, undefined, childId);
+    } else {
+      void send(trimmed, agentId, outgoing.length > 0 ? outgoing : undefined, {
+        pinnedConversationId: childId,
+      }).finally(refreshLabels);
+    }
   };
 
   return (
@@ -557,8 +600,28 @@ function SideChatComposer({
           }}
         />
       )}
+      {ordinarySession && (
+        <QueuedMessagesStrip
+          messages={ownQueue}
+          onDelete={(id) => useChatStore.getState().dequeueMessage(id)}
+          onEdit={(id) => {
+            const target = ownQueue.find((message) => message.queueId === id);
+            if (!target) return;
+            setText(target.text);
+            replaceFiles(target.files ?? []);
+            useChatStore.getState().dequeueMessage(id);
+            textareaRef.current?.focus();
+          }}
+          onSteer={(id) => useChatStore.getState().steerMessage(id)}
+          onReorder={(id, before) => useChatStore.getState().reorderQueuedMessage(id, before)}
+          widthClassName="mx-3 w-auto"
+        />
+      )}
       <ChatComposer
-        keyboard={{ submitWithModEnter: false, preventsKeyboardSubmit: false }}
+        keyboard={{
+          submitWithModEnter: ordinarySession ? submitWithModEnter : false,
+          preventsKeyboardSubmit: false,
+        }}
         input={{
           ref: textareaRef,
           value: text,
@@ -571,6 +634,12 @@ function SideChatComposer({
           disabled: !ready,
           "data-testid": "side-chat-input",
           onKeyDown: (event, intent) => {
+            if (ordinarySession && intent.shouldSteerAllFromKeyboard) {
+              event.preventDefault();
+              submit();
+              useChatStore.getState().steerAllQueuedMessages(childId);
+              return;
+            }
             if (intent.shouldSubmitFromKeyboard) {
               event.preventDefault();
               submit();
@@ -602,17 +671,23 @@ function SideChatComposer({
         }}
         actions={{
           leading: pending ? null : (
-            <ComposerAddMenu
-              disabled={agentId === null}
-              onAttach={() => fileInputRef.current?.click()}
-              showGoal={false}
-              showPlan={false}
-              planActive={false}
-              testIdPrefix="side-chat"
-            />
+            <>
+              <ComposerAddMenu
+                disabled={agentId === null}
+                onAttach={() => fileInputRef.current?.click()}
+                showGoal={false}
+                showPlan={controls.showPlan}
+                onPlan={controls.onPlan}
+                planActive={controls.planActive}
+                planDisabled={controls.planDisabled}
+                testIdPrefix="side-chat"
+              />
+              {controls.leading}
+            </>
           ),
           trailing: (
             <>
+              {controls.trailing}
               <ComposerMicButton
                 className="size-8 md:size-7"
                 disabled={!ready}
@@ -625,11 +700,21 @@ function SideChatComposer({
               />
               <ComposerSendButton
                 type="button"
-                label={showInterrupt ? "Interrupt side chat" : "Send side question"}
+                label={
+                  showInterrupt
+                    ? "Interrupt side chat"
+                    : ordinarySession
+                      ? queuesSend
+                        ? "Queue message"
+                        : "Send message"
+                      : "Send side question"
+                }
                 interrupt={showInterrupt}
                 busy={interrupting}
                 disabled={
-                  showInterrupt ? interrupting || !interruptReady : !canSend || !ready || busy
+                  showInterrupt
+                    ? interrupting || !interruptReady
+                    : !canSend || !ready || (busy && !ordinarySession)
                 }
                 onClick={showInterrupt ? interruptSideChat : submit}
                 data-testid={showInterrupt ? "side-chat-interrupt" : "side-chat-send"}

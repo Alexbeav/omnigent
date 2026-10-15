@@ -11,7 +11,7 @@ The live editable checkout remains `~/Projects/omnigent`.
 | --- | --- | --- |
 | Independent chat messaging | Generated native agents receive the existing same-owner peer grant. Native startup instructions identify messages from other agents. | Existing sessions retain pinned definitions. Deploy the changes and start or update agent definitions before live use. |
 | Web pictures | Shared validation accepts supported image filenames when browser MIME data is empty or generic. Sending uses an image content block. | The exact cause of the original interface report remains unconfirmed. Live vendor image turns were not tested. |
-| Three tall chats | Three desktop columns, add control, sidebar edge-drop, resizing, separate drafts and sends, popout, and close/reopen. | Widths are not saved after reload. Dragging outside the page does not create a window. |
+| Three tall chats | Three desktop columns, per-pane model and effort controls, sidebar edge-drop, header drag popouts, resizing, separate drafts and sends, popout, and close/reopen. | Widths are not saved after reload. Actual OS desktop drops and popup placement depend on the browser. |
 | Background hosts | Browser connection instructions include `--background`; the guide includes WSL lifetime and the working PowerShell launch form. | Automatic startup after Windows login or reboot is not installed by this patch. |
 | OMP coordinating workers | Existing ACP relay already exposes child creation, sending, inbox, and cancellation. Fixed false availability when another ACP agent is configured. | OMP is configured on Windows Eagle, not this WSL runner. Coordinator placement and a three-worker live proof remain. |
 | Child visibility | The selected root's sidebar shows child titles, statuses, and navigation links. | The Agents panel remains the full tree view. |
@@ -80,7 +80,7 @@ Then test cancellation, process restart, and explicit screenshot transfer separa
 
 The updated UI is live at [the NAS server](http://172.16.1.8:8090).
 Reload the browser with **Ctrl+Shift+R** to load the new bundle.
-On a desktop, open a chat and use **Add pane…** at the bottom right twice to select two more chats.
+On a desktop, open a chat and use **Add pane…** in the header twice to select two more chats.
 Use **Add > Files and images** in a composer to attach a picture.
 
 Use an isolated environment from [Verify Omnigent](../feature-map/skills/verify-omnigent/SKILL.md).
@@ -97,6 +97,41 @@ For pictures, use **Add > Files and images**, paste an image, and drop a file.
 Send one image without text and inspect the stored user bubble.
 For independent messaging, use fresh generated native agents and a disposable same-owner peer.
 Existing pinned custom definitions need an explicit `peer_messaging: true` update.
+
+## Follow-up: pane controls and dragging
+
+Alex requested the primary chat's model and reasoning controls in every ordinary pane.
+The provider stays fixed. Each pane reads its own model catalog, reported model and effort.
+The shared picker and explicit conversation targets prevent changes from reaching a neighboring chat.
+Host, permission and Codex Plan controls also belong to the pane.
+
+Drag a header or sidebar row to the marked right edge to request a separate window.
+Headers handle Escape, pointer cancellation and lost capture.
+An outside-viewport release is supported when the browser delivers it.
+The recorded Chromium release uses browser automation and does not establish real OS desktop-drop behavior.
+
+Ordinary panes also share queueing, steering, keyboard shortcuts and the Always steer preference.
+Queue flushes honor each conversation's live status, including a busy pane with a stale idle sidebar row.
+The add control now lives in the primary header. Sidebar drops place or move a chat on either side of any pane.
+The `paneOrder` query preserves visual order without changing the primary route.
+The outer docking target sits inside the separate window target so they do not overlap.
+
+The Claude bridge patch excludes diagnostic `api-request-blob` snapshots from transcript forwarding.
+These snapshots duplicated real user records and could expose native reminders.
+Display and copy extraction also hide complete or truncated reminder blocks.
+Stored rows and existing native history stay unchanged.
+New regressions cover both transcript readers and consecutive executor/bridge calls at the mocked terminal-paste boundary.
+This is not a real-provider end-to-end test. Existing Claude runners need a targeted reconnect to import the host-side parser fix.
+
+Follow-up verification completed on 2026-10-16 (local time).
+The three isolated Chromium journeys passed in 10.84 seconds against the final production build.
+They cover six pane-specific model/effort/permission updates and reload, scoped queue edit/remove/send-now/idle flush/bulk steer, left/right placement, resize, popout and cancellation.
+The queue journey keeps the sidebar idle while the Claude pane's live stream is busy.
+The primary draft remains unchanged and all mocked backend routes are accounted for.
+Store checks passed 585 tests; composer checks passed 361 tests; the other pane/shell/bubble component checks passed 192 tests.
+Python parser and feature-map checks passed 136 tests.
+Local evidence is under `.omnigent/verify/`, including `final-pane-browser.xml` and `pane-final-*.log`.
+The first deployment record below is historical; the follow-up deployment will be recorded separately.
 
 ## Rollout boundary
 

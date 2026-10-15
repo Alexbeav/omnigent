@@ -1,9 +1,18 @@
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLinkIcon, PanelRightOpenIcon, XIcon } from "lucide-react";
+import {
+  type CSSProperties,
+  type PointerEventHandler,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { ExternalLinkIcon, XIcon } from "lucide-react";
 import type { Conversation } from "@/hooks/useConversations";
 import { SideChatPane } from "@/components/chat/SideChatPane";
 import { Button } from "@/components/ui/button";
 import { sessionNavigationSearch } from "@/lib/sessionNavigation";
+import { isChatDetachPoint } from "./chatDetach";
 
 export const MAX_CHAT_PANES = 3;
 
@@ -16,6 +25,20 @@ export function normalizePaneIds(primaryId: string | undefined, raw: string | nu
     .slice(0, MAX_CHAT_PANES - 1);
 }
 
+export function normalizePaneOrder(
+  primaryId: string | undefined,
+  paneIds: readonly string[],
+  raw: string | null,
+): string[] {
+  const available = new Set([primaryId, ...paneIds].filter((id): id is string => Boolean(id)));
+  const ordered = (raw ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id, index, ids) => available.has(id) && ids.indexOf(id) === index);
+  for (const id of available) if (!ordered.includes(id)) ordered.push(id);
+  return ordered;
+}
+
 export function buildPanePopoutUrl(
   currentHref: string,
   conversationId: string,
@@ -25,6 +48,7 @@ export function buildPanePopoutUrl(
   url.pathname = rebasePath(`/c/${encodeURIComponent(conversationId)}`);
   url.search = sessionNavigationSearch(url.search);
   url.searchParams.delete("panes");
+  url.searchParams.delete("paneOrder");
   url.hash = "";
   return url;
 }
@@ -33,10 +57,94 @@ function sessionLabel(conversations: readonly Conversation[], id: string): strin
   return conversations.find((conversation) => conversation.id === id)?.title ?? id;
 }
 
-function ResizableChatPane({ children, label }: { children: ReactNode; label: string }) {
+function usePaneHeaderDetach(onPopout: () => void) {
+  const drag = useRef<{ pointerId: number; x: number; y: number; target: HTMLElement } | null>(
+    null,
+  );
+  const [detaching, setDetaching] = useState(false);
+  const cancel = () => {
+    const active = drag.current;
+    drag.current = null;
+    setDetaching(false);
+    if (active?.target.hasPointerCapture?.(active.pointerId)) {
+      active.target.releasePointerCapture?.(active.pointerId);
+    }
+  };
+  useEffect(() => {
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && drag.current) cancel();
+    };
+    window.addEventListener("keydown", cancelOnEscape);
+    return () => window.removeEventListener("keydown", cancelOnEscape);
+  });
+  const onPointerDown: PointerEventHandler<HTMLElement> = (event) => {
+    if (
+      event.button !== 0 ||
+      !(event.target as Element).closest("[data-pane-drag-handle]") ||
+      (event.target as Element).closest("button, select, input, textarea, a")
+    )
+      return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      target: event.currentTarget,
+    };
+  };
+  const onPointerMove: PointerEventHandler<HTMLElement> = (event) => {
+    const start = drag.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    if (!detaching && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 5) {
+      setDetaching(true);
+    }
+  };
+  const onPointerUp: PointerEventHandler<HTMLElement> = (event) => {
+    const start = drag.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 5;
+    drag.current = null;
+    setDetaching(false);
+    if (moved && isChatDetachPoint(event.clientX, event.clientY)) onPopout();
+  };
+  return {
+    dragProps: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp,
+      onPointerCancel: cancel,
+      onLostPointerCapture: cancel,
+    },
+    detachTarget:
+      detaching &&
+      createPortal(
+        <div
+          data-testid="chat-detach-target"
+          className="pointer-events-none fixed top-0 right-0 bottom-0 z-[80] flex w-12 items-center justify-center border-l-2 border-dashed border-primary bg-primary/15 text-xs font-medium text-primary [writing-mode:vertical-rl]"
+        >
+          Drop to open in new window
+        </div>,
+        document.body,
+      ),
+  };
+}
+
+function ResizableChatPane({
+  children,
+  label,
+  paneId,
+  onPopout,
+}: {
+  children: ReactNode;
+  label: string;
+  paneId: string;
+  onPopout: () => void;
+}) {
   const [width, setWidth] = useState<number | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const drag = useRef<{ x: number; width: number } | null>(null);
+  const { dragProps, detachTarget } = usePaneHeaderDetach(onPopout);
   const constrain = (requested: number) => {
     const section = sectionRef.current;
     const container = section?.parentElement;
@@ -72,10 +180,13 @@ function ResizableChatPane({ children, label }: { children: ReactNode; label: st
   return (
     <section
       ref={sectionRef}
+      data-pane-id={paneId}
       className="relative hidden min-h-0 min-w-80 flex-1 flex-col overflow-hidden border-l border-border bg-background md:flex"
       aria-label={label}
       style={width === null ? undefined : { flex: `0 0 ${width}px` }}
+      {...dragProps}
     >
+      {detachTarget}
       <div
         role="separator"
         aria-label={`Resize ${label}`}
@@ -107,96 +218,79 @@ export function ConversationPanes({
   primary,
   header,
   primaryId,
-  paneIds,
+  paneOrder,
   conversations,
-  onAdd,
   onClose,
   onPopout,
 }: {
   primary: ReactNode;
   header?: ReactNode;
   primaryId?: string;
-  paneIds: string[];
+  paneOrder: string[];
   conversations: readonly Conversation[];
-  onAdd: (id: string) => void;
   onClose: (id: string) => void;
   onPopout: (id: string) => void;
 }) {
-  const openIds = useMemo(() => new Set([primaryId, ...paneIds]), [primaryId, paneIds]);
-  const choices = conversations.filter((conversation) => !openIds.has(conversation.id));
+  const primaryDetach = usePaneHeaderDetach(() => {
+    if (primaryId) onPopout(primaryId);
+  });
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto" data-testid="conversation-panes">
-      <section
-        className="relative flex min-h-0 min-w-0 flex-1 flex-col md:min-w-80"
-        aria-label="Primary chat"
-        style={{ "--workspace-panel-offset": "2.75rem" } as CSSProperties}
-      >
-        {header}
-        {primary}
-        {primaryId && (
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            className="absolute top-2 right-2 z-50 hidden md:inline-flex"
-            aria-label="Open primary chat in a new window"
-            onClick={() => onPopout(primaryId)}
+      {paneOrder.map((id) =>
+        id === primaryId ? (
+          <section
+            key={id}
+            data-pane-id={id}
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col md:min-w-80"
+            aria-label="Primary chat"
+            style={{ "--workspace-panel-offset": "2.75rem" } as CSSProperties}
+            {...primaryDetach.dragProps}
           >
-            <ExternalLinkIcon />
-          </Button>
-        )}
-      </section>
-      {paneIds.map((id) => (
-        <ResizableChatPane key={id} label={`Chat: ${sessionLabel(conversations, id)}`}>
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-              {sessionLabel(conversations, id)}
-            </span>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={`Open ${sessionLabel(conversations, id)} in a new window`}
-              onClick={() => onPopout(id)}
-            >
-              <ExternalLinkIcon />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={`Close ${sessionLabel(conversations, id)} pane`}
-              onClick={() => onClose(id)}
-            >
-              <XIcon />
-            </Button>
-          </header>
-          <div className="min-h-0 flex-1">
-            <SideChatPane childId={id} showFullHistory />
-          </div>
-        </ResizableChatPane>
-      ))}
-      {paneIds.length < MAX_CHAT_PANES - 1 && choices.length > 0 && (
-        <label className="absolute right-3 bottom-3 z-50 hidden items-center gap-1 rounded-md border border-border bg-background px-2 shadow-sm md:flex">
-          <PanelRightOpenIcon className="size-4" aria-hidden="true" />
-          <span className="sr-only">Add chat pane</span>
-          <select
-            aria-label="Add chat pane"
-            className="h-8 max-w-36 bg-transparent text-sm outline-none"
-            value=""
-            onChange={(event) => {
-              if (event.target.value) onAdd(event.target.value);
-            }}
+            {primaryDetach.detachTarget}
+            <div data-pane-drag-handle className="contents">
+              {header}
+            </div>
+            {primary}
+          </section>
+        ) : (
+          <ResizableChatPane
+            key={id}
+            label={`Chat: ${sessionLabel(conversations, id)}`}
+            paneId={id}
+            onPopout={() => onPopout(id)}
           >
-            <option value="">Add pane…</option>
-            {choices.map((conversation) => (
-              <option key={conversation.id} value={conversation.id}>
-                {conversation.title ?? conversation.id}
-              </option>
-            ))}
-          </select>
-        </label>
+            <header
+              data-pane-drag-handle
+              className="flex h-12 shrink-0 cursor-grab select-none items-center gap-2 border-b border-border px-3 active:cursor-grabbing"
+            >
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                {sessionLabel(conversations, id)}
+              </span>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Open ${sessionLabel(conversations, id)} in a new window`}
+                onClick={() => onPopout(id)}
+              >
+                <ExternalLinkIcon />
+              </Button>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Close ${sessionLabel(conversations, id)} pane`}
+                onClick={() => onClose(id)}
+              >
+                <XIcon />
+              </Button>
+            </header>
+            <div className="min-h-0 flex-1">
+              <SideChatPane childId={id} showFullHistory />
+            </div>
+          </ResizableChatPane>
+        ),
       )}
     </div>
   );

@@ -1106,7 +1106,12 @@ export interface ChatActions {
    * while the agent is busy. The head is flushed automatically (FIFO, one per
    * turn) when the session next goes idle — see the `session_status` handler.
    */
-  enqueueMessage: (text: string, files?: File[], replyDraft?: StoredReplyDraft) => void;
+  enqueueMessage: (
+    text: string,
+    files?: File[],
+    replyDraft?: StoredReplyDraft,
+    conversationId?: string,
+  ) => void;
   /** Remove a queued message by id (the strip's per-row delete). */
   dequeueMessage: (queueId: string) => void;
   /**
@@ -1145,7 +1150,7 @@ export interface ChatActions {
    * the head starts a turn → the session goes busy → this no-ops until the next
    * idle, so the queue drains FIFO one per turn.
    */
-  maybeFlushQueuedHead: () => void;
+  maybeFlushQueuedHead: (conversationId?: string) => void;
   /**
    * Flush queued messages for conversations OTHER than the active one, whose
    * status in the `["conversations"]` cache is idle. The active conversation is
@@ -1187,25 +1192,28 @@ export interface ChatActions {
     conversationId?: string,
   ) => Promise<void>;
   /**
-   * Set the active session's effort. ``null`` clears the override.
+   * Set a session's effort. Omit the id to use the active session. ``null`` clears the override.
    */
-  setEffort: (effort: string | null) => Promise<void>;
+  setEffort: (effort: string | null, conversationId?: string) => Promise<void>;
   /**
-   * Set the active session's model. For claude-native, the server also injects
+   * Set a session's model. ``opts.conversationId`` pins a split pane. For claude-native, the server also injects
    * ``/model`` into the tmux pane so the in-binary picker tracks the change.
    *
    * ``expectConfirmation`` marks the pick pending until the harness's own
    * report (or a not-applied error) settles it — pass it for sessions
    * whose chip renders the reported model (claude-/codex-native).
    */
-  setModel: (model: string | null, opts?: { expectConfirmation?: boolean }) => Promise<void>;
+  setModel: (
+    model: string | null,
+    opts?: { expectConfirmation?: boolean; conversationId?: string },
+  ) => Promise<void>;
   /**
    * Set the active session's cost-control switch — optimistic local
    * flip, then PATCH; the server's canonical value (or a rollback on
    * failure) settles the state. ``null`` clears back to the spec
    * default. No-ops when there is no active conversation.
    */
-  setCostControlMode: (mode: "on" | "off" | null) => Promise<void>;
+  setCostControlMode: (mode: "on" | "off" | null, conversationId?: string) => Promise<void>;
   /**
    * Set the active session's sub-agent routing switch — optimistic local
    * write, then PATCH; the server's canonical value (or a rollback on
@@ -1230,21 +1238,21 @@ export interface ChatActions {
    * Toggle Codex Plan mode for the active session. No-ops when there is no
    * active conversation.
    */
-  setCodexPlanMode: (enabled: boolean) => Promise<void>;
+  setCodexPlanMode: (enabled: boolean, conversationId?: string) => Promise<void>;
   /**
    * Switch a running claude-native session's permission mode (e.g. to
    * ``"auto"``). Rejects when the live TUI could not reach the mode, so
    * callers surface the error rather than assuming the switch landed.
    * No-ops when there is no active conversation.
    */
-  setClaudePermissionMode: (mode: string) => Promise<void>;
+  setClaudePermissionMode: (mode: string, conversationId?: string) => Promise<void>;
   /**
    * Switch a running codex-native session's approval/sandbox mode (e.g. to
    * ``"full-access"``). Rejects when the live Codex thread could not accept the
    * update, so callers surface the error rather than assuming it landed.
    * No-ops when there is no active conversation.
    */
-  setCodexApprovalMode: (mode: string) => Promise<void>;
+  setCodexApprovalMode: (mode: string, conversationId?: string) => Promise<void>;
   /**
    * Fetch the next page of older messages and prepend them to `blocks`.
    *
@@ -1880,13 +1888,16 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
   abortController: null,
   historyGeneration: 0,
 
-  enqueueMessage: (text, files, replyDraft) => {
-    const { conversationId, boundAgentId, sessionHarness } = get();
+  enqueueMessage: (text, files, replyDraft, targetId) => {
+    const source = targetId === undefined ? get() : setterForState(targetId);
+    if (source === null) return;
+    const { conversationId, boundAgentId, sessionHarness } = source;
+    const queueSet = targetId === undefined ? setActive : setterFor(targetId);
     if (conversationId === null) return;
     queueSeq += 1;
     const queueId = `q_${queueSeq}`;
     const stableId = randomUUID().replace(/-/g, "");
-    setActive((s) => ({
+    queueSet((s) => ({
       // Queueing consumes the composer like a send does: a restored failed
       // send is no longer what the composer holds, and the queued message
       // carries its own id, so neither the tracker nor the retry id may
@@ -1910,7 +1921,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     // A message queued while the agent is idle (a race where the send routed
     // to the queue but the turn had already ended) would otherwise wait for an
     // idle edge that never comes — flush now.
-    get().maybeFlushQueuedHead();
+    get().maybeFlushQueuedHead(targetId);
   },
 
   dequeueMessage: (queueId) => {
@@ -1996,8 +2007,10 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     });
   },
 
-  maybeFlushQueuedHead: () => {
-    const s = get();
+  maybeFlushQueuedHead: (targetId) => {
+    const s = targetId === undefined ? get() : setterForState(targetId);
+    if (s === null) return;
+    const queueSet = targetId === undefined ? setActive : setterFor(targetId);
     // Flush once the agent loop is free to take a turn. `waiting` is NOT busy:
     // the turn already ended and only background work (background shells /
     // sub-agents) outlives it, so the server accepts a new turn immediately —
@@ -2010,9 +2023,8 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       // A send owns the latch, so the queue waits for it — that is the
       // one-message-per-turn contract. Unless the latch is stranded, in which
       // case waiting is forever: clear it so the composer also stops queueing
-      // (`shouldQueueSend` reads the same flag) and drain below. Only the
-      // ACTIVE conversation can wedge like this; `flushBackgroundQueues`
-      // already drives every other queue off the server's own status.
+      // (`shouldQueueSend` reads the same flag) and drain below. Each live
+      // conversation recovers its own latch, including one in a split pane.
       if (!sendLatchIsStranded(s)) return;
       // The stranded send still holds this conversation's chain link, so the
       // drain below would park on it for another SEND_CHAIN_MAX_WAIT_MS. Same
@@ -2021,7 +2033,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
       // chain started here is safe.
       sendChains.delete(s.conversationId);
       // Clear the latch on THIS conversation's entry only, alongside its status.
-      setActive({ status: "idle", sendLatchedAt: null });
+      queueSet({ status: "idle", sendLatchedAt: null });
     }
     // Flush the FIRST message OF THE BOUND CONVERSATION (FIFO within it), not
     // the global array head. The queue is one flat array across conversations,
@@ -2030,7 +2042,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     const head = s.queuedMessages.find((m) => m.conversationId === s.conversationId);
     if (head === undefined || head.requiresRetry) return;
     // Remove it BEFORE the POST so a re-entrant flush can't double-send.
-    setActive({ queuedMessages: s.queuedMessages.filter((m) => m.queueId !== head.queueId) });
+    queueSet({ queuedMessages: s.queuedMessages.filter((m) => m.queueId !== head.queueId) });
     void s.send(head.text, head.agentId ?? s.boundAgentId, head.files, queuedSendOptions(head));
   },
 
@@ -2068,13 +2080,10 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     const now = Date.now();
     for (const conversationId of candidateIds) {
       if (statusById.get(conversationId) !== "idle") continue;
-      // The sidebar can still say idle while a compact control starts.
+      // A live pane's stream can already report busy while the sidebar still
+      // says idle. Honor that state for every harness before draining its queue.
       const local = setterForState(conversationId);
-      if (
-        local?.sessionHarness === "codex-native" ||
-        local?.sessionHarness === "claude-sdk" ||
-        local?.sessionHarness === "pi-native"
-      ) {
+      if (local !== null) {
         if (local.sessionStatus === "running") continue;
         if (local.status === "streaming") {
           if (!sendLatchIsStranded(local)) continue;
@@ -3022,9 +3031,9 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     });
   },
 
-  setEffort: async (effort) => {
-    setActive({ sessionReasoningEffort: effort });
-    const { conversationId } = get();
+  setEffort: async (effort, targetId) => {
+    const conversationId = targetId ?? get().conversationId;
+    (targetId === undefined ? setActive : setterFor(targetId))({ sessionReasoningEffort: effort });
     if (conversationId) {
       if (queryClient === null) {
         throw new Error("chatStore.setEffort: queryClient not initialized");
@@ -3046,8 +3055,10 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
   },
 
   setModel: async (model, opts) => {
-    setActive({ sessionModelOverride: model });
-    const { conversationId } = get();
+    const conversationId = opts?.conversationId ?? get().conversationId;
+    (opts?.conversationId === undefined ? setActive : setterFor(conversationId))({
+      sessionModelOverride: model,
+    });
     if (conversationId) {
       const expectConfirmation = opts?.expectConfirmation === true && model !== null;
       if (expectConfirmation) {
@@ -3089,10 +3100,12 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setCostControlMode: async (mode) => {
-    const { conversationId } = get();
+  setCostControlMode: async (mode, targetId) => {
+    const conversationId = targetId ?? get().conversationId;
     if (!conversationId) return;
-    const previous = get().costControlModeOverride;
+    const source = targetId === undefined ? get() : setterForState(targetId);
+    if (!source) return;
+    const previous = source.costControlModeOverride;
     // Routing and a pinned model are mutually exclusive: the server's routing
     // guard skips whenever model_override is set, so turning routing ON must
     // also clear this session's pinned model (in the SAME PATCH) — otherwise
@@ -3100,7 +3113,7 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     // would never run. Mirrors the new-chat dialog's mutual exclusion. Only
     // clear when a model is actually pinned, so toggling routing on a
     // model-less (e.g. SDK) session doesn't emit a spurious model-cleared change.
-    const previousModel = get().sessionModelOverride;
+    const previousModel = source.sessionModelOverride;
     const clearModel = mode === "on" && previousModel != null;
     // Pin the target: these are this conversation's switches, and the PATCH can
     // outlive a switch away. Resolving the target afterwards would leave a
@@ -3177,10 +3190,12 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     });
   },
 
-  setCodexPlanMode: async (enabled) => {
-    const { conversationId } = get();
+  setCodexPlanMode: async (enabled, targetId) => {
+    const conversationId = targetId ?? get().conversationId;
     if (!conversationId) return;
-    const previous = get().codexPlanMode;
+    const source = targetId === undefined ? get() : setterForState(targetId);
+    if (!source) return;
+    const previous = source.codexPlanMode;
     // Pinned for the same reason as `setCostControlMode` — see there.
     const patchSet = setterFor(conversationId);
     patchSet({ codexPlanMode: enabled });
@@ -3193,10 +3208,12 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setClaudePermissionMode: async (mode) => {
-    const { conversationId } = get();
+  setClaudePermissionMode: async (mode, targetId) => {
+    const conversationId = targetId ?? get().conversationId;
     if (!conversationId) return;
-    const previous = get().claudePermissionMode;
+    const source = targetId === undefined ? get() : setterForState(targetId);
+    if (!source) return;
+    const previous = source.claudePermissionMode;
     // Pinned for the same reason as `setCostControlMode` — see there.
     const patchSet = setterFor(conversationId);
     // Optimistic, then reconciled against the mode the server confirms the
@@ -3211,10 +3228,12 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  setCodexApprovalMode: async (mode) => {
-    const { conversationId } = get();
+  setCodexApprovalMode: async (mode, targetId) => {
+    const conversationId = targetId ?? get().conversationId;
     if (!conversationId) return;
-    const previous = get().codexApprovalMode;
+    const source = targetId === undefined ? get() : setterForState(targetId);
+    if (!source) return;
+    const previous = source.codexApprovalMode;
     // Pinned for the same reason as `setCostControlMode` — see there.
     const patchSet = setterFor(conversationId);
     // Optimistic, then reconciled against the mode the server confirms the

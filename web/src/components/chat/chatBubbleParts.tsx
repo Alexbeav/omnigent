@@ -110,6 +110,7 @@ export function extractUserText(content: MessageContentBlock[]): string {
     .filter(isTextBlock)
     .map((c) => c.text)
     .join("")
+    .replace(/<system-reminder>[\s\S]*?(?:<\/system-reminder>|$)/g, "")
     .replace(ATTACHED_RE, "")
     .trim();
 }

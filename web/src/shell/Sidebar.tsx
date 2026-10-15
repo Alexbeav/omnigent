@@ -96,6 +96,7 @@ import { useProjectOrder, useSaveProjectOrder } from "@/hooks/useProjectOrder";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "@/lib/routing";
 import { SidebarHeaderActions, SidebarSettingsButton } from "./SidebarHeaderActions";
+import { CHAT_DETACH_EDGE_PX, isChatDetachPoint } from "./chatDetach";
 import omnigentWordmark from "@/assets/omnigent-wordmark.svg";
 import { Button } from "@/components/ui/button";
 import {
@@ -396,7 +397,8 @@ interface SidebarProps {
    */
   peek?: boolean;
   /** Add a dragged session beside the active chat. Desktop only. */
-  onSplitConversation?: (conversationId: string) => void;
+  onSplitConversation?: (conversationId: string, targetId: string, side: "left" | "right") => void;
+  onPopoutConversation?: (conversationId: string) => void;
 }
 
 /**
@@ -596,6 +598,7 @@ function SidebarImpl({
   onOpenSearch,
   peek,
   onSplitConversation,
+  onPopoutConversation,
 }: SidebarProps) {
   const sidebarData = useSidebarData();
   const branding = useBranding();
@@ -1261,6 +1264,7 @@ function SidebarImpl({
                     onExitSelectionMode={exitSelectionMode}
                     getVisibleIdsRef={getVisibleIdsRef}
                     onSplitConversation={onSplitConversation}
+                    onPopoutConversation={onPopoutConversation}
                   />
                 ) : (
                   <p role="status" className="px-2 py-1 text-muted-foreground text-sm">
@@ -1294,23 +1298,89 @@ function SidebarImpl({
 // (AppShell stabilizes the callbacks with useCallback).
 export const Sidebar = memo(SidebarImpl);
 
-function ChatSplitDropZone({ left }: { left: number }) {
+function ChatSplitDropZone({
+  paneId,
+  side,
+  rect,
+}: {
+  paneId: string;
+  side: "left" | "right";
+  rect: { left: number; right: number; top: number; bottom: number };
+}) {
   const { setNodeRef, isOver } = useDroppable({
-    id: "chat-split-edge",
-    data: { type: "chat-split" },
+    id: `chat-split:${paneId}:${side}`,
+    data: { type: "chat-split", targetId: paneId, side },
   });
   return createPortal(
     <div
       ref={setNodeRef}
-      style={{ left }}
+      style={{
+        left:
+          side === "left"
+            ? rect.left
+            : Math.min(rect.right, window.innerWidth - CHAT_DETACH_EDGE_PX) - 24,
+        top: rect.top,
+        height: rect.bottom - rect.top,
+      }}
       role="status"
       aria-live="polite"
+      data-testid={`chat-split-${paneId}-${side}`}
       className={cn(
-        "pointer-events-auto fixed top-0 bottom-0 z-[70] hidden w-12 items-center justify-center border-r-2 border-dashed bg-primary/5 text-xs font-medium [writing-mode:vertical-rl] md:flex",
+        "pointer-events-auto fixed z-[70] hidden w-6 items-center justify-center border-x-2 border-dashed bg-primary/5 text-xs font-medium [writing-mode:vertical-rl] md:flex",
         isOver && "border-primary bg-primary/15 text-primary",
       )}
     >
-      Drop to split chat
+      Drop {side}
+    </div>,
+    getEmbedRoot() ?? document.body,
+  );
+}
+
+function ChatSplitDropZones() {
+  const [panes, setPanes] = useState<
+    { id: string; left: number; right: number; top: number; bottom: number }[]
+  >([]);
+  useEffect(() => {
+    const measure = () =>
+      setPanes(
+        Array.from(document.querySelectorAll<HTMLElement>("section[data-pane-id]")).map((pane) => {
+          const rect = pane.getBoundingClientRect();
+          return {
+            id: pane.dataset.paneId!,
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom,
+          };
+        }),
+      );
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+  return panes.flatMap((pane) =>
+    (["left", "right"] as const).map((side) => (
+      <ChatSplitDropZone key={`${pane.id}:${side}`} paneId={pane.id} side={side} rect={pane} />
+    )),
+  );
+}
+
+function ChatDetachDropZone() {
+  const { setNodeRef, isOver } = useDroppable({
+    id: "chat-detach-edge",
+    data: { type: "chat-detach" },
+  });
+  return createPortal(
+    <div
+      ref={setNodeRef}
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "pointer-events-auto fixed top-0 right-0 bottom-0 z-[70] hidden w-12 items-center justify-center border-l-2 border-dashed bg-primary/5 text-xs font-medium [writing-mode:vertical-rl] md:flex",
+        isOver && "border-primary bg-primary/15 text-primary",
+      )}
+    >
+      Drop to open in new window
     </div>,
     getEmbedRoot() ?? document.body,
   );
@@ -1597,7 +1667,8 @@ interface ConversationListProps {
   onDeselectAll: () => void;
   onExitSelectionMode: () => void;
   getVisibleIdsRef: RefObject<() => string[]>;
-  onSplitConversation?: (conversationId: string) => void;
+  onSplitConversation?: (conversationId: string, targetId: string, side: "left" | "right") => void;
+  onPopoutConversation?: (conversationId: string) => void;
 }
 
 function ConversationList({
@@ -1621,6 +1692,7 @@ function ConversationList({
   onExitSelectionMode,
   getVisibleIdsRef,
   onSplitConversation,
+  onPopoutConversation,
 }: ConversationListProps) {
   // Row-invariant values resolved once here and shared with rows via context
   // (see IsMobileContext etc.), so each row doesn't run its own copy.
@@ -1945,6 +2017,24 @@ function ConversationList({
     project: string | null;
     isPinned: boolean;
   } | null>(null);
+  const cancelClickCleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => cancelClickCleanup.current?.(), []);
+  const suppressClickAfterCancel = useCallback(() => {
+    cancelClickCleanup.current?.();
+    const stopClick = (event: globalThis.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cleanup();
+    };
+    const timer = window.setTimeout(cleanup, 250);
+    function cleanup() {
+      window.clearTimeout(timer);
+      document.removeEventListener("click", stopClick, true);
+      cancelClickCleanup.current = null;
+    }
+    document.addEventListener("click", stopClick, true);
+    cancelClickCleanup.current = cleanup;
+  }, []);
   // Mouse: a small drag threshold so a plain click still navigates / opens the
   // kebab. Touch: a press-and-hold delay so scrolling the list isn't hijacked
   // into a drag. Project headers also support keyboard sorting.
@@ -1995,8 +2085,31 @@ function ConversationList({
       const dragged = activeDrag;
       setActiveDrag(null);
       if (!dragged) return;
+      if (event.over?.data.current?.type === "chat-detach") {
+        onPopoutConversation?.(dragged.id);
+        return;
+      }
+      const activator = event.activatorEvent;
+      const origin =
+        activator instanceof MouseEvent
+          ? { x: activator.clientX, y: activator.clientY }
+          : activator instanceof TouchEvent && activator.changedTouches[0]
+            ? { x: activator.changedTouches[0].clientX, y: activator.changedTouches[0].clientY }
+            : null;
+      if (
+        event.over === null &&
+        origin &&
+        isChatDetachPoint(origin.x + event.delta.x, origin.y + event.delta.y)
+      ) {
+        onPopoutConversation?.(dragged.id);
+        return;
+      }
       if (event.over?.data.current?.type === "chat-split") {
-        onSplitConversation?.(dragged.id);
+        onSplitConversation?.(
+          dragged.id,
+          event.over.data.current.targetId as string,
+          event.over.data.current.side as "left" | "right",
+        );
         return;
       }
       const target = (event.over?.data.current as SidebarDropTarget | undefined) ?? null;
@@ -2033,6 +2146,7 @@ function ConversationList({
       expandProject,
       onTogglePinned,
       onSplitConversation,
+      onPopoutConversation,
       projects,
       saveOrder,
     ],
@@ -2276,16 +2390,14 @@ function ConversationList({
           )
         }
         onDragCancel={() => {
+          if (activeDrag) suppressClickAfterCancel();
           setActiveDrag(null);
           setDraggedProject(null);
           setOverProject(null);
         }}
       >
-        {activeDrag && onSplitConversation && (
-          <ChatSplitDropZone
-            left={scrollContainerRef.current?.getBoundingClientRect().right ?? 0}
-          />
-        )}
+        {activeDrag && onSplitConversation && <ChatSplitDropZones />}
+        {activeDrag && onPopoutConversation && <ChatDetachDropZone />}
         <RowEditHoldContext.Provider value={reportRowEditing}>
           <div
             className="flex flex-col gap-6"

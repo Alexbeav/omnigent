@@ -25,6 +25,8 @@ and steers messages while the agent is busy.
   in the composer, and a composer pick is not reverted by later terminal turns.
 - `permission-mode`: the harness's native approval modes; the current mode is
   marked and the choice persists.
+- `pane-configuration`: ordinary desktop panes use the same model, effort,
+  permission and host controls as the primary chat. Each pane owns its changes.
 - `slash-menu`: typing `/` opens commands and skills with keyboard navigation.
 - `attachments`: attach button, paste, and drop onto the transcript; chips can
   be removed. States: unsupported file type rejected without losing the
@@ -75,6 +77,12 @@ and steers messages while the agent is busy.
 **Mobile** (either composer on a phone-sized viewport): the same controls with
 collapsed labels.
 
+**Desktop chat panes:** use `Add pane…` to open another chat. Use that pane's
+model pill to change its model or reasoning effort within its current provider.
+Its host menu and permission control also target that chat. While that chat is busy,
+Enter queues a follow-up. Its queue supports edit, remove, reorder and send now.
+The default Ctrl/Command+Enter shortcut sends only that pane's queued messages immediately.
+
 ## Driving it with the repro environment
 
 Preconditions: a running instance (`verify-env start`, then `verify-env
@@ -113,6 +121,10 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
   `tests/e2e_ui/chat/test_codex_effort_terminal_composer_mirror.py::test_composer_effort_pick_survives_terminal_turns`
 - **`permission-mode`:**
   `tests/e2e_ui/chat/test_claude_model_picker.py::test_claude_native_permission_mode_switch_persists`
+- **`pane-configuration`:**
+  `tests/browser_ui/chat/test_pane_session_controls.py::test_each_pane_changes_its_own_model_effort_and_permissions`
+  drives Codex and Claude panes together. It checks six scoped PATCH requests,
+  unchanged primary configuration, independent drafts, and persisted picks after reload.
 - **`slash-menu`:**
   `tests/browser_ui/chat/test_slash_menu.py::test_slash_menu_tracks_real_focus_and_wrapping_keyboard_navigation`
 - **`attachments`:**
@@ -127,7 +139,10 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
   `tests/e2e_ui/chat/test_composer_submit_shortcut.py::test_submit_with_mod_enter_persists_and_is_the_only_send_gesture`
 - **`queue-and-steer`:**
   `tests/e2e_ui/chat/test_queue_steer.py::test_steer_sends_queued_message_while_busy`,
-  `tests/e2e_ui/chat/test_composer_bulk_steer.py::test_bulk_steer_retries_the_whole_queue`
+  `tests/e2e_ui/chat/test_composer_bulk_steer.py::test_bulk_steer_retries_the_whole_queue`,
+  `tests/browser_ui/chat/test_pane_session_controls.py::test_secondary_pane_queue_and_steer_stay_on_that_session`.
+  The pane journey checks a stale idle sidebar against a busy live stream,
+  edit/remove, send now, idle flush and keyboard bulk steer without changing the primary draft.
 - **`browser-pointer-queue`, desktop:** manually hold an agent turn open, then
   send a normal composer follow-up and two pointer instructions (Send and Enter).
   With Always steer off, all three stay queued and the popup says "Queued for
@@ -153,6 +168,9 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
 - The in-session and new-session composers are different surfaces. A change to
   the pill, tooltip, configuration menu, or effort picker in one does not reach
   the other. Verify both, plus the mobile layout.
+- The primary chat and ordinary split panes share `SessionHarnessPicker.tsx`.
+  Configuration reads use the conversation scope, and writes accept a pinned
+  conversation id. A pane must never temporarily become the active chat to edit configuration.
 - "New session" in a test name can mean a session with no turns yet, not the
   landing page. Check which surface the test opens.
 - Tooltip changes need a hover after the picker closes, not only on first load.

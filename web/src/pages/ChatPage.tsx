@@ -1,10 +1,21 @@
+import {
+  isCostRoutingEligible,
+  effortLevelsForConv,
+  modelPickerKindForConv,
+  shouldShowEffortPicker,
+  shouldShowCodexPlanModeControl,
+  shouldShowPermissionModeControl,
+  shouldShowCodexApprovalModeControl,
+  shouldShowGoalControl,
+  shouldShowPollyClaudeGoalControl,
+  shouldShowPollyCodexGoalControl,
+  type NativeModelPickerKind,
+} from "@/lib/sessionComposerCapabilities";
+
+import { SessionHarnessPicker } from "@/components/composer/SessionHarnessPicker";
 import { useLoadedConversations } from "@/hooks/useSidebarData";
 import { useSkills } from "@/hooks/useSkills";
-import {
-  HarnessPicker,
-  HarnessPickerConfigRow,
-  HarnessPickerConfigPage,
-} from "@/components/composer/HarnessPicker";
+
 import {
   type ForwardedRef,
   type ChangeEvent,
@@ -22,15 +33,13 @@ import {
 } from "react";
 import {
   BotIcon,
-  WandSparklesIcon,
   CornerUpLeftIcon,
   FileTextIcon,
   Loader2Icon,
   MessagesSquareIcon,
-  TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   composerSendShortcutKeys,
   KeyboardShortcutTooltipContent,
@@ -52,9 +61,8 @@ import { ReplyDraftBlocks } from "@/components/composer/ReplyDraftBlocks";
 import {
   ComposerWorkspaceBar,
   ComposerPermissionPicker,
-  ComposerConfigTooltipRows,
 } from "@/components/composer/ComposerControls";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+
 import { useAppName } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { QueuedMessagesStrip } from "@/pages/QueuedMessagesStrip";
@@ -65,16 +73,12 @@ import {
 import { isIOSShell, onNativeSidebarDrag, setNativeServerSwitcherHidden } from "@/lib/nativeBridge";
 import { type Agent, useSessionAgent, useAgents } from "@/hooks/useAgents";
 import { agentDisplayLabel } from "@/components/AgentInfo";
-import {
-  BRAIN_HARNESS_LABELS,
-  SMART_ROUTING_LABEL,
-  useBrainHarnessLabels,
-} from "@/lib/agentLabels";
+import { BRAIN_HARNESS_LABELS, useBrainHarnessLabels } from "@/lib/agentLabels";
 import { usePermissions, useSessionOwner } from "@/hooks/usePermissions";
 import type { NativeModelOption, Session, SessionStatus } from "@/lib/types";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { useReplyDraft } from "@/hooks/useReplyDraft";
-import { useSessionModelLabel } from "@/hooks/useSessionModelLabel";
+
 import { useModelPickerHotkey } from "@/hooks/useModelPickerHotkey";
 import { useFocusComposerHotkey } from "@/hooks/useFocusComposerHotkey";
 import { useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
@@ -87,8 +91,7 @@ import {
 import { getCurrentAuthorId } from "@/lib/identity";
 import { toast } from "sonner";
 import { createSideChat, retrySession } from "@/lib/sessionsApi";
-import { codexEffortLevelsForModel, findNativeModelOption } from "@/lib/codexNativeModels";
-import { modelConfigurationSourceRows } from "@/lib/modelConfigurationSource";
+
 import {
   committedItemProvesDelivery,
   composerAttachmentKey,
@@ -101,8 +104,6 @@ import {
 import {
   claudeNativeSubagentLabel,
   codexNativeSubagentLabel,
-  isNativeTerminalSession,
-  nativeCodingAgentForSession,
   nativeCodingAgentForHarness,
   nativeCodingAgentForSubagentWrapper,
   WRAPPER_LABEL_KEY,
@@ -146,37 +147,6 @@ export type { MentionItem, MentionState };
 // existing importers (tests + components) that reach them via "./ChatPage"
 // keep working. SessionSharedContext and computeIsWorking are also imported
 // back below for ChatPage's own use.
-export {
-  BubbleView,
-  ConversationScrollRefBridge,
-  HistoryAutoLoader,
-  HistoryLoadingIndicator,
-  JumpToTopButton,
-  KeepBottomOnViewportResize,
-  LatestTurnSpacer,
-  ScrollToBottomOnSend,
-  SessionSharedContext,
-  UserMessageNavConnected,
-  WORKING_MESSAGES,
-  WorkingIndicator,
-  bubbleKey,
-  buildPendingBubbles,
-  collectBubbleMarkdown,
-  collectPendingElicitations,
-  computeIsWorking,
-  containsDisplayMath,
-  containsMarkdownTable,
-  extractUserText,
-  isBackgroundTasksOnly,
-  isSystemBubble,
-  mergePendingBubbles,
-  reorderCommittedRequestElicitations,
-  shouldShowAuthorBadge,
-  shouldShowWorkingIndicator,
-  stripGatedSubagentRoutingChips,
-  stripPendingElicitations,
-  workingIndicatorLabel,
-} from "@/components/chat/chatBubbleParts";
 export type { ConversationScroller } from "@/components/chat/chatBubbleParts";
 import {
   type ConversationScroller,
@@ -216,48 +186,35 @@ import {
 } from "@/hooks/useWorkspaceChangedFiles";
 import { ComposerMicButton } from "@/components/ComposerMicButton";
 import { ComposerAttachments } from "@/components/ComposerAttachments";
-import { isCostRoutingSession, isSubagentRoutingSession } from "@/components/CostRoutingControl";
-import {
-  SMART_ROUTING_ARMS,
-  hostBacksHarnessWithGateway,
-  smartRoutingSourceFor,
-} from "@/lib/smartRoutingAvailability";
+import { isSubagentRoutingSession } from "@/components/CostRoutingControl";
+
 import { useHostModelOptions, useHosts } from "@/hooks/useHosts";
-import { nativeModelLabel } from "@/components/HarnessConfigControls";
-import { ComposerConfigSections } from "@/components/composer/ComposerConfigSections";
-import { buildFusionSections } from "@/components/composer/fusionSections";
-import { fusionOption, isFusionModelUid } from "@/lib/devinFusion";
+
 import { ComposerWorkspaceStatus } from "@/components/composer/ComposerWorkspaceStatus";
 import { ComposerPrLink } from "@/components/composer/ComposerPrLink";
 import { ComposerContextRing } from "@/components/composer/ComposerContextRing";
 import { useComposerGitStatus } from "@/hooks/useComposerGitStatus";
 import { composerContextFromLabels } from "@/lib/composerContextAdapters";
-import {
-  compactModelTriggerLabel,
-  formatStatusModelLabel,
-  formatStatusEffortLabel,
-  formatModelEffortStatusLabel,
-} from "@/lib/composerModelLabel";
+import { formatStatusModelLabel, formatModelEffortStatusLabel } from "@/lib/composerModelLabel";
 import { useServerInfo } from "@/lib/CapabilitiesContext";
 import type { ServerInfo } from "@/lib/capabilities";
 import { MainTerminalView } from "@/shell/MainTerminalView";
 import { UNTITLED_CONVERSATION_LABEL } from "@/shell/sidebarNav";
-import { ComposerAgentIcon, NewChatLandingScreen } from "@/shell/NewChatDialog";
+import { NewChatLandingScreen } from "@/shell/NewChatDialog";
 import { ResumeWithDirectoryDialog } from "@/shell/ResumeWithDirectoryDialog";
 import { useSessionReconnect } from "@/hooks/useSessionReconnect";
 import { ReconnectSessionDialog } from "@/shell/ReconnectSessionDialog";
 import { useTerminalFirst } from "@/shell/TerminalFirstContext";
-import { supportsEffortControl } from "@/lib/sessionCapabilities";
+
 import {
   CLAUDE_NATIVE_SWITCHABLE_PERMISSION_MODES,
   claudePermissionModeLabel,
-  isClaudeNativeSession,
 } from "@/lib/claudePermissionMode";
 import {
   CODEX_NATIVE_RUNTIME_APPROVAL_PRESETS,
   codexApprovalModeLabel,
 } from "@/lib/codexApprovalMode";
-import { isCodexNativeSession } from "@/lib/codexPlanMode";
+
 import { getCliServerUrl } from "@/lib/host";
 import { useOmnigentAnalytics } from "@/lib/analyticsEmit";
 import { GoalDialog, CommandGoalDialog, GoalStatusPill, useGoalState } from "@/components/goal";
@@ -267,6 +224,53 @@ import { ConnectionIndicator } from "./ChatIndicators";
 import { Transcript } from "@/components/chat/Transcript";
 
 /** Server-info as consumers see it: the probe's result, or "loading". */
+export { isCostRoutingEligible } from "@/lib/sessionComposerCapabilities";
+
+export {
+  effortLevelsForConv,
+  modelPickerKindForConv,
+  shouldShowModelPicker,
+  shouldShowEffortPicker,
+  shouldShowCodexPlanModeControl,
+  shouldShowPermissionModeControl,
+  shouldShowCodexApprovalModeControl,
+  shouldShowGoalControl,
+  shouldShowPollyClaudeGoalControl,
+  shouldShowPollyCodexGoalControl,
+} from "@/lib/sessionComposerCapabilities";
+
+export {
+  BubbleView,
+  ConversationScrollRefBridge,
+  HistoryAutoLoader,
+  HistoryLoadingIndicator,
+  JumpToTopButton,
+  KeepBottomOnViewportResize,
+  LatestTurnSpacer,
+  ScrollToBottomOnSend,
+  SessionSharedContext,
+  UserMessageNavConnected,
+  WORKING_MESSAGES,
+  WorkingIndicator,
+  bubbleKey,
+  buildPendingBubbles,
+  collectBubbleMarkdown,
+  collectPendingElicitations,
+  computeIsWorking,
+  containsDisplayMath,
+  containsMarkdownTable,
+  extractUserText,
+  isBackgroundTasksOnly,
+  isSystemBubble,
+  mergePendingBubbles,
+  reorderCommittedRequestElicitations,
+  shouldShowAuthorBadge,
+  shouldShowWorkingIndicator,
+  stripGatedSubagentRoutingChips,
+  stripPendingElicitations,
+  workingIndicatorLabel,
+} from "@/components/chat/chatBubbleParts";
+
 type ServerInfoValue = ServerInfo | "loading";
 
 /**
@@ -279,42 +283,6 @@ type ServerInfoValue = ServerInfo | "loading";
  */
 function smartRoutingEnabled(serverInfo: ServerInfoValue): boolean {
   return serverInfo !== "loading" && serverInfo.smart_routing_enabled;
-}
-
-/**
- * Whether the session's own model can be routed per turn.
- *
- * SDK/bundle agent sessions need only the deployment flag. Native Claude
- * Code / Codex panes ARE routable per turn — the server injects the routed
- * pick via ``/model`` when ``cost_control_mode_override`` is on, the same
- * apparatus the create-time gear arms — but only when a router can answer
- * for their family (the server rejects a routing-on create otherwise): the
- * external AI-Gateway router needs the family's inference gateway-backed on
- * the session's host, and the built-in judge covers the rest. An absent
- * host row reads as backed, mirroring {@link hostBacksHarnessWithGateway}.
- */
-export function isCostRoutingEligible(
-  serverInfo: ServerInfoValue,
-  // Only the fields the guards below read, so a temp/optimistic session can be
-  // evaluated from its seed without fabricating a whole Session. A real Session
-  // is structurally assignable.
-  session: Pick<Session, "agentName" | "parentSessionId" | "harness" | "labels"> | null | undefined,
-  host?: { gateway_inference?: Record<string, boolean> | null } | null,
-): boolean {
-  if (serverInfo === "loading" || !serverInfo.smart_routing_enabled) return false;
-  if (!isCostRoutingSession(session)) return false;
-  if (!isNativeTerminalSession(session)) return true;
-  const native = nativeCodingAgentForSession(session);
-  if (native === undefined || !SMART_ROUTING_ARMS.some((arm) => arm === native.harness)) {
-    return false;
-  }
-  return (
-    smartRoutingSourceFor({
-      externalConfigured: serverInfo.smart_routing_sources.external,
-      ossConfigured: serverInfo.smart_routing_sources.oss,
-      gatewayBacked: hostBacksHarnessWithGateway(host, native.harness),
-    }) !== null
-  );
 }
 
 /**
@@ -4279,25 +4247,6 @@ export function unboundSessionResumableInApp(params: {
   return params.importSource == null || HOST_PORTABLE_IMPORT_SOURCES.has(params.importSource);
 }
 
-const EFFORT_LEVELS = ["low", "medium", "high"] as const;
-
-/** Anthropic-side efforts for claude-native sessions (matches ANTHROPIC_EFFORTS in reasoning_effort.py). */
-const CLAUDE_NATIVE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
-
-/** Pi thinking ladder (matches PI_EFFORTS in reasoning_effort.py; ``ultra`` aliases to ``max`` on Pi so omitted). */
-const PI_NATIVE_EFFORT_LEVELS = [
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
-
-type NativeModelPickerKind =
-  "claude" | "codex" | "cursor" | "kiro" | "opencode" | "pi" | "devin" | "acp" | "configured";
-
 type LabelSource = { labels?: Record<string, string | null> | null } | null | undefined;
 
 /**
@@ -4340,782 +4289,4 @@ export function readOnlyReasonForSessionLabels(
     return "Claude Code sub-agents are read-only";
   }
   return null;
-}
-
-/**
- * A custom (label-less) session resolved to the native Codex harness.
- *
- * Custom YAML agents get no `omnigent.wrapper` presentation label, so the
- * resolved harness is the capability evidence. Any wrapper label — including
- * sub-agent variants like `codex-native-ui-subagent`, which cannot honor
- * mid-session overrides — keeps the label authoritative and skips the
- * fallback.
- */
-/**
- * The wrapper label a session behaves as: its own, else the one its harness
- * implies.
- *
- * A session created before its harness was renamed carries no
- * ``omnigent.wrapper`` label — the ACP-era Devin rows are the live example — so
- * every label-driven surface below (model picker, effort ladder, permission mode)
- * would read it as non-native even though the runner resolves it to a native
- * harness and gives it a pane. Deriving from the harness fixes that for any
- * rename, and subsumes the codex-only special case this replaces.
- *
- * A sub-agent child is excluded: it owns no PTY and takes no input, so it must
- * not gain a picker just because its harness is native.
- */
-function effectiveWrapperLabel(
-  conv:
-    | {
-        labels?: Record<string, string | null> | null;
-        harness?: string | null;
-        parentSessionId?: string | null;
-      }
-    | null
-    | undefined,
-): string | undefined {
-  const label = conv?.labels?.["omnigent.wrapper"];
-  if (label != null) return label;
-  if (conv?.parentSessionId != null) return undefined;
-  return nativeCodingAgentForHarness(conv?.harness)?.wrapperLabel;
-}
-
-export function effortLevelsForConv(
-  conv:
-    | {
-        labels?: Record<string, string | null> | null;
-        harness?: string | null;
-        parentSessionId?: string | null;
-      }
-    | null
-    | undefined,
-  codexModelOptions: readonly NativeModelOption[] = [],
-  currentModel: string | null = null,
-): readonly string[] {
-  switch (effectiveWrapperLabel(conv)) {
-    case "claude-code-native-ui":
-      return CLAUDE_NATIVE_EFFORT_LEVELS;
-    case "devin-native-ui":
-      // Devin encodes effort as a model-variant suffix, and the rung set is
-      // PER MODEL (swe-2 exposes only medium/high/max; `swe-2-low` is a different
-      // Fusion model), so derive it from the selected model's catalog entry —
-      // its `supportedReasoningEfforts` — rather than a fixed ladder.
-      return codexEffortLevelsForModel(codexModelOptions, currentModel);
-    case "codex-native-ui":
-      return codexEffortLevelsForModel(codexModelOptions, currentModel);
-    case "pi-native-ui":
-      return PI_NATIVE_EFFORT_LEVELS;
-    default:
-      return EFFORT_LEVELS;
-  }
-}
-
-/**
- * Which native model picker should be visible for *conv*?
- *
- * Gated on the wrapper label, not `omnigent.ui === "terminal"`:
- * other terminal-first wrappers may not be Claude/Codex-native (see
- * `TerminalFirstContext.tsx`).
- */
-export function modelPickerKindForConv(
-  conv:
-    | {
-        labels?: Record<string, string | null> | null;
-        harness?: string | null;
-        parentSessionId?: string | null;
-        inferenceConfigured?: boolean;
-      }
-    | null
-    | undefined,
-  modelOptions: readonly NativeModelOption[] = [],
-): NativeModelPickerKind | null {
-  switch (effectiveWrapperLabel(conv)) {
-    case "claude-code-native-ui":
-      return "claude";
-    case "codex-native-ui":
-      return "codex";
-    case "cursor-native-ui":
-      return "cursor";
-    case "kiro-native-ui":
-      // Launch-only model selection: kiro applies ``--model`` at launch. Unlike
-      // cursor/opencode there is no terminal->web model mirror, so the picker
-      // reflects the pre-launch ``model_override`` selection.
-      return "kiro";
-    case "opencode-native-ui":
-      // Like cursor: a vendor-owns-model wrapper that mirrors its live TUI
-      // model into the session ``model_override`` (the forwarder's terminal→web
-      // mirror), so the picker surfaces that as the live model.
-      return "opencode";
-    case "devin-native-ui":
-      // Like opencode/pi: Devin mirrors its live model into ``model_override``
-      // (the executor types ``/model`` when a routed model changes).
-      return "devin";
-    case "pi-native-ui":
-      // Like cursor: the runner types a model switch into the live Pi process
-      // (via the bridge inbox → Pi's ``setModel``) and Pi mirrors its own
-      // ``/model`` picks back to ``model_override`` via the extension's
-      // model_select handler, so the picker surfaces that as the live model.
-      return "pi";
-    default:
-      if (conv?.inferenceConfigured) return "configured";
-      // Generic ACP sessions carry no wrapper label; the server canonicalizes
-      // ``acp:<slug>`` ids to "acp" in the snapshot's harness field.
-      if (conv?.harness === "acp" && modelOptions.length > 1) return "acp";
-      return null;
-  }
-}
-
-export function shouldShowModelPicker(
-  conv:
-    | {
-        labels?: Record<string, string | null> | null;
-        harness?: string | null;
-        inferenceConfigured?: boolean;
-      }
-    | null
-    | undefined,
-  modelOptions: readonly NativeModelOption[] = [],
-): boolean {
-  return modelPickerKindForConv(conv, modelOptions) !== null;
-}
-
-/**
- * True when effort controls should be visible.
- *
- * :param conv: Session or sidebar row carrying labels. ``null`` or missing
- *     labels fail closed.
- * :returns: True only when the session supports Web UI effort controls.
- */
-export function shouldShowEffortPicker(
-  conv:
-    { labels?: Record<string, string | null> | null; harness?: string | null } | null | undefined,
-): boolean {
-  return supportsEffortControl(conv);
-}
-
-export function shouldShowCodexPlanModeControl(
-  conv: { labels?: Record<string, string | null> | null } | null | undefined,
-): boolean {
-  return isCodexNativeSession(conv);
-}
-
-/**
- * True when the claude-native permission-mode picker should be visible.
- *
- * Claude-native sessions only: the switch drives Claude Code's own
- * shift+tab cycle, which no other harness has.
- *
- * :param conv: Session-like object carrying `labels`; a missing session
- *     or missing labels fails closed.
- * :returns: True only for sessions running the claude-native wrapper.
- */
-export function shouldShowPermissionModeControl(
-  conv: { labels?: Record<string, string | null> | null } | null | undefined,
-): boolean {
-  // Devin cycles its own rungs with Shift+Tab, which the runner drives, so it
-  // gets the same control — with its own vocabulary (see `permissionOptions`).
-  return isClaudeNativeSession(conv) || modelPickerKindForConv(conv) === "devin";
-}
-
-/**
- * True when the codex-native approval-mode picker should be visible.
- *
- * Codex-native sessions only: the switch drives Codex's own approval/sandbox
- * presets (the ``/permissions`` popup), which no other harness has.
- *
- * :param conv: Session-like object carrying `labels`; a missing session or
- *     missing labels fails closed.
- * :returns: True only for sessions running the codex-native wrapper.
- */
-export function shouldShowCodexApprovalModeControl(
-  conv: { labels?: Record<string, string | null> | null } | null | undefined,
-): boolean {
-  return isCodexNativeSession(conv);
-}
-
-/**
- * True when the session Goal control should be visible.
- *
- * @param conv - Session or sidebar row carrying labels. ``null`` or missing
- *   labels fail closed.
- * @returns True only for Codex-native wrapper sessions until the server
- *   advertises a generic goal capability.
- */
-export function shouldShowGoalControl(
-  conv: { labels?: Record<string, string | null> | null } | null | undefined,
-): boolean {
-  return isCodexNativeSession(conv);
-}
-
-/** True for top-level Polly sessions running on the Claude SDK harness. */
-export function shouldShowPollyClaudeGoalControl(
-  session: Pick<Session, "agentName" | "harness" | "parentSessionId"> | null | undefined,
-): boolean {
-  return (
-    session?.parentSessionId == null &&
-    session?.agentName?.toLowerCase() === "polly" &&
-    session?.harness === "claude-sdk"
-  );
-}
-
-/** True for top-level Polly sessions running on the Codex harness. */
-export function shouldShowPollyCodexGoalControl(
-  session: Pick<Session, "agentName" | "harness" | "parentSessionId"> | null | undefined,
-): boolean {
-  return (
-    session?.parentSessionId == null &&
-    session?.agentName?.toLowerCase() === "polly" &&
-    session?.harness === "codex"
-  );
-}
-
-/**
- * Whether the session surfaces any run-config the gear modal can edit. Shared
- * render guard for the config gear and click-to-open gate for the model/effort
- * label half of the composer's split pill, so both halves stay in lockstep.
- */
-function hasSessionConfig({
-  showModels,
-  showEffort,
-}: {
-  showModels: boolean;
-  showEffort: boolean;
-}): boolean {
-  return showModels || showEffort;
-}
-
-function SessionHarnessPicker({
-  busy,
-  busyRef,
-  setBusy,
-  agentName,
-  harnessLabel,
-  showModels,
-  showEffort,
-  effortLevels,
-  modelPickerKind,
-  supportsModelReset,
-  codexModelOptions,
-  inferenceConfigured,
-  inferenceError,
-  modelLabelOptions,
-  modelLabelHostId,
-  costRoutingEligible,
-  disabled,
-  openNonce = 0,
-}: {
-  busy: boolean;
-  busyRef: { current: boolean };
-  setBusy: (busy: boolean) => void;
-  agentName: string | null;
-  harnessLabel: string | null;
-  showModels: boolean;
-  showEffort: boolean;
-  effortLevels: readonly string[];
-  modelPickerKind: NativeModelPickerKind | null;
-  supportsModelReset: boolean;
-  codexModelOptions: readonly NativeModelOption[];
-  inferenceConfigured?: boolean;
-  inferenceError?: string | null;
-  modelLabelOptions: readonly NativeModelOption[];
-  modelLabelHostId: string | null | undefined;
-  costRoutingEligible: boolean;
-  disabled: boolean;
-  openNonce?: number;
-}) {
-  const isMobile = useIsMobileViewport();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const appliedOpenNonce = useRef(0);
-  const conversationId = useChatStore((state) => state.conversationId);
-  const sessionHarness = useChatStore((state) => state.sessionHarness);
-  const subAgentName = useChatStore((state) => state.subAgentName);
-  const pendingModelChange = useChatStore((state) => state.pendingModelChange);
-  const sessionModelSeeded = useChatStore((state) => state.sessionModelSeeded);
-  const selectedEffort = useSessionEffort();
-  const costControlModeOverride = useChatStore((state) => state.costControlModeOverride);
-  const routingOn = costRoutingEligible && costControlModeOverride === "on";
-  const {
-    effectiveModel,
-    modelLabel,
-    modelLabelLoading,
-    modelLabelUnavailable,
-    modelOptions,
-    pickerSelectedModel,
-  } = useResolvedComposerModel(
-    modelPickerKind,
-    codexModelOptions,
-    modelLabelOptions,
-    modelLabelHostId,
-  );
-  const modelSummary = modelLabelLoading
-    ? "Loading model…"
-    : modelLabelUnavailable
-      ? "Model name unavailable"
-      : modelLabel;
-  const nativeAgent =
-    nativeCodingAgentForHarness(sessionHarness) ??
-    (modelPickerKind ? nativeCodingAgentForHarness(modelPickerKind + "-native") : undefined);
-  const iconAgent = {
-    name: nativeAgent?.agentName ?? agentName ?? subAgentName ?? "",
-    harness: nativeAgent?.harness ?? sessionHarness,
-  };
-  const summary = useSessionConfigSummary({
-    harnessLabel,
-    showModels,
-    showEffort,
-    codexModelOptions,
-    effectiveModel,
-    modelLabel: modelSummary,
-    costRoutingEligible,
-  });
-  const configurable = hasSessionConfig({
-    showModels,
-    showEffort,
-  });
-  const effortLabel = showEffort && !routingOn ? formatStatusEffortLabel(selectedEffort) : null;
-  const label = routingOn
-    ? SMART_ROUTING_LABEL
-    : modelLabelLoading
-      ? ""
-      : compactModelTriggerLabel(
-          modelSummary ?? nativeAgent?.displayName ?? harnessLabel ?? "Session",
-        );
-  const availableEfforts =
-    modelPickerKind === "codex"
-      ? codexEffortLevelsForModel(codexModelOptions, pickerSelectedModel)
-      : effortLevels;
-  useEffect(() => {
-    if (!openNonce || openNonce === appliedOpenNonce.current) return;
-    appliedOpenNonce.current = openNonce;
-    if (!disabled && configurable) {
-      setMenuOpen(true);
-      setConfigOpen(true);
-    }
-  }, [openNonce, disabled, configurable]);
-  useEffect(() => {
-    setMenuOpen(false);
-    setConfigOpen(false);
-    setError(null);
-  }, [conversationId]);
-  const apply = async (change: () => Promise<unknown>) => {
-    if (disabled || busyRef.current || pendingModelChange !== null) return;
-    busyRef.current = true;
-    setBusy(true);
-    setError(null);
-    const sourceSessionId = useChatStore.getState().conversationId;
-    try {
-      await change();
-    } catch (failure) {
-      if (useChatStore.getState().conversationId === sourceSessionId)
-        setError(
-          failure instanceof Error ? failure.message : "Unable to update session configuration",
-        );
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
-  const selectModel = (modelId: string | null) =>
-    void apply(async () => {
-      const store = useChatStore.getState();
-      const sourceSessionId = store.conversationId;
-      await store.setModel(modelId, {
-        expectConfirmation: modelPickerKind === "claude" || modelPickerKind === "codex",
-      });
-      if (useChatStore.getState().conversationId !== sourceSessionId) return;
-      if (
-        modelPickerKind === "codex" &&
-        selectedEffort !== null &&
-        !codexEffortLevelsForModel(codexModelOptions, modelId).includes(selectedEffort)
-      )
-        await store.setEffort(null);
-      if (
-        costRoutingEligible &&
-        routingOn &&
-        useChatStore.getState().conversationId === sourceSessionId
-      )
-        await store.setCostControlMode("off");
-    });
-  // Devin Fusion: the composed `fusion-…` id is the model; the lead effort is
-  // baked in, so it carries no separate reasoning effort.
-  const composerFusionOption = fusionOption(modelOptions);
-  const composerFusion = composerFusionOption?.fusion;
-  const fusionSelected = composerFusion !== undefined && isFusionModelUid(pickerSelectedModel);
-  const selectFusionModel = (modelUid: string) =>
-    void apply(async () => {
-      const store = useChatStore.getState();
-      const sourceSessionId = store.conversationId;
-      await store.setModel(modelUid, { expectConfirmation: false });
-      if (useChatStore.getState().conversationId !== sourceSessionId) return;
-      if (selectedEffort !== null) await store.setEffort(null);
-    });
-  const configContent = (
-    <>
-      {costRoutingEligible && showModels && (
-        <>
-          <DropdownMenuItem
-            disabled={busy || pendingModelChange !== null}
-            onSelect={() =>
-              void apply(() => useChatStore.getState().setCostControlMode(routingOn ? "off" : "on"))
-            }
-            data-active={routingOn ? "true" : undefined}
-            className="items-center text-13 data-[active=true]:bg-muted data-[active=true]:text-foreground dark:data-[active=true]:bg-muted/50"
-          >
-            <WandSparklesIcon className="size-4" />
-            {SMART_ROUTING_LABEL}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-        </>
-      )}
-      <ComposerConfigSections
-        models={
-          showModels
-            ? {
-                testId: "composer-agent-models",
-                header: "Models",
-                leading:
-                  (inferenceConfigured && inferenceError) || modelOptions.length === 0 ? (
-                    <div className="px-2 py-1 text-xs text-muted-foreground" role="status">
-                      {inferenceError ?? "No usable models are available for this session."}
-                    </div>
-                  ) : undefined,
-                choices: [
-                  ...(supportsModelReset &&
-                  !inferenceConfigured &&
-                  !modelOptions.some((model) => model.isDefault)
-                    ? [
-                        {
-                          key: "__default__",
-                          label: "Default",
-                          checked: !routingOn && pickerSelectedModel === null,
-                          disabled: busy || pendingModelChange !== null || !!inferenceError,
-                          onSelect: () => selectModel(null),
-                          testId: "composer-agent-model-default",
-                        },
-                      ]
-                    : []),
-                  ...modelOptions.map((model) => ({
-                    key: model.id,
-                    label: nativeModelLabel(model),
-                    checked:
-                      !routingOn &&
-                      (composerFusion !== undefined && model.id === composerFusionOption?.id
-                        ? isFusionModelUid(pickerSelectedModel)
-                        : model.id === pickerSelectedModel),
-                    disabled: busy || pendingModelChange !== null || !!inferenceError,
-                    onSelect: () =>
-                      composerFusion !== undefined && model.id === composerFusionOption?.id
-                        ? selectFusionModel(composerFusion.default)
-                        : selectModel(supportsModelReset && model.isDefault ? null : model.id),
-                    testId: `composer-agent-model-${model.id}`,
-                    className: "whitespace-normal break-words",
-                    data: { "data-model-id": model.id },
-                  })),
-                  ...(pickerSelectedModel &&
-                  !isFusionModelUid(pickerSelectedModel) &&
-                  !modelOptions.some((model) => model.id === pickerSelectedModel)
-                    ? [
-                        {
-                          key: "__current__",
-                          label: `${modelSummary ?? "Default"} (current)`,
-                          checked: !routingOn,
-                          disabled: true,
-                          className: "whitespace-normal break-words",
-                          data: { "data-model-id": pickerSelectedModel },
-                        },
-                      ]
-                    : []),
-                ],
-              }
-            : undefined
-        }
-        efforts={
-          showEffort && availableEfforts.length > 0
-            ? {
-                testId: "composer-agent-efforts",
-                header: modelPickerKind === "pi" ? "Thinking level" : "Effort",
-                choices: availableEfforts.map((effort) => ({
-                  key: effort,
-                  label: formatStatusEffortLabel(effort) ?? effort,
-                  checked: !routingOn && effort === selectedEffort,
-                  disabled: routingOn || busy || pendingModelChange !== null,
-                  onSelect: () => void apply(() => useChatStore.getState().setEffort(effort)),
-                  testId: `composer-agent-effort-${effort}`,
-                  data: { "data-effort-level": effort },
-                })),
-              }
-            : undefined
-        }
-        extra={
-          composerFusion !== undefined && fusionSelected && !routingOn
-            ? buildFusionSections({
-                descriptor: composerFusion,
-                modelUid: pickerSelectedModel ?? composerFusion.default,
-                testIdPrefix: "composer-agent",
-                onChange: selectFusionModel,
-                disabled: busy || pendingModelChange !== null,
-              })
-            : undefined
-        }
-      />
-    </>
-  );
-  return (
-    <>
-      <HarnessPicker
-        open={menuOpen}
-        onOpenChange={(next) => {
-          if (!next || (!disabled && !busy && configurable)) setMenuOpen(next);
-          if (!next) setConfigOpen(false);
-        }}
-        trigger={{
-          label: "Configure session",
-          model: label,
-          effort: effortLabel ?? undefined,
-          icon: <ComposerAgentIcon agent={iconAgent} />,
-          disabled: busy || !configurable,
-          "aria-disabled": disabled || busy || !configurable,
-          className: disabled ? "cursor-default opacity-50" : undefined,
-          testIdPrefix: "composer",
-          "data-testid": "composer-config-gear",
-          loading: modelLabelLoading && !routingOn,
-          pending:
-            (sessionModelSeeded || pendingModelChange !== null) &&
-            (modelPickerKind === "claude" || modelPickerKind === "codex"),
-        }}
-        tooltip={<ComposerConfigTooltipRows rows={summary} />}
-        tooltipTestId="composer-config-gear-tooltip"
-        testId="composer-agent-menu"
-      >
-        {isMobile && configOpen ? (
-          <HarnessPickerConfigPage
-            backTestId="composer-agent-config-back"
-            testId="composer-agent-config-menu"
-            onBack={() => setConfigOpen(false)}
-          >
-            {configContent}
-          </HarnessPickerConfigPage>
-        ) : (
-          <HarnessPickerConfigRow
-            label={nativeAgent?.displayName ?? harnessLabel ?? "Session"}
-            value={routingOn ? SMART_ROUTING_LABEL : (modelSummary ?? "Default")}
-            open={configOpen}
-            onOpenChange={setConfigOpen}
-            isMobile={isMobile}
-            disabled={busy || pendingModelChange !== null}
-            valueTestId="composer-agent-model-summary"
-            testId="composer-agent-edit"
-            configTestId="composer-agent-config-menu"
-          >
-            {configContent}
-          </HarnessPickerConfigRow>
-        )}
-      </HarnessPicker>
-      {error && (
-        <TooltipProvider delayDuration={0}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={`Couldn't update configuration: ${error}`}
-                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"
-                data-testid="composer-config-error"
-              >
-                <TriangleAlertIcon className="size-4" aria-hidden="true" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="top"
-              className="w-72 max-w-[calc(100vw-2rem)] flex-col items-start gap-1 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-menu"
-              data-testid="composer-config-error-tooltip"
-            >
-              <strong className="font-medium">Couldn’t update configuration</strong>
-              <span className="text-xs leading-5 text-muted-foreground">
-                {error} Try again, or reconnect the session if the problem continues.
-              </span>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
-    </>
-  );
-}
-
-/**
- * Label/value rows summarizing the session's live run-config, for the gear
- * icon's hover tooltip. Mirrors the new-session summary but with in-session
- * values. The Permissions row lives in the modal itself, not this summary.
- */
-function useSessionConfigSummary({
-  harnessLabel,
-  showModels,
-  showEffort,
-  codexModelOptions,
-  effectiveModel,
-  modelLabel,
-  costRoutingEligible,
-}: {
-  harnessLabel: string | null;
-  showModels: boolean;
-  showEffort: boolean;
-  codexModelOptions: readonly NativeModelOption[];
-  effectiveModel: string | null;
-  modelLabel: string | null;
-  costRoutingEligible: boolean;
-}): { label: string; value: string }[] {
-  const selectedEffort = useSessionEffort();
-  const costControlModeOverride = useChatStore((s) => s.costControlModeOverride);
-  const routingOn = costRoutingEligible && costControlModeOverride === "on";
-
-  const rows: { label: string; value: string }[] = [];
-  if (harnessLabel) rows.push({ label: "Harness", value: harnessLabel });
-  if (showModels) {
-    rows.push({
-      label: "Model",
-      value: routingOn ? SMART_ROUTING_LABEL : (modelLabel ?? "Default"),
-    });
-  }
-  // Suppress Effort while routing is on: the router picks the model and its
-  // effort per turn, so a pinned effort doesn't apply and would mislead.
-  if (showEffort && !routingOn) {
-    const effortValue = formatStatusEffortLabel(selectedEffort);
-    if (effortValue) rows.push({ label: "Effort", value: effortValue });
-  }
-  if (!routingOn) {
-    const source =
-      findNativeModelOption(codexModelOptions, effectiveModel)?.source ??
-      codexModelOptions.find((option) => option.source)?.source;
-    rows.push(...modelConfigurationSourceRows(source));
-  }
-  return rows;
-}
-
-/**
- * The effort this conversation is actually at.
- *
- * `sessionReasoningEffort` is conversation-scoped, so two live conversations at
- * different efforts each read their own.
- */
-function useSessionEffort(): string | null {
-  return useChatStore((s) => s.sessionReasoningEffort);
-}
-
-/**
- * Resolve the session's live model + its picker option list from the store,
- * per harness family. Shared by the AgentPicker trigger, the gear config
- * modal, and the gear hover summary so all three agree on what "the current
- * model" is (the resolution differs by wrapper — see the inline notes).
- *
- * @param modelPickerKind Native picker family, or ``null`` for SDK/bundle.
- * @param codexModelOptions Server-provided model options (codex/cursor/…).
- */
-function useResolvedComposerModel(
-  modelPickerKind: NativeModelPickerKind | null,
-  codexModelOptions: readonly NativeModelOption[],
-  modelLabelOptions: readonly NativeModelOption[],
-  hostId: string | null | undefined,
-) {
-  const sessionId = useChatStore((s) => s.conversationId);
-  const agentId = useChatStore((s) => s.boundAgentId);
-  const harness = useChatStore((s) => s.sessionHarness);
-  const sessionModelOverride = useChatStore((s) => s.sessionModelOverride);
-  const sessionModelSeeded = useChatStore((s) => s.sessionModelSeeded);
-  const llmModel = useChatStore((s) => s.llmModel);
-  const nativeVendorOwnsModel = useChatStore((s) => s.nativeVendorOwnsModel);
-
-  // Native model pickers populate from the snapshot's runner-backed
-  // ``model_options`` field. Claude's rows are the aliases pinned to the
-  // launch-time Databricks catalog; Codex carries richer effort metadata.
-  const usesServerModelOptions =
-    modelPickerKind === "claude" ||
-    modelPickerKind === "codex" ||
-    modelPickerKind === "cursor" ||
-    modelPickerKind === "kiro" ||
-    modelPickerKind === "pi" ||
-    modelPickerKind === "opencode" ||
-    modelPickerKind === "devin" ||
-    modelPickerKind === "acp" ||
-    modelPickerKind === "configured";
-  const modelOptions: readonly {
-    id: string;
-    model?: string;
-    label?: string;
-    displayName?: string;
-    isDefault?: boolean;
-  }[] = usesServerModelOptions ? codexModelOptions : [];
-  const isNativeModelPicker = modelPickerKind !== null;
-
-  // The harness's own report is the display authority for claude-/codex-
-  // native sessions: `llmModel` carries the verbatim reported model (the
-  // launch's own report, or an in-pane switch), and the chip, the gear
-  // highlight, and the hover summary all resolve from it alone. The user's
-  // request (`sessionModelOverride`) is input, never display state — rendering
-  // a request as if it were truth is exactly how a record/pane divergence hides.
-  const isReportedModelPicker = modelPickerKind === "claude" || modelPickerKind === "codex";
-  // The row the reported model maps to: its catalog row when one matches
-  // exactly (by id or wire model), else the raw reported value itself — the
-  // modal appends that as its own honest row rather than relabeling it onto
-  // a same-family row of a different generation.
-  const reportedRowId =
-    isReportedModelPicker && llmModel
-      ? (findNativeModelOption(codexModelOptions, llmModel)?.id ?? llmModel)
-      : null;
-  // Before the harness has reported anything (a routed session whose pane
-  // has not started, a reload of one), the gear seeds from the session's
-  // own REQUEST so the pick the user (or the router) made is what the row
-  // offers to edit — a request is never display truth, but it is the draft.
-  // The moment a report exists it wins, so a request the pane never took
-  // can't masquerade as the active model.
-  const requestedRowId =
-    isReportedModelPicker && sessionModelOverride
-      ? (findNativeModelOption(codexModelOptions, sessionModelOverride)?.id ?? sessionModelOverride)
-      : null;
-  // cursor mirrors its live TUI model into ``model_override``; kiro sets it
-  // on a web pick (which also drives a live ``/model`` switch); opencode/pi
-  // mirror both ways into ``model_override``. Those wrappers keep their
-  // override-derived surface until they adopt reported-model semantics.
-  // SDK/bundle agents (no native picker) resolve the session override or the
-  // bound default.
-  const pickerSelectedModel = isReportedModelPicker
-    ? (reportedRowId ?? requestedRowId)
-    : (sessionModelOverride ?? (modelPickerKind === "configured" ? llmModel : null));
-  const effectiveModel = sessionModelSeeded
-    ? (sessionModelOverride ?? llmModel)
-    : nativeVendorOwnsModel
-      ? modelPickerKind === "cursor" || modelPickerKind === "kiro"
-        ? sessionModelOverride
-        : modelPickerKind === "opencode" || modelPickerKind === "pi" || modelPickerKind === "devin"
-          ? (sessionModelOverride ?? llmModel)
-          : null
-      : isReportedModelPicker
-        ? llmModel
-        : (sessionModelOverride ?? llmModel);
-  const {
-    label: modelLabel,
-    loading: modelLabelLoading,
-    unavailable: modelLabelUnavailable,
-  } = useSessionModelLabel(
-    { sessionId, hostId: hostId ?? null, agentId, harness },
-    effectiveModel,
-    modelLabelOptions,
-    usesServerModelOptions,
-    hostId !== undefined &&
-      !sessionModelSeeded &&
-      (!isReportedModelPicker || effectiveModel === llmModel),
-    codexModelOptions,
-  );
-  return {
-    llmModel,
-    usesServerModelOptions,
-    modelOptions,
-    isNativeModelPicker,
-    pickerSelectedModel,
-    effectiveModel,
-    modelLabel,
-    modelLabelLoading,
-    modelLabelUnavailable,
-  };
 }

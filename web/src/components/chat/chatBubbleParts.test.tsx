@@ -4,7 +4,7 @@ import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bubble } from "@/lib/renderItems";
 import { useChatStore, type ChatState } from "@/store/chatStore";
-import { BubbleView, containsMermaidDiagram } from "./chatBubbleParts";
+import { BubbleView, containsMermaidDiagram, extractUserText } from "./chatBubbleParts";
 
 const fetchMock = vi.fn();
 const initialStoreState = useChatStore.getState();
@@ -144,6 +144,30 @@ describe("message navigation highlight", () => {
 });
 
 describe("UserBubble literal text", () => {
+  it.each([false, true])("hides native reminders, including truncated blocks: %s", (truncated) => {
+    const content = [
+      {
+        type: "input_text" as const,
+        text: "<system-reminder>private context</system-reminder>hello",
+      },
+      {
+        type: "input_text" as const,
+        text: "<system-reminder>hidden context" + (truncated ? "" : "</system-reminder>"),
+      },
+    ];
+    const original = JSON.stringify(content);
+    expect(extractUserText(content)).toBe("hello");
+    render(
+      <BubbleView
+        bubble={{ kind: "user", itemId: "reminders", content }}
+        isLastAssistant={false}
+      />,
+    );
+    expect(screen.getByTestId("message-bubble")).toHaveTextContent("hello");
+    expect(screen.queryByText(/private context|hidden context/)).toBeNull();
+    expect(JSON.stringify(content)).toBe(original);
+  });
+
   it.each([
     [
       "unfinished placeholder",

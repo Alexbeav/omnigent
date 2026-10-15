@@ -8,6 +8,7 @@ import type * as ChatStoreModule from "@/store/chatStore";
 import { useChatStore, type ChatState } from "@/store/chatStore";
 import { conversationRegistry } from "@/store/conversationRegistry";
 import { SideChatPane } from "./SideChatPane";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { clearSessionDrafts, getSessionDraft } from "@/lib/sessionDrafts";
 
 vi.mock("@/store/chatStore", async (importOriginal) => ({
@@ -37,7 +38,9 @@ const queryClient = new QueryClient();
 const renderPane = (ui: ReactNode) =>
   render(ui, {
     wrapper: ({ children }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>{children}</TooltipProvider>
+      </QueryClientProvider>
     ),
   });
 
@@ -87,6 +90,74 @@ it("keeps an ordinary pane draft across unmount", () => {
 
   renderPane(<SideChatPane childId={childId} showFullHistory />);
   expect(screen.getByTestId("side-chat-input")).toHaveValue("draft for this pane");
+});
+
+describe("ordinary pane queue", () => {
+  it("queues and steers only the pane, including the keyboard shortcut", () => {
+    renderPane(<SideChatPane childId={childId} showFullHistory />);
+    const input = screen.getByTestId("side-chat-input");
+    fireEvent.change(input, { target: { value: "Follow up in this pane" } });
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(send).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessages).toEqual([
+      expect.objectContaining({
+        conversationId: childId,
+        agentId: "agent_side",
+        text: "Follow up in this pane",
+      }),
+    ]);
+    expect(input).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));
+    expect(send).toHaveBeenCalledWith(
+      "Follow up in this pane",
+      "agent_side",
+      undefined,
+      expect.objectContaining({ pinnedConversationId: childId }),
+    );
+    expect(useChatStore.getState().queuedMessages).toEqual([]);
+
+    fireEvent.change(input, { target: { value: "Steer from the keyboard" } });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    expect(send).toHaveBeenLastCalledWith(
+      "Steer from the keyboard",
+      "agent_side",
+      undefined,
+      expect.objectContaining({ pinnedConversationId: childId }),
+    );
+    expect(useChatStore.getState().conversationId).toBe("conv_main");
+  });
+
+  it("flushes its queue when idle without draining another conversation", async () => {
+    useChatStore.setState({
+      queuedMessages: [
+        {
+          queueId: "other-queue",
+          text: "Other work",
+          conversationId: "conv_other",
+          agentId: "other_agent",
+        },
+      ],
+    });
+    renderPane(<SideChatPane childId={childId} showFullHistory />);
+    const input = screen.getByTestId("side-chat-input");
+    fireEvent.change(input, { target: { value: "Wait for this pane" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(send).not.toHaveBeenCalled();
+    act(() =>
+      conversationRegistry.acquire(childId).setState({ sessionStatus: "idle", status: "idle" }),
+    );
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(send).toHaveBeenCalledWith(
+      "Wait for this pane",
+      "agent_side",
+      undefined,
+      expect.objectContaining({ pinnedConversationId: childId }),
+    );
+    expect(useChatStore.getState().queuedMessages.map((message) => message.queueId)).toEqual([
+      "other-queue",
+    ]);
+  });
 });
 
 describe("side-chat attachments", () => {

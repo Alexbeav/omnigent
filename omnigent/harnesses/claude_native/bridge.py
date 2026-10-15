@@ -7798,6 +7798,10 @@ def _transcript_items_from_entry(
         the file shape.
     :returns: Updated active response id and parsed items.
     """
+    # Provider request snapshots repeat messages with native reminders included.
+    # They are diagnostic records, not new conversation turns.
+    if entry.get("type") == "api-request-blob":
+        return current_response_id, []
     if not include_sidechains and entry.get("isSidechain") is True:
         return current_response_id, []
     if entry.get("type") == "attachment":
