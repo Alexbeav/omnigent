@@ -22,7 +22,7 @@ export type FileNavigationGuard = (
 ) => void;
 
 interface FileViewerContextType {
-  openFile: (path: string, options?: OpenFileOptions) => void;
+  openFile: (path: string, options?: OpenFileOptions, sourceConversationId?: string) => void;
   /** The mounted viewer confirms dirty navigation before selection or URL changes. */
   registerNavigationGuard?: (guard: FileNavigationGuard) => () => void;
   /** Open Pull Requests in the workspace rail or mobile drawer. */
@@ -61,7 +61,7 @@ export const FileViewerContext = createContext<FileViewerContextType | null>(nul
  * Returns the `openFile` callback when rendered inside AppShell, or
  * `null` when used outside of it (tests, Storybook, etc.).
  */
-export function useFileViewer(): ((path: string, options?: OpenFileOptions) => void) | null {
+export function useFileViewer(): FileViewerContextType["openFile"] | null {
   return useContext(FileViewerContext)?.openFile ?? null;
 }
 

@@ -11,7 +11,7 @@
 // without importing the block dispatcher that renders them.
 
 import type React from "react";
-import { useMemo } from "react";
+import { useContext, useMemo } from "react";
 import { GitPullRequestIcon } from "lucide-react";
 import { defaultRemarkPlugins } from "streamdown";
 import remarkBreaks from "remark-breaks";
@@ -24,8 +24,15 @@ import {
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { useThrottledValue } from "@/hooks/useThrottledValue";
 import { withBasePath } from "@/lib/basePath";
-import { isNativeShell } from "@/lib/nativeBridge";
-import { maybeOpenLinkInApp } from "@/lib/openLinkInApp";
+import { isNativeShell, supportsBrowser } from "@/lib/nativeBridge";
+import { maybeOpenLinkInApp, openLinkInApp } from "@/lib/openLinkInApp";
+import { copyText } from "@/lib/clipboard";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import {
   useFileViewer,
@@ -33,7 +40,12 @@ import {
   useIsChangedPath,
   useWorkspacePaths,
 } from "@/shell/FileViewerContext";
-import { resolveChatFilePath, useWorkspaceFileExists } from "@/hooks/useWorkspaceChangedFiles";
+import {
+  resolveChatFilePath,
+  useWorkspaceEnvironment,
+  useWorkspaceFileExists,
+} from "@/hooks/useWorkspaceChangedFiles";
+import { ConversationScopeContext } from "@/components/chat/conversationScope";
 import { showToast } from "@/components/ui/toast";
 
 // Streamdown hands each component override the source hast node alongside the
@@ -71,8 +83,16 @@ interface WorkspaceFileOpener {
 function useWorkspaceFileOpener(text: string, explicitLink = false): WorkspaceFileOpener {
   const openFile = useFileViewer();
   const isChangedPath = useIsChangedPath();
-  const conversationId = useFileViewerConversationId();
-  const { root, home } = useWorkspacePaths();
+  const viewerConversationId = useFileViewerConversationId();
+  const scopedConversationId = useContext(ConversationScopeContext);
+  const conversationId = scopedConversationId ?? viewerConversationId;
+  const outsideViewer = !!conversationId && conversationId !== viewerConversationId;
+  const workspace = useWorkspacePaths();
+  const environment = useWorkspaceEnvironment(outsideViewer ? conversationId : undefined, {
+    enabled: outsideViewer && !!openFile,
+  });
+  const root = outsideViewer ? (environment.data?.root ?? null) : workspace.root;
+  const home = outsideViewer ? (environment.data?.home ?? null) : workspace.home;
 
   // Agents cite a file with the position they mean, `docs/notes.md:12` or
   // `:12:7`. The position is not part of the filename, so no such path is ever
@@ -92,7 +112,8 @@ function useWorkspaceFileOpener(text: string, explicitLink = false): WorkspaceFi
 
   // Only relative paths can be in the changed-files list (it speaks
   // workspace-relative); an outside-workspace absolute is never a change.
-  const isChanged = !!linkPath && !linkPath.startsWith("/") && isChangedPath(linkPath);
+  const isChanged =
+    !outsideViewer && !!linkPath && !linkPath.startsWith("/") && isChangedPath(linkPath);
   // Explicit links also verify basenames; inline code keeps its path heuristic.
   const { exists, settled } = useWorkspaceFileExists(
     conversationId,
@@ -116,13 +137,18 @@ function useWorkspaceFileOpener(text: string, explicitLink = false): WorkspaceFi
     };
   }
   return {
-    open: () =>
-      citedLine === null
-        ? openFile(linkPath)
-        : openFile(linkPath, {
-            line: citedLine,
-            ...(citation.column ? { column: citation.column } : {}),
-          }),
+    open: () => {
+      const position =
+        citedLine === null
+          ? undefined
+          : {
+              line: citedLine,
+              ...(citation.column ? { column: citation.column } : {}),
+            };
+      if (outsideViewer) openFile(linkPath, position, conversationId);
+      else if (position) openFile(linkPath, position);
+      else openFile(linkPath);
+    },
     unopenable: false,
     resolvedPath: linkPath,
   };
@@ -252,6 +278,14 @@ function followLinkWithPopupFallback(
   }
   if (!/^(?:https?:)?\/\//i.test(href)) return;
   event.preventDefault();
+  openLinkInBrowser(href);
+}
+
+function openLinkInBrowser(href: string): void {
+  if (isNativeShell()) {
+    window.open(href, "_blank", "noopener,noreferrer");
+    return;
+  }
   const popup = window.open("about:blank", "_blank");
   if (popup) {
     popup.opener = null;
@@ -261,6 +295,44 @@ function followLinkWithPopupFallback(
   link.target = "_self";
   link.rel = "noopener noreferrer";
   link.click();
+}
+
+function ChatLinkMenu({
+  children,
+  href,
+  openInApp,
+}: {
+  children: React.ReactElement;
+  href: string;
+  openInApp?: () => void;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          disabled={!openInApp}
+          onSelect={openInApp}
+          title={openInApp ? undefined : "The integrated website browser requires the desktop app."}
+        >
+          Open in Omnigent
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => openLinkInBrowser(href)}>
+          {isNativeShell() ? "Open in default browser" : "Open in browser tab"}
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => {
+            void copyText(href).then(
+              () => showToast("Link copied"),
+              () => showToast("Could not copy the link. Please try again."),
+            );
+          }}
+        >
+          Copy link
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
 }
 
 function PullRequestLinkLabel({ children }: { children: React.ReactNode }) {
@@ -302,7 +374,9 @@ function WorkspaceFileLink({
   const path = typeof marked === "string" ? marked : "";
   const { open: openWorkspaceFile, unopenable, resolvedPath } = useWorkspaceFileOpener(path, true);
   // Scopes the desktop in-app browser route to this conversation's view.
-  const conversationId = useFileViewerConversationId();
+  const viewerConversationId = useFileViewerConversationId();
+  const scopedConversationId = useContext(ConversationScopeContext);
+  const conversationId = scopedConversationId ?? viewerConversationId;
 
   if (!path) {
     // Rebase an app-internal link (e.g. an agent's `/clear` "the new chat"
@@ -314,7 +388,7 @@ function WorkspaceFileLink({
     // popup fallback so a click still works where new tabs can't open.
     const blankHref = props.target === "_blank" && typeof rebased === "string" ? rebased : null;
     const pullRequest = githubPullRequest(rebased);
-    return (
+    const link = (
       <a
         href={rebased}
         className={cn(STREAMDOWN_LINK_CLASS, className)}
@@ -336,6 +410,27 @@ function WorkspaceFileLink({
           children
         )}
       </a>
+    );
+    if (typeof rebased !== "string" || !/^(?:https?:)?\/\//i.test(rebased)) return link;
+    let menuHref: string;
+    try {
+      menuHref = new URL(rebased, window.location.href).toString();
+    } catch {
+      return link;
+    }
+    return (
+      <ChatLinkMenu
+        href={menuHref}
+        openInApp={
+          conversationId && supportsBrowser()
+            ? () => {
+                openLinkInApp(conversationId, rebased);
+              }
+            : undefined
+        }
+      >
+        {link}
+      </ChatLinkMenu>
     );
   }
 
@@ -389,7 +484,7 @@ function WorkspaceFileLink({
 
   // No href: the parked fragment would still navigate on cmd/middle-click, and
   // no URL opens the FileViewer. role/tabIndex/onKeyDown restore button semantics.
-  return (
+  const link = (
     <a
       {...props}
       role="button"
@@ -410,6 +505,20 @@ function WorkspaceFileLink({
     >
       {children}
     </a>
+  );
+  if (!conversationId) return link;
+  const url = new URL(
+    withBasePath(`/c/${encodeURIComponent(conversationId)}`),
+    window.location.origin,
+  );
+  url.searchParams.set("file", resolvedPath);
+  const citation = splitWorkspaceFileCitation(path);
+  if (citation.line !== null) url.searchParams.set("line", String(citation.line));
+  if (citation.column) url.searchParams.set("column", String(citation.column));
+  return (
+    <ChatLinkMenu href={url.toString()} openInApp={openWorkspaceFile}>
+      {link}
+    </ChatLinkMenu>
   );
 }
 

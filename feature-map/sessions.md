@@ -13,6 +13,8 @@ the header menu), and each place is a separate entry point.
   with their status and direct links in the sidebar.
 
 - `multi-pane`: desktop can show three sessions side by side with separate transcripts and composers; each divider resizes its two neighbors in every chat order; mobile keeps one pane.
+- `chat-link-menu`: right-click a website or reachable file link in any chat
+  to open it in Omnigent, open it in a browser, or copy its destination.
 
 - `pin`: pinned sessions move to their own section and back.
 - `pin-undo`: unpinning shows an Undo toast that re-pins the session into its
@@ -212,6 +214,15 @@ does not send a message; enter a question and send when ready.
 ⌘/Ctrl+Alt+B. Agent browser requests and chat links with in-app opening enabled
 create or select a closable Browser soft tab automatically.
 
+**Chat links:** right-click a website or file link for **Open in Omnigent**,
+**Open in browser tab**, and **Copy link**. File links open their existing
+preview in Omnigent; their copied link opens that preview in the source chat,
+including a cited line and column. Website links can open in the desktop app's
+integrated browser even when automatic in-app opening is off. That action is
+disabled in the web interface, which has no integrated website browser. The
+desktop app offers **Open in default browser**; the web interface opens a tab
+in the current browser. Left-click behavior stays the same.
+
 **Desktop recent sessions:** hold Control and press Tab to open the five most
 recent sessions. Continue pressing Tab (or Shift+Tab) to cycle, release Control
 to switch, or press Escape to cancel.
@@ -229,6 +240,16 @@ Starting a session from a project button or menu, sidebar New session, shortcut,
 the sidebar, then choose a child. The Agents panel still shows the full tree.
 
 ## Driving it with the repro environment
+
+- **`chat-link-menu`, full chat and three panes (browser contract):**
+  `tests/browser_ui/chat/test_transcript_rendering.py::test_file_link_context_menu_targets_its_source_chat`
+  checks file preview, browser-tab navigation and clipboard URLs from the source
+  chat. `test_external_link_click_opens_the_rendered_target` covers website
+  navigation by click, keyboard and context menu with no opener or referrer.
+  Component tests in `web/src/components/blocks/ChatMarkdown.inAppLinkRouting.test.tsx`
+  check explicit desktop routing independently of the click preference.
+  The component suite checks the desktop bridge contract; it does not launch
+  the installed desktop app or prove which OS browser receives its request.
 
 Preconditions: a running instance (`verify-env start`, then `verify-env
 doctor`), the built web UI, and at least one session (the `seeded_session`

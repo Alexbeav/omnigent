@@ -55,7 +55,12 @@ async function openInApp(conversationId: string, url: string): Promise<void> {
  * opted in. Returns true when routed (the caller cancels the default click).
  */
 export function maybeOpenLinkInApp(conversationId: string | undefined, href: string): boolean {
-  if (!conversationId || !supportsBrowser() || !readOpenLinksInApp()) return false;
+  return readOpenLinksInApp() && openLinkInApp(conversationId, href);
+}
+
+/** Explicit menu choices do not depend on the plain-click preference. */
+export function openLinkInApp(conversationId: string | undefined, href: string): boolean {
+  if (!conversationId || !supportsBrowser()) return false;
   let url: URL;
   try {
     url = new URL(href, window.location.href);

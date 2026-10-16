@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import Locator, Page, Route, expect
 
-from tests.browser_ui.chat.session_contract import ChatSessionContract, message_item
+from tests.browser_ui.chat.session_contract import (
+    ChatSessionContract,
+    _ChatSseStream,
+    install_chat_session_routes,
+    list_payload,
+    message_item,
+)
 
 _CODE_BODY = '[data-streamdown="code-block-body"]'
 _LONG_WORD = "horizontalScrolling" * 14
@@ -219,7 +226,7 @@ def test_mermaid_recovery_uses_the_real_browser_renderer(
     expect(page.get_by_test_id("mermaid-error")).to_have_count(0)
 
 
-@pytest.mark.parametrize("activation", ["click", "keyboard"])
+@pytest.mark.parametrize("activation", ["click", "keyboard", "context-menu"])
 def test_external_link_click_opens_the_rendered_target(
     page: Page,
     chat_session_contract: ChatSessionContract,
@@ -245,8 +252,11 @@ def test_external_link_click_opens_the_rendered_target(
     with page.expect_popup() as popup_info:
         if activation == "click":
             link.click()
-        else:
+        elif activation == "keyboard":
             link.press("Enter")
+        else:
+            link.click(button="right")
+            page.get_by_role("menuitem", name="Open in browser tab").click()
     popup = popup_info.value
     popup.wait_for_url(_TARGET)
     expect(page).to_have_url(chat.url)
@@ -255,6 +265,73 @@ def test_external_link_click_opens_the_rendered_target(
     assert popup.evaluate("document.referrer") == ""
     assert requests and "referer" not in requests[0]
     assert len(page.context.pages) == 2
+
+
+@pytest.mark.parametrize("pane_count", [1, 3], ids=["full-chat", "three-panes"])
+def test_file_link_context_menu_targets_its_source_chat(
+    page: Page, chat_session_contract: ChatSessionContract, tmp_path: Path, pane_count: int
+) -> None:
+    chat = chat_session_contract
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page.set_viewport_size({"width": 1800, "height": 1100})
+    with ExitStack() as cleanup:
+        chats = [chat]
+        for index in range(1, pane_count):
+            stream = _ChatSseStream()
+            cleanup.callback(stream.close)
+            sibling = ChatSessionContract(
+                page, chat.contract, stream, session_id=f"link-pane-{index}"
+            )
+            install_chat_session_routes(sibling)
+            chats.append(sibling)
+        source = chats[pane_count // 2]
+        _seed_assistant_message(source, "Open [my report](report.md:12).")
+        environment = f"/v1/sessions/{source.session_id}/resources/environments/default"
+        chat.contract.json(environment, {"metadata": {"root": "/browser-workspace"}})
+        chat.contract.json(f"{environment}/changes", list_payload([]))
+        chat.contract.json(f"/v1/sessions/{source.session_id}/comments", list_payload([]))
+        chat.contract.json(
+            f"{environment}/filesystem",
+            list_payload([{"path": "report.md", "name": "report.md", "type": "file"}]),
+        )
+        chat.contract.json(
+            f"{environment}/filesystem/report.md",
+            {
+                "object": "session.environment.filesystem.file_content",
+                "path": "report.md",
+                "content": "# My report\n\nThis is the source chat's report.",
+                "encoding": "utf-8",
+                "content_type": "text/markdown",
+                "bytes": 46,
+            },
+        )
+        chat.contract.json("/v1/sessions", list_payload([handle._session() for handle in chats]))
+        suffix = "" if pane_count == 1 else "?panes=" + ",".join(c.session_id for c in chats[1:])
+        page.goto(chat.url + suffix)
+        root = (
+            page
+            if pane_count == 1
+            else page.locator(f'section[data-pane-id="{source.session_id}"]')
+        )
+        link = root.get_by_role("button", name="my report", exact=True)
+        link.click(button="right")
+        expect(page.get_by_role("menuitem", name="Open in Omnigent")).to_be_enabled()
+        expect(page.get_by_role("menuitem", name="Open in browser tab")).to_be_enabled()
+        page.screenshot(path=str(tmp_path / f"file-link-menu-{pane_count}.png"))
+        page.get_by_role("menuitem", name="Copy link", exact=True).click()
+        expected = f"{chat.base_url}/c/{source.session_id}?file=report.md&line=12"
+        assert page.evaluate("navigator.clipboard.readText()") == expected
+        link.click(button="right")
+        with page.expect_popup() as opened:
+            page.get_by_role("menuitem", name="Open in browser tab").click()
+        opened.value.wait_for_url(expected)
+        assert opened.value.evaluate("window.opener === null")
+        opened.value.close()
+        link.click(button="right")
+        page.get_by_role("menuitem", name="Open in Omnigent", exact=True).click()
+        expect(page.locator('[data-testid="file-viewer"]:visible').first).to_be_visible()
+        assert page.url.startswith(f"{chat.base_url}/c/{source.session_id}?")
+        assert all(not handle.event_posts for handle in chats)
 
 
 @pytest.mark.parametrize("activation", ["click", "keyboard"])

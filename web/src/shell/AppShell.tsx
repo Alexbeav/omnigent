@@ -1573,16 +1573,26 @@ export function AppShell() {
     };
   }, []);
   const openFileViewer = useCallback(
-    (path: string, options?: OpenFileOptions) => {
+    (path: string, options?: OpenFileOptions, sourceConversationId?: string) => {
       const guards = [...fileNavigationGuardsRef.current];
       const navigate = (index: number) => {
         const guard = guards[index];
         if (guard) guard(path, options, () => navigate(index + 1));
-        else commitFileNavigation(path, options);
+        else if (sourceConversationId && sourceConversationId !== conversationId) {
+          const layout = layoutRef.current;
+          const search = new URLSearchParams({ file: path });
+          if (options?.line) search.set("line", String(options.line));
+          if (options?.column) search.set("column", String(options.column));
+          layout.navigatePane(
+            sourceConversationId,
+            layout.order.includes(sourceConversationId) ? layout.order : [sourceConversationId],
+            { search: `?${search}` },
+          );
+        } else commitFileNavigation(path, options);
       };
       navigate(0);
     },
-    [commitFileNavigation],
+    [commitFileNavigation, conversationId],
   );
 
   // Strip the file-viewer URL params (file/diff/comment). Memoized on
