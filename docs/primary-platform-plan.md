@@ -206,5 +206,7 @@ The header popout button or an outside-page release requests a separate window. 
 
 The next request adds editable suggested replies to the chat composer.
 A [shared composer prototype](primary-platform-prompt-suggestions.md) passes 43 component checks but is not connected or deployed.
-The native-only versus generated-fallback choice is pending.
+Research confirms the recent Codex desktop feature and OMP 18.9.0's built-in predictions; Hermes offers a community Desktop plugin.
+The installed Codex prediction method returns `not implemented yet`, and the current OMP ACP connection does not forward its interactive predictions.
+An available source and transport must be selected before connecting the prototype; custom generation adds model usage.
 This chat still uses native Codex directly, and OMP coordination remains deferred.
