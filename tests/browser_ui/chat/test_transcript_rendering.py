@@ -265,6 +265,8 @@ def test_file_link_context_menu_opens_and_copies_the_viewer_url(
     page: Page, chat_session_contract: ChatSessionContract, tmp_path: Path, surface: str
 ) -> None:
     chat = chat_session_contract
+    page_errors: list[str] = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
     page.context.grant_permissions(["clipboard-read", "clipboard-write"])
     page.emulate_media(color_scheme="dark")
     page.set_viewport_size({"width": 1440, "height": 900})
@@ -273,7 +275,7 @@ def test_file_link_context_menu_opens_and_copies_the_viewer_url(
     environment = f"/v1/sessions/{chat.session_id}/resources/environments/default"
     chat.contract.json(environment, {"metadata": {"root": "/browser-workspace"}})
     chat.contract.json(f"{environment}/changes", list_payload([]))
-    chat.contract.json(f"/v1/sessions/{chat.session_id}/comments", list_payload([]))
+    chat.contract.json(f"/v1/sessions/{chat.session_id}/comments", [])
     chat.contract.json(
         f"{environment}/filesystem",
         list_payload([{"path": "report.md", "name": "report.md", "type": "file"}]),
@@ -330,7 +332,9 @@ def test_file_link_context_menu_opens_and_copies_the_viewer_url(
     opened.value.close()
     link.click(button="right")
     page.get_by_role("menuitem", name="Open in Omnigent", exact=True).click()
-    expect(page.locator('[data-testid="file-viewer"]:visible').first).to_be_visible()
+    viewer = page.locator('[data-testid="file-viewer"]:visible').first
+    expect(viewer.get_by_text("A report from this workspace.", exact=True)).to_be_visible()
+    assert not page_errors
     assert page.url == expected
     assert not chat.event_posts
 
