@@ -299,3 +299,42 @@ selected answers, **Blue (Recommended)** and **Brief (Recommended)**, in one
 structured reply. This confirms the live Codex question/answer round trip after
 activation. Custom answers, pane routing, Claude and Cline retain the automated
 coverage above; this check did not establish fresh human round trips for them.
+
+### Cline tool connection verified, 2026-10-17
+
+The first authenticated Cline test exposed a separate transport gap: CLI 3.0.72
+retained ACP's per-session MCP list without loading it into the runtime. A
+private settings-file probe also failed through the shared background runtime.
+The same installed CLI successfully called a fixture MCP tool with a private
+settings file and `CLINE_SESSION_BACKEND_MODE=local`.
+
+Source `0d3c2686cdab243570caced15b07402dd6f92521` adds the generic
+`{omnigent_mcp_config}` command marker. Its settings file uses the existing
+session relay, is written before process spawn with mode `0600`, and is removed
+on close. A disabled or unavailable relay prevents a command requiring the
+marker from starting. Other launch commands remain literal argument vectors.
+See the [ACP launch example](AGENT_YAML_SPEC.md#custom-acp-agents).
+
+Pegasus's existing host checkout was fast-forwarded to that source. Its Cline
+command now prefixes the existing Node/CLI command with
+`/usr/bin/env CLINE_SESSION_BACKEND_MODE=local CLINE_MCP_SETTINGS_PATH={omnigent_mcp_config}`.
+Existing provider/model flags, permission settings, login and shared Cline
+profile were preserved. The runner detected the changed ACP command and
+respawned only the idle Cline test harness; shared host PID `187169` stayed up.
+
+The live [Cline test chat](https://omnigent.ulduar.crosstalkis.com/c/3761b068055a4b908a2da5623ad905d7)
+then called `sys_agent_list` successfully and posted one `sys_ask_user` message
+with two questions, both option lists and a deterministic reply ID. A read-only
+API check and a live Chromium screenshot confirmed the card, choices and custom
+answer control. Alex's Cline answer submission remains pending. The current NAS
+frontend still uses the older **Codex question** heading; the generic heading
+is committed but has not been deployed there.
+
+The focused ACP/runner/feature-map group passed **440 tests** with retries off;
+the file-settings subprocess regression fails against the previous launcher.
+Pre-commit passed. No frontend or server schema changed. Evidence is under
+`~/.local/state/omnigent-investigations/native-question-controls-20261016/`,
+including `cline-mcp-full-final.log`, `cline-live-question.json`, and
+`cline-live-question-card.png`. The screenshot is local evidence, not a
+committed product asset. Restore `config-before-cline-mcp.yaml` from that
+directory and reconnect idle Cline chats to roll back the launch configuration.
