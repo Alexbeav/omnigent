@@ -1,5 +1,61 @@
 # OMP as an Omnigent session coordinator
 
+## Eagle WSL pilot installed, 2026-10-16
+
+OMP `18.11.1` is installed in an isolated Eagle WSL directory:
+`/home/alexbeav/.local/share/omnigent-omp/18.11.1/omp`.
+The official GitHub `omp-linux-x64` asset matches its release digest and checksum manifest.
+Its SHA-256 is `bf1e86a935b1ea26166a5280001eccea1205e6c21efe1b5853f0fd368c754974`.
+No Bun installation or shared-host restart was required.
+The existing Windows OMP and patched Hermes installations are unchanged.
+
+The isolated profile is `~/.omp/profiles/omnigent-coordinator/agent`.
+It selects `openai-codex/gpt-6.1-sol` and denies direct shell, edit, browser and OMP task tools.
+This profile is not an operating-system sandbox.
+Eagle WSL's ACP list contains a separate `OMP Pilot` entry, with Omnigent tools enabled and `permission_mode: auto`.
+The existing Cline entry and unrelated configuration are preserved.
+The host advertised `acp:omp-pilot: true` through normal dynamic discovery.
+No sign-in task, WSL setting or service owner changed.
+
+The ACP handshake and session creation pass against the installed binary.
+It advertises image input and load/resume/fork/list support.
+The qualified Omnigent MCP helper lists the selected tool schemas and completes a transport call against a fixture callback.
+That fixture does not establish live Omnigent dispatch or worker coordination.
+The isolated model probe fails because no allowed model has usable credentials.
+No authenticated inference or two-turn persistence is proven.
+
+OMP's native-Codex credential import dry run skipped the auth file because its format is unsupported.
+No credential was imported, copied, rewritten or refreshed.
+`omp auth import` accepts OMP exports, while `auth-broker import` accepts CLIProxyAPI records.
+The existing Cline login is not a documented OMP credential-import format.
+The profile has zero stored credential rows and no provider API key in the inherited environment.
+Alex must complete the supported OMP login in a local terminal:
+
+```bash
+/home/alexbeav/.local/share/omnigent-omp/18.11.1/omp --profile omnigent-coordinator login openai-codex
+```
+
+Use the intended existing account in the provider's own sign-in flow.
+This creates an OMP profile login and does not replace the native Codex home.
+After login, the parent can create the pilot from this validated agent config:
+
+```text
+/home/alexbeav/.local/state/omnigent-investigations/remaining-enhancements/scope-1/implementation/omp-pilot/config.yaml
+```
+
+The pilot owner did not create an Omnigent child chat.
+The parent must prove two coordinator turns, then create distinct native Claude, native Codex and ACP Cline workers.
+Reopen each worker and send a follow-up to the same session ID.
+Make sure that actual harnesses, host bindings, completion delivery and attachments match the intended task.
+The question-control and suggestion features remain separate application workstreams.
+
+Rollback removes only the `OMP Pilot` ACP list entry.
+Preserve the isolated profile, credentials, binary and transcripts for diagnosis.
+Do not restore an entire old global configuration file over later edits.
+The private setup, qualification and rollback record is under
+`~/.local/state/omnigent-investigations/remaining-enhancements/scope-1/implementation/`.
+Current operational state belongs in the homelab `Common/Infrastructure-State.md` note.
+
 ## Decision
 
 Use Oh My Pi (OMP) as the coordinator chat. OMP creates three separate
