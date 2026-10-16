@@ -37,11 +37,18 @@ Alex must complete the supported OMP login in a local terminal:
 
 Use the intended existing account in the provider's own sign-in flow.
 This creates an OMP profile login and does not replace the native Codex home.
-After login, the parent can create the pilot from this validated agent config:
+The parent can create an idle pilot from this agent config; wait for login before inference:
 
 ```text
 /home/alexbeav/.local/state/omnigent-investigations/remaining-enhancements/scope-1/implementation/omp-pilot/config.yaml
 ```
+
+The parent's first idle creation attempt returned HTTP 400 because `os_env.cwd` was absolute.
+Schema parsing alone did not exercise the server's uploaded-spec working-directory check.
+The corrected value is `.local/state/omnigent-investigations/remaining-enhancements/scope-1/implementation/workspace`, relative to the parent workspace `/home/alexbeav`.
+It resolves to the same isolated directory, and the qualified server's uploaded-spec check accepts it.
+Actual corrected Omnigent creation awaits the parent's retry; this correction created no chats or model requests.
+The evidence is `implementation/cwd-creation-validation.json`.
 
 The pilot owner did not create an Omnigent child chat.
 The parent must prove two coordinator turns, then create distinct native Claude, native Codex and ACP Cline workers.
@@ -84,7 +91,7 @@ must resolve current IDs with `sys_agent_list` before it creates children.
 
 Read-only configuration inspection located `Oh My Pi` in
 `C:\Users\Alexbeav\.omnigent\config.yaml` on Windows Eagle.
-The WSL configuration at `~/.omnigent/config.yaml` contains Cline only.
+On 2026-10-15, the WSL configuration at `~/.omnigent/config.yaml` contained Cline only.
 The report contains no authentication values.
 
 A disposable OMP child launch from this WSL session failed before an OMP turn:
