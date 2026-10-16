@@ -31,9 +31,7 @@ def test_selected_parent_exposes_child_links(
         ]
     )
     install_chat_session_routes(child)
-    chat.contract.json(
-        "/v1/sessions", list_payload([chat.session_snapshot(), child.session_snapshot()])
-    )
+    chat.contract.json("/v1/sessions", list_payload([chat.session_snapshot()]))
     children = [
         {
             "id": "sidebar-worker",
