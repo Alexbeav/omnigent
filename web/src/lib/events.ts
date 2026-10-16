@@ -1,3 +1,4 @@
+import type { AsyncUserInput } from "./asyncQuestions";
 // Mirrors sdks/python-client/omnigent_client/_events.py.
 //
 // Hand-ported. When _events.py changes, update this file and the
@@ -320,6 +321,7 @@ export interface NativeToolCall {
 
 /** The final assistant message from `output_item.done` (type `message`). */
 export interface MessageDone {
+  asyncUserInput?: AsyncUserInput;
   type: "message_done";
   content: Record<string, unknown>[];
   itemId: string;
