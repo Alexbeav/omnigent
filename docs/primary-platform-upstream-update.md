@@ -295,10 +295,10 @@ Pacifica's legacy plist is outside `LaunchAgents`, so it cannot create a duplica
 The [Windows installer and rollback helpers](../deploy/hosts/windows-signin/README.md) preserve old checkouts and global tools.
 The [background-host guide](background-hosts.md) explains the platform startup models.
 
-Eagle WSL has a separate pinned v0.18 environment and an enabled hidden sign-in task.
-Its launcher's manual test returned success after detecting the healthy existing v0.17 daemon.
-The shared host and zygote remain alive, so this upgrade does not interrupt the active chat.
-The new environment activates after a cold start or an explicit idle handoff.
+Eagle WSL now runs the separate pinned v0.18 environment after Alex completed the manual idle handoff.
+The original host ID reports online, with one candidate daemon and all three packages at `0.18.0`.
+The old host and zygote are gone, and the hidden sign-in task is enabled and running.
+This chat continues to accept messages after the change.
 No WSL systemd setting or existing SSH service changed.
 
 Rocky remains offline and was not upgraded.
@@ -306,7 +306,7 @@ Its stale DNS and SSH address reaches the Windows laptop instead, proven through
 No host key, DNS record or SSH configuration changed.
 The earlier Cline/OMP fleet acceptance remains deferred.
 
-Final read-only checks show all six reachable original hosts online and the server healthy.
+Final read-only checks show all six reachable original hosts online on v0.18 and the server healthy.
 Package provenance, service ownership and Windows process chains were checked.
 The hidden launchers request window style 0, and the inspected processes have no main window handle.
 A physical sign-out/sign-in cycle and provider turns on the upgraded hosts remain untested.
@@ -314,3 +314,15 @@ At the next convenient sign-in, make sure that no empty terminal or browser open
 Open Omnigent on the phone, make sure that the intended hosts return online, and send a small message through a configured provider.
 Private execution reports, rollback paths and sanitized checks are under `.omnigent/verify/host-upgrade-20261016/`.
 The homelab Infrastructure-State note and host-upgrade runbook remain the operational authority.
+
+## Firefox integration, 2026-10-16
+
+The [Firefox guide](primary-platform-browser.md) records the local MCP connection for Omnigent web.
+FoxPilot uses the existing Windows Firefox profile through native Windows Node and a loopback broker.
+Eagle WSL Codex, Claude Code and Cline user MCP configurations point to the pinned `1.0.29` server.
+Private backups preserve the original configurations, and unrelated settings remain intact.
+Alex installed the signed Firefox add-on, and direct page reading passes after domain consent.
+A fresh native Codex chat calls FoxPilot and receives the active Firefox result.
+Automation Mode is still off at this checkpoint, so interaction tools remain blocked by the add-on.
+Claude/Cline browser turns and persistence across a Firefox restart remain unproven.
+This configuration change requires no server image or web bundle rebuild.
