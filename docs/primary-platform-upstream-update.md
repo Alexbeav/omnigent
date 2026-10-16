@@ -7,11 +7,12 @@ The deployed server keeps the qualified `38f30aa96` backend with UI source `23fa
 
 ## Contribution status checked on 2026-10-16
 
-Child-chat sidebar visibility is submitted as [draft PR #10431](https://github.com/omnigent-ai/omnigent/pull/10431), closing [feature issue #10430](https://github.com/omnigent-ai/omnigent/issues/10430).
+Child-chat sidebar visibility is submitted as [PR #10431](https://github.com/omnigent-ai/omnigent/pull/10431), closing [feature issue #10430](https://github.com/omnigent-ai/omnigent/issues/10430).
 Its isolated branch `contrib/sidebar-child-chats` starts at upstream snapshot `b6119bb8470624d22cc142691871dba155e75063`.
 The focused head is `0400f473279b0e43676aa573d1a8de6a9904789b`, with no deployment records or unrelated fork enhancements in the diff.
 The branch passes 177 component checks, its isolated browser journey, 264 feature-map checks, lint, type checking, build and pre-commit.
-The draft still needs its sanitized visual demo attached. Browser attachment upload did not complete, and no demo media was committed.
+Alex attached the sanitized screenshot, and the Demo section now embeds it. PR #10431 is ready for review.
+Maintainer approval is still required. No demo media was committed to the repository.
 
 The pane proposal is [#10429](https://github.com/omnigent-ai/omnigent/issues/10429).
 A [coordination comment on #6758](https://github.com/omnigent-ai/omnigent/pull/6758#issuecomment-6211218243) explains the narrower three-column workflow and planned contribution sequence.
@@ -117,7 +118,7 @@ No upstream issue, comment or PR was published during this investigation.
 | Desktop panes and docking | Port ordered three-pane layout, draft/stream isolation, resizing, both docking directions, header actions and safe popouts. | Separate feature proposal and base layout PR. Review Canvas split-panel [#7431](https://github.com/omnigent-ai/omnigent/pull/7431) for shared layout ideas. |
 | Pane configuration | Port the shared picker and explicit conversation targets after the layout. | Separate dependent PR, based on main's newer SDK reasoning-effort support. |
 | Pane queue and steer | Port scoped queue operations and live-status protection after the layout. | Separate dependent PR; preserve main's mid-turn input-consumption behavior. |
-| Child sidebar visibility | Port discovery/navigation into upstream's current sidebar sorting and grouping. | Draft [#10431](https://github.com/omnigent-ai/omnigent/pull/10431), closing [#10430](https://github.com/omnigent-ai/omnigent/issues/10430), passes focused current-main checks. Sanitized demo attachment is pending. Cross-device side-chat [#10307](https://github.com/omnigent-ai/omnigent/pull/10307) remains a separate feature. |
+| Child sidebar visibility | Port discovery/navigation into upstream's current sidebar sorting and grouping. | [#10431](https://github.com/omnigent-ai/omnigent/pull/10431), closing [#10430](https://github.com/omnigent-ai/omnigent/issues/10430), passes focused current-main checks. The sanitized demo is attached, and the PR is ready for review. Cross-device side-chat [#10307](https://github.com/omnigent-ai/omnigent/pull/10307) remains a separate feature. |
 | Claude request snapshots | Use upstream's broader typed-record exclusion. Stable needs that backport; main already contains it. | Do not resubmit the parser fix: [#10293](https://github.com/omnigent-ai/omnigent/pull/10293) merged on 2026-10-15. Keep additional regression coverage only if it proves a distinct boundary. |
 | Old reminder text in stored bubbles | Retain the display-only workaround initially if required for this fork's old history. Never treat it as history repair. | Defer a renderer cleanup PR until a current-main reproduction exists and tests protect intentional user text containing reminder tags. The parser fix does not strip old stored bubbles. |
 | Background host instructions | Keep detached launch instructions and the documented WSL lifetime distinction. | Compare existing host work [#6756](https://github.com/omnigent-ai/omnigent/pull/6756), [#8429](https://github.com/omnigent-ai/omnigent/pull/8429) and [#10292](https://github.com/omnigent-ai/omnigent/pull/10292). Avoid presenting the WSL setting as application process detachment. |
@@ -476,3 +477,20 @@ Infrastructure state was updated first, followed by the server plan and monthly 
 Private qualification, deployment and live-verification records remain in `.omnigent/verify/active-pane-controls-20261016/`.
 To test, refresh with Ctrl+Shift+R, select each pane and open Share or Workspace, then start a project chat in the middle slot.
 The toolbar must follow the selection, and the other two chats and their drafts must remain.
+
+## Stopping point, 2026-10-16
+
+Alex confirmed the deployed UI works and requested no further development until a new idea or an update check.
+The application source is committed on `upgrade/v0.18-primary` and pushed to `Alexbeav/omnigent`.
+The deployed UI source remains `23fa269450e7833d0cb345045e1cbfff4296f2bf`; later commits record deployment and contribution status only.
+The independent child-sidebar contribution is pushed as `contrib/sidebar-child-chats` at `0400f473279b0e43676aa573d1a8de6a9904789b`.
+Both working trees were clean and their remote branch heads matched before this documentation closeout.
+
+Alex supplied the screenshot on #10431. Its Demo section now embeds the attachment, and the PR is ready for review.
+The existing maintainer-approval requirement remains. The pane proposal #10429 awaits coordination with #6758.
+No further development, host upgrade, deployment, or automatic update check is scheduled.
+Resume only when Alex requests more work or an update check.
+
+Deployment, rollback and verification facts remain in this record and the homelab Infrastructure-State note, server plan and monthly change log.
+The NAS Compose configuration is local commit `de7d20d63df0999bbaa76643eb9dab949245b4df` and was not pushed to its infrastructure remote.
+Credentials, database backups, raw logs and temporary demo captures remain outside the application Git history.
