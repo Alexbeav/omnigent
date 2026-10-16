@@ -374,3 +374,28 @@ The browser regression first reproduced a 479-pixel pane on a 390-pixel screen, 
 Frontend lint, type checking, pre-commit hooks and 231 feature-map contract tests pass.
 The [pane guide](primary-platform-panes.md) contains human verification steps.
 Private browser captures and validation logs are under `.omnigent/verify/drag-preview-20261016/`.
+
+## Split preview release deployed, 2026-10-16
+
+The private production server runs v0.18.0 with UI source `b68236eee53057e3d7242c5fd9cf835cb7227477` on `upgrade/v0.18-primary`.
+The image is `registry.crosstalkis.com/omnigent-server:sha-b68236eee@sha256:4a99da03186bda1c8deec4e047796872ee666ee68e80bfad11b81871222eb8d0`.
+This UI release reuses the qualified `38f30aa96` runtime. All 919 Python source files and 98 installed package versions match that runtime.
+All 525 packaged web assets match the tested build, and all 454 served JS/CSS files match by SHA-256.
+The entry bundle is `assets/index-Ban-Pc5n.js`.
+
+The final release passes 192 component tests, three Chromium journeys, 231 feature-map contract tests, type checking, lint, build and pre-commit.
+The browser journey also moves the primary into a resized slot before switching to the phone viewport.
+Canonical HTTPS health, anonymous HTTP 401 and existing-account session/history reads pass without an OAuth refresh.
+Cutover retained all 113 conversations and 64,829 original item IDs, with zero missing IDs and schema `mm1a2b3c4d5e` unchanged.
+Two new items arrived after restart, so the immediate after count was 64,831.
+Only `omnigent` changed. Postgres and all 30 other container records retained their IDs, start times, status and restart counts.
+The server is healthy with zero restarts, and Transit remains unsealed.
+
+The fresh dump is `/volume1/docker/stacks/omnigent/backups/split-active-20261016-b68236eee/cutover.dump` (64,456,562 bytes, SHA-256 `ed13c5c7dd37d2618645504dbb1582961ec3062169a1efcc7e90711554480366`).
+The directory retains the previous Compose file, deployment result and rollback-aware script.
+The prior UI image `f0f7ee0e3` and its separate backup remain available too.
+The NAS Compose pin is local commit `7eb5e2f2dba53904679b23cc78cbde29eecb51bb` and is not pushed.
+The monitoring edit remains untouched. No provider host or browser profile was restarted.
+Private evidence: `.omnigent/verify/drag-preview-20261016/verification.md`, `candidate.json`, `deployment.json` and `live-verification.json`.
+Human steps are in the [pane guide](primary-platform-panes.md#human-verification).
+Upstream PR submission remains deferred until this UI follow-up is tested by Alex.
