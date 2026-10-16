@@ -47,10 +47,11 @@ The parent's first idle creation attempt returned HTTP 400 because `os_env.cwd` 
 Schema parsing alone did not exercise the server's uploaded-spec working-directory check.
 The corrected value is `.local/state/omnigent-investigations/remaining-enhancements/scope-1/implementation/workspace`, relative to the parent workspace `/home/alexbeav`.
 It resolves to the same isolated directory, and the qualified server's uploaded-spec check accepts it.
-Actual corrected Omnigent creation awaits the parent's retry; this correction created no chats or model requests.
-The evidence is `implementation/cwd-creation-validation.json`.
+The parent then created the idle **OMP Coordinator Pilot** session
+`332152c8e8be4500ae75be0bfe51fdf8` with agent `4afb77d8a8864b0d8094c750a2e3d541`.
+No model message was sent; provider login remains required before qualification.
+The creation evidence is `release/omp-pilot-session.json` beside the implementation record.
 
-The pilot owner did not create an Omnigent child chat.
 The parent must prove two coordinator turns, then create distinct native Claude, native Codex and ACP Cline workers.
 Reopen each worker and send a follow-up to the same session ID.
 Make sure that actual harnesses, host bindings, completion delivery and attachments match the intended task.
@@ -274,7 +275,8 @@ The live OMP child failed during runner configuration lookup and never reached a
 
 The remaining end-to-end proof needs a coordinator on the chosen host, then one worker for each requested harness.
 File transfer to existing children, interruption, and parent-runner shutdown remain separate acceptance checks.
-No OMP installation, authentication, live configuration edit, or service restart took place in this workstream.
+The earlier capability research made no installation or live configuration changes.
+The installed pilot and its current authentication limit are recorded at the top of this document.
 
 ## Primary sources
 

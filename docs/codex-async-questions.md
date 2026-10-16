@@ -56,5 +56,8 @@ The shared form retains checkbox support for the existing blocking paths.
 See the [feature map](../feature-map/async-questions.md) for full chat, split-pane, reload, and retry checks.
 Browser tests use the built SPA with isolated mocked HTTP/SSE contracts.
 They prove browser routing and state, while server integration tests separately prove native echo correlation and retry suppression.
-A real-provider journey still requires a new disposable Codex request and an explicit human answer.
+A separate isolated real-provider test persisted a fresh Codex async question,
+sent a synthetic Markdown answer, and received the expected Codex acknowledgement.
+Retrying that answer left one correlated user message. This establishes the native
+round trip; it does not establish a human browser click through a live provider.
 No existing pending user question is answered by these tests.

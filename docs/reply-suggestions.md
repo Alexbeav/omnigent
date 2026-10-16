@@ -100,7 +100,13 @@ and `web/src/hooks/useReplySuggestion.test.tsx`.
 
 Local wire probes with synthetic credentials and a loopback provider confirmed
 empty tool arrays for both installed CLIs and Claude's 256-token request parameter.
-They do not prove live-provider entitlement or latency. No recurring production
+Those wire probes do not prove live-provider entitlement or latency. Separate
+isolated real-provider checks succeeded for both accounts: Claude returned `NONE`
+for a fixed-marker conversation, and Codex returned a 24-character suggestion.
+The Codex probe reported 6,119 input tokens and 10 output tokens for two short
+synthetic messages. Native protocol overhead makes the transcript character ceiling
+different from a billed-input-token cap. These samples are not latency or usage guarantees.
+No recurring production
 generation or production setting activation was performed during implementation.
 The question branch adds typed `async_user_input` / `async_question_reply` message
 fields and `asyncUserInput` / `asyncQuestionReply` transcript blocks. Both gates
