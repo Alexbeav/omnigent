@@ -71,6 +71,7 @@ export interface ComposerKeyIntent {
 interface ChatComposerProps extends Omit<ComponentPropsWithoutRef<"div">, "children"> {
   /** Offered text stays outside the draft until accepted. IDs identify a session and turn. */
   suggestion?: { id: string; text: string } | null;
+  onSuggestionHandled?: () => void;
   keyboard: {
     submitWithModEnter: boolean;
     preventsKeyboardSubmit: boolean;
@@ -98,7 +99,7 @@ interface ChatComposerProps extends Omit<ComponentPropsWithoutRef<"div">, "child
 }
 
 export const ChatComposer = forwardRef<HTMLDivElement, ChatComposerProps>(function ChatComposer(
-  { className, input, keyboard, suggestion, slots, actions, ...props },
+  { className, input, keyboard, suggestion, onSuggestionHandled, slots, actions, ...props },
   ref,
 ) {
   const actionRowRef = useRef<HTMLDivElement>(null);
@@ -122,7 +123,12 @@ export const ChatComposer = forwardRef<HTMLDivElement, ChatComposerProps>(functi
       >
         {slots?.inputPrefix}
         {slots?.inputBackdrop}
-        <ComposerTextInput input={input} keyboard={keyboard} suggestion={suggestion} />
+        <ComposerTextInput
+          input={input}
+          keyboard={keyboard}
+          suggestion={suggestion}
+          onSuggestionHandled={onSuggestionHandled}
+        />
         {slots?.inputHint}
       </ComposerInputArea>
       {slots?.attachments}
@@ -260,7 +266,8 @@ export function ComposerTextInput({
   input,
   keyboard,
   suggestion,
-}: Pick<ChatComposerProps, "input" | "keyboard" | "suggestion">) {
+  onSuggestionHandled,
+}: Pick<ChatComposerProps, "input" | "keyboard" | "suggestion" | "onSuggestionHandled">) {
   const [dismissedId, setDismissedId] = useState<string | null>(null);
   const offered =
     suggestion?.text.trim() &&
@@ -276,6 +283,7 @@ export function ComposerTextInput({
       placeholder={offered?.text ?? input.placeholder}
       onChange={(event) => {
         if (offered) setDismissedId(offered.id);
+        onSuggestionHandled?.();
         input.onChange?.(event);
       }}
       onKeyDown={(event) => {
@@ -317,12 +325,14 @@ export function ComposerTextInput({
           if (event.key === "Tab" || event.key === "ArrowRight") {
             event.preventDefault();
             setDismissedId(offered.id);
+            onSuggestionHandled?.();
             insertComposerText(event.currentTarget, offered.text);
             return;
           }
           if (event.key === "Escape") {
             event.preventDefault();
             setDismissedId(offered.id);
+            onSuggestionHandled?.();
             return;
           }
         }

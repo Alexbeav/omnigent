@@ -10,6 +10,13 @@ and steers messages while the agent is busy.
 
 ## Sub-features
 
+- `suggested-next-reply`: opt-in faint next-user text after a live completed turn,
+  full chat and ordinary split/rail panes, native Codex/Claude only. Tab/Right
+  accepts an editable draft without sending. Settings → General → Composer controls
+  the current account/browser preference. Empty/visible/active/editable only;
+  drafts, pending async questions and approvals suppress generation. See
+  [behavior and transport limits](../docs/reply-suggestions.md).
+
 - `pill-tooltip`: hovering the pill shows one tooltip with Harness, Model, and
   Connection rows (plus effort when the harness has it).
 - `pill-tooltip-suppressed`: the tooltip stays hidden while the model picker is
@@ -207,6 +214,15 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
   server agent keeps the dialog open with the server's reason.
 - **`mobile-labels`, new-session composer:**
   `tests/e2e_ui/mobile/test_composer_model_label_stop_overlap.py::test_new_session_composer_collapses_labels_to_icons_on_mobile`
+
+## Suggested reply verification
+
+`web/src/hooks/useReplySuggestion.test.tsx` checks the shared eligibility/cache
+boundary; shared `ChatComposer.test.tsx` checks acceptance and IME/completion
+precedence. `tests/browser_ui/chat/test_reply_suggestions.py` drives full chat for
+both native harnesses and three ordinary panes. Backend boundaries live in
+`tests/server/test_reply_suggestions.py` and `tests/runner/test_reply_suggestions.py`.
+The landing composer and native temporary forks intentionally remain ineligible.
 
 ## Gotchas
 

@@ -888,7 +888,18 @@ def create_sessions_router(
     from omnigent.server.routes.sessions.routes_hooks import register_hooks_routes
     from omnigent.server.routes.sessions.routes_items import register_items_routes
     from omnigent.server.routes.sessions.routes_permissions import register_permissions_routes
+    from omnigent.server.routes.sessions.routes_reply_suggestions import (
+        register_reply_suggestion_routes,
+    )
     from omnigent.server.routes.sessions.routes_resources import register_resources_routes
+
+    register_reply_suggestion_routes(
+        router,
+        conversation_store=conversation_store,
+        runner_router=runner_router,
+        auth_provider=auth_provider,
+        permission_store=permission_store,
+    )
 
     register_core_routes(
         router,

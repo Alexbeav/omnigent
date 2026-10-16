@@ -1,24 +1,16 @@
 # Suggested replies in chat composers
 
-Status: a composer prototype is implemented on `feature/composer-prompt-suggestions`.
-It is not connected to a suggestion source and is not deployed.
-The source of suggestions is still under review: reuse an available provider interface, or generate a fallback with a separate background model request.
-No suggestion-generation request or provider configuration change ran during this investigation.
+Status: the original shared-composer prototype now has an opt-in background
+suggestion source on `feature/bounded-reply-suggestions`, built from
+`feature/composer-prompt-suggestions`. It covers full chat and ordinary panes in
+native Codex and native Claude; it has not been deployed or enabled in production.
+See [suggested next replies](reply-suggestions.md) for behavior, configuration,
+isolation, actual output-limit guarantees, usage, tests, and integration requirements.
 
-## Composer behavior
-
-The shared composer accepts an optional suggestion identified by session and turn.
-The suggestion appears as faint placeholder text only while the input is empty and writable.
-Tab or Right Arrow copies it into the editable draft without sending it.
-Typing or Escape dismisses it for that session and turn.
-A new suggestion ID permits another suggestion, even when its text matches an earlier one.
-Existing drafts, disabled input, read-only input, composition, modified keys, and completion handlers retain precedence.
-No caller supplies the new property yet, so the installed single-chat, split-pane, and new-session behavior remains unchanged.
-
-The prototype passes 43 shared-composer checks, plus frontend lint and type checking.
-The tests distinguish the placeholder from the saved draft and confirm that acceptance updates the controlled draft state.
-The verification logs are private under `.omnigent/verify/prompt-suggestions-20261016/`.
-There is no browser or live-provider proof for an integrated suggestion flow yet.
+The historical comparison below explains why the implementation uses a separate
+bounded native request instead of assuming desktop predictions are available.
+Local wire qualification uses synthetic credentials and loopback responses;
+it does not establish a live-provider entitlement or change provider configuration.
 
 ## Provider interfaces inspected on 2026-10-16
 
@@ -77,7 +69,8 @@ Do not silently ask the title endpoint for a title and present that output as a 
 Provider suggestions belong to their original session and completed turn.
 Prefer a working provider interface where the active harness exposes one.
 The installed Codex prediction handler is unavailable, and the current Claude interactive and OMP ACP paths do not automatically forward their suggestions.
-A custom fallback remains possible, but its additional model usage is separate from the free Codex desktop beta.
+The opt-in [bounded fallback](reply-suggestions.md) uses additional model usage,
+separate from the free Codex desktop beta.
 
 Primary references:
 
