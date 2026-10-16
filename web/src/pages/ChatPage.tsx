@@ -1,3 +1,5 @@
+import { useReplySuggestion } from "@/hooks/useReplySuggestion";
+import { useConversationEntryState } from "@/hooks/useConversationEntryState";
 import { SelectionPopup } from "@/components/chat/SelectionPopup";
 import {
   isCostRoutingEligible,
@@ -3139,6 +3141,20 @@ function ComposerImpl(
     setDropTarget(el?.closest<HTMLElement>("[data-chat-surface]") ?? el);
   }, []);
   const isDragActive = useFileDropTarget(dropTarget, addFiles);
+  const replySuggestionState = useConversationEntryState(composerSessionId);
+  const replySuggestion = useReplySuggestion({
+    sessionId: composerSessionId,
+    state: replySuggestionState,
+    empty:
+      fullText === "" &&
+      draft.quotes.length === 0 &&
+      files.length === 0 &&
+      mentionedItems.length === 0 &&
+      !hasQueuedComposerMessages,
+    writable:
+      !disabled && !isReadOnly && !unreachable && !composerLockedByBtw && !hasPendingElicitation,
+    surface: dropTarget,
+  });
 
   const clearComposerAfterSend = (resetNativeInputSession: boolean) => {
     const textarea = textareaRef.current;
@@ -3553,6 +3569,8 @@ function ComposerImpl(
         </ComposerWorkspaceBar>
       </div>
       <ChatComposer
+        suggestion={replySuggestion.suggestion}
+        onSuggestionHandled={replySuggestion.dismiss}
         keyboard={{ submitWithModEnter, preventsKeyboardSubmit }}
         ref={bindComposerCard}
         className={cn(

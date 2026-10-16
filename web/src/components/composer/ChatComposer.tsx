@@ -2,6 +2,7 @@ import {
   forwardRef,
   useLayoutEffect,
   useRef,
+  useState,
   type ComponentPropsWithRef,
   type ComponentPropsWithoutRef,
   type KeyboardEvent,
@@ -68,6 +69,9 @@ export interface ComposerKeyIntent {
 }
 
 interface ChatComposerProps extends Omit<ComponentPropsWithoutRef<"div">, "children"> {
+  /** Offered text stays outside the draft until accepted. IDs identify a session and turn. */
+  suggestion?: { id: string; text: string } | null;
+  onSuggestionHandled?: () => void;
   keyboard: {
     submitWithModEnter: boolean;
     preventsKeyboardSubmit: boolean;
@@ -95,7 +99,7 @@ interface ChatComposerProps extends Omit<ComponentPropsWithoutRef<"div">, "child
 }
 
 export const ChatComposer = forwardRef<HTMLDivElement, ChatComposerProps>(function ChatComposer(
-  { className, input, keyboard, slots, actions, ...props },
+  { className, input, keyboard, suggestion, onSuggestionHandled, slots, actions, ...props },
   ref,
 ) {
   const actionRowRef = useRef<HTMLDivElement>(null);
@@ -119,7 +123,12 @@ export const ChatComposer = forwardRef<HTMLDivElement, ChatComposerProps>(functi
       >
         {slots?.inputPrefix}
         {slots?.inputBackdrop}
-        <ComposerTextInput input={input} keyboard={keyboard} />
+        <ComposerTextInput
+          input={input}
+          keyboard={keyboard}
+          suggestion={suggestion}
+          onSuggestionHandled={onSuggestionHandled}
+        />
         {slots?.inputHint}
       </ComposerInputArea>
       {slots?.attachments}
@@ -256,10 +265,27 @@ function insertComposerText(
 export function ComposerTextInput({
   input,
   keyboard,
-}: Pick<ChatComposerProps, "input" | "keyboard">) {
+  suggestion,
+  onSuggestionHandled,
+}: Pick<ChatComposerProps, "input" | "keyboard" | "suggestion" | "onSuggestionHandled">) {
+  const [dismissedId, setDismissedId] = useState<string | null>(null);
+  const offered =
+    suggestion?.text.trim() &&
+    input.value === "" &&
+    !input.disabled &&
+    !input.readOnly &&
+    suggestion.id !== dismissedId
+      ? suggestion
+      : null;
   return (
     <ComposerTextarea
       {...input}
+      placeholder={offered?.text ?? input.placeholder}
+      onChange={(event) => {
+        if (offered) setDismissedId(offered.id);
+        onSuggestionHandled?.();
+        input.onChange?.(event);
+      }}
       onKeyDown={(event) => {
         // A newline in every mode and on touch devices; completion menus never see it.
         if (isComposerAltNewlineKey({ ...event, isComposing: event.nativeEvent.isComposing })) {
@@ -295,6 +321,21 @@ export function ComposerTextInput({
           shouldSteerAllFromKeyboard,
         });
         if (event.defaultPrevented) return;
+        if (offered && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+          if (event.key === "Tab" || event.key === "ArrowRight") {
+            event.preventDefault();
+            setDismissedId(offered.id);
+            onSuggestionHandled?.();
+            insertComposerText(event.currentTarget, offered.text);
+            return;
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setDismissedId(offered.id);
+            onSuggestionHandled?.();
+            return;
+          }
+        }
         const edit = listStartEdit ?? listEdit;
         if (edit) {
           event.preventDefault();

@@ -620,6 +620,7 @@ export function composerAttachmentKey(a: ComposerAttachment): string {
  * sense for a conversation the user is NOT looking at.
  */
 export interface ConversationState {
+  replySuggestionTurn: string | null;
   /**
    * Flat block list (history + streaming). Renderer walks this.
    *
@@ -1873,6 +1874,7 @@ export function consumePendingInitialPrompt(conversationId: string): PendingInit
 export const useChatStore = create<ChatState>((_rootSet, get) => ({
   conversationId: null,
   redirectToConversationId: null,
+  replySuggestionTurn: null,
   blocks: [],
   pendingUserMessages: [],
   settledShellInputs: [],
@@ -6514,6 +6516,9 @@ export async function pumpStreamEvents(
         // agent_run complete + create_session settle. Read the finalized state so
         // a `session.interrupted` cancelled (kept above) wins over block.status.
         onResponseEnd(id, endedId, get().activeResponse?.state ?? block.status);
+        if (active?.state === "streaming" && block.status === "completed") {
+          set({ replySuggestionTurn: endedId });
+        }
         // Turn over: drop any provisional preview never finalized by a
         // committed item (e.g. an interrupt where the partial item lands
         // after this event, or a stream drop). Normal messages already
@@ -7487,6 +7492,9 @@ export function handleSessionEvent(event: StreamEvent, streamConversationId?: st
                 completedAt: Date.now(),
               };
             }
+          }
+          if (settledResponseId && event.status !== "failed") {
+            patch.replySuggestionTurn = settledResponseId;
           }
           // Clear ALL pending user messages on terminal status. Any
           // message still pending when the session reaches idle was

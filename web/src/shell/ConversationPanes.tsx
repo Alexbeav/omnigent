@@ -136,7 +136,12 @@ function PaneSessionSurface({
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <div className={show ? "hidden" : "min-h-0 flex-1"}>
-        <SideChatPane childId={conversationId} showFullHistory streamBoundByShell={active} />
+        <SideChatPane
+          childId={conversationId}
+          showFullHistory
+          streamBoundByShell={active}
+          suggestionsActive={active && !show}
+        />
       </div>
       {show && (
         <TerminalFirstContextProvider
@@ -365,7 +370,11 @@ export function ConversationPanes({
                     (uniform ? (
                       <PaneSessionSurface conversationId={id} active={activePaneId === id} />
                     ) : (
-                      <SideChatPane childId={id} showFullHistory />
+                      <SideChatPane
+                        childId={id}
+                        showFullHistory
+                        suggestionsActive={activePaneId === id}
+                      />
                     ))}
                 </div>
               </>

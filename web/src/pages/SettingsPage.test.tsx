@@ -1507,3 +1507,19 @@ describe("SettingsPage", () => {
     expect(screen.queryByTestId("archived-toggle-selection")).toBeNull();
   });
 });
+
+describe("suggested replies preference", () => {
+  it("defaults off, explains extra usage, and saves only for the current account", () => {
+    localStorage.clear();
+    renderPage("/settings/general");
+    const toggle = screen.getByTestId("reply-suggestions-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/Uses an extra model request on your current account/)).toBeVisible();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(localStorage.getItem("omnigent:reply-suggestions:alice")).toBe("on");
+    expect(localStorage.getItem("omnigent:reply-suggestions:local")).toBeNull();
+    fireEvent.click(toggle);
+    expect(localStorage.getItem("omnigent:reply-suggestions:alice")).toBe("off");
+  });
+});

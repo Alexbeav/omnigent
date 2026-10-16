@@ -9,6 +9,103 @@ import {
 } from "./ChatComposer";
 
 describe("ChatComposer", () => {
+  function SuggestedEditor({
+    id = "session-a:turn-1",
+    initial = "",
+    onKeyDown = vi.fn(),
+    disabled = false,
+    readOnly = false,
+  }: {
+    id?: string;
+    initial?: string;
+    onKeyDown?: NonNullable<React.ComponentProps<typeof ChatComposer>["input"]["onKeyDown"]>;
+    disabled?: boolean;
+    readOnly?: boolean;
+  }) {
+    const [value, setValue] = useState(initial);
+    return (
+      <>
+        <ChatComposer
+          suggestion={{ id, text: "Run the tests and fix any failures." }}
+          keyboard={{ submitWithModEnter: false, preventsKeyboardSubmit: false }}
+          input={{
+            "aria-label": "Draft",
+            placeholder: "Write a message",
+            value,
+            disabled,
+            readOnly,
+            onChange: (event) => setValue(event.target.value),
+            onKeyDown,
+          }}
+          actions={{ leading: null, trailing: null }}
+        />
+        <output aria-label="Saved draft">{value}</output>
+      </>
+    );
+  }
+
+  it.each(["Tab", "ArrowRight"])(
+    "accepts a suggestion with %s into an editable draft without sending",
+    (key) => {
+      const onKeyDown = vi.fn();
+      render(<SuggestedEditor onKeyDown={onKeyDown} />);
+      const input = screen.getByRole("textbox");
+      expect(input).toHaveValue("");
+      expect(input).toHaveAttribute("placeholder", "Run the tests and fix any failures.");
+      fireEvent.keyDown(input, { key });
+      expect(input).toHaveValue("Run the tests and fix any failures.");
+      expect(screen.getByLabelText("Saved draft")).toHaveTextContent(
+        "Run the tests and fix any failures.",
+      );
+      expect(onKeyDown).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ shouldSubmitFromKeyboard: false }),
+      );
+      fireEvent.change(input, { target: { value: "Run just the browser tests." } });
+      expect(screen.getByLabelText("Saved draft")).toHaveTextContent("Run just the browser tests.");
+    },
+  );
+
+  it("dismisses suggestions on typing or Escape and resets only for a new session or turn", () => {
+    const view = render(<SuggestedEditor />);
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "My own reply" } });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input).toHaveAttribute("placeholder", "Write a message");
+    view.rerender(<SuggestedEditor id="session-b:turn-1" />);
+    expect(input).toHaveAttribute("placeholder", "Run the tests and fix any failures.");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveAttribute("placeholder", "Write a message");
+    view.rerender(<SuggestedEditor id="session-b:turn-2" />);
+    expect(input).toHaveAttribute("placeholder", "Run the tests and fix any failures.");
+  });
+
+  it.each([{ initial: "Keep my draft" }, { disabled: true }, { readOnly: true }])(
+    "does not offer a suggestion over existing or locked input: %j",
+    (props) => {
+      render(<SuggestedEditor {...props} />);
+      expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Write a message");
+    },
+  );
+
+  it.each([
+    { shiftKey: true },
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { isComposing: true },
+  ])("keeps modified Tab and composition behavior: %j", (modifiers) => {
+    render(<SuggestedEditor />);
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Tab", ...modifiers });
+    expect(screen.getByLabelText("Saved draft")).toBeEmptyDOMElement();
+  });
+
+  it("lets completion handlers take precedence over suggestions", () => {
+    render(<SuggestedEditor onKeyDown={(event) => event.preventDefault()} />);
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Tab" });
+    expect(screen.getByLabelText("Saved draft")).toBeEmptyDOMElement();
+  });
+
   function renderEditor(initial: string, submitWithModEnter = false) {
     const onKeyDown = vi.fn();
     function Editor() {

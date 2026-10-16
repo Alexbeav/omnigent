@@ -235,3 +235,12 @@ BACKGROUND_TITLE_CLAUDE_ECONOMY_MODEL = _BACKGROUND_TITLE_FALLBACKS["claude"].mo
 
 #: The codex-family arm background session titles pin.
 BACKGROUND_TITLE_CODEX_ECONOMY_MODEL = _BACKGROUND_TITLE_FALLBACKS["codex"].model_ids[0]
+
+
+_REPLY_SUGGESTION_CODEX = StaticModelFallback(
+    model_ids=("gpt-6-luna", "gpt-5.6-luna"),
+    owner="Reply suggestions (omnigent.runner.reply_suggestions)",
+    provenance="Luna economy family; selection requires the session account's live catalog",
+    discovery_gap="catalog models are not ranked by price",
+)
+REPLY_SUGGESTION_CODEX_MODELS = _REPLY_SUGGESTION_CODEX.model_ids

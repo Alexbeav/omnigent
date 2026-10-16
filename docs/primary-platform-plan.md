@@ -201,3 +201,13 @@ Reload [the live UI](http://172.16.1.8:8090) with **Ctrl+Shift+R**.
 Drag sidebar chats over the left/right halves, change a secondary pane's model and reasoning,
 and queue a follow-up while that pane works. Its send-now arrow or the default Ctrl/Command+Enter shortcut steers only that pane.
 The header popout button or an outside-page release requests a separate window. Browser policy controls OS desktop drops.
+
+## Suggested replies, 2026-10-16
+
+The [suggested next reply implementation](reply-suggestions.md) connects the
+shared composer to an optional bounded background request for native Codex and
+native Claude, in full chat and ordinary panes. It defaults off and is not deployed.
+The installed Codex prediction method remains unimplemented; native desktop beta
+entitlement does not cover this extra request. Integration must retain the pending
+async-question gate and the current-session provider/account resolution.
+This chat still uses native Codex directly, and OMP coordination remains deferred.

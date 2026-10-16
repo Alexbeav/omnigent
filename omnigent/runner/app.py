@@ -7219,6 +7219,53 @@ def create_runner_app(
         server_client=server_client,
     )
 
+    from omnigent.reply_suggestions import RunnerReplySuggestionRequest
+    from omnigent.runner.reply_suggestions import register_reply_suggestion_routes
+
+    async def _reply_suggestion_context(
+        session_id: str, body: RunnerReplySuggestionRequest
+    ) -> BackgroundTitleContext:
+        if process_manager is None:
+            raise RuntimeError("Reply suggestions require a process manager")
+        entry = await _resolve_session_spec_entry(session_id)
+        spec = _unwrap_spec_entry(entry)
+        if spec is None or _session_sub_agent_resolved.get(session_id) is False:
+            raise RuntimeError("The session's own agent could not be resolved")
+        raw_harness = body.harness_override or _session_harness_name(session_id)
+        harness = canonicalize_harness(raw_harness) or raw_harness or "unsupported"
+        spawn_env = _build_spawn_env_from_spec(
+            spec,
+            harness,
+            cwd=await _session_runtime_cwd(session_id),
+            workdir=_resolved_spec_workdir(entry),
+            session_id=session_id,
+            resource_registry=resource_registry,
+        )
+        return BackgroundTitleContext(
+            prompt=body.prompt,
+            harness=harness,
+            spawn_env=dict(spawn_env or {}),
+            process_manager=process_manager,
+            session_spec=spec,
+        )
+
+    async def _reply_suggestion_models(session_id: str, harness: str) -> list[dict[str, Any]]:
+        if harness == "codex-native":
+            return await _codex_native_model_options(session_id)
+        from omnigent.harnesses.claude_native.main import claude_launch_catalog
+
+        return (
+            await claude_launch_catalog(await _resolve_session_claude_launch_config(session_id))
+            or []
+        )
+
+    register_reply_suggestion_routes(
+        app,
+        resolve_context=_reply_suggestion_context,
+        model_options=_reply_suggestion_models,
+        resolve_claude_config=_resolve_session_claude_launch_config,
+    )
+
     @app.post("/v1/sessions/{session_id}/resources/environments/{environment_id}/shell")
     async def run_environment_shell(
         session_id: str,

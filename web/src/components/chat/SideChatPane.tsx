@@ -1,3 +1,4 @@
+import { useReplySuggestion } from "@/hooks/useReplySuggestion";
 import { SelectionPopup } from "./SelectionPopup";
 import { QueuedMessagesStrip } from "@/pages/QueuedMessagesStrip";
 import { shouldQueueSend } from "@/lib/messageQueue";
@@ -120,6 +121,7 @@ export function SideChatPane({
   readOnly: restoredReadOnly = false,
   showFullHistory = false,
   streamBoundByShell = false,
+  suggestionsActive = true,
 }: {
   childId: string;
   selectionParentId?: string;
@@ -130,6 +132,7 @@ export function SideChatPane({
   showFullHistory?: boolean;
   /** The active split pane shares the shell's existing stream binding. */
   streamBoundByShell?: boolean;
+  suggestionsActive?: boolean;
 }) {
   const pending = isPendingSideChat(childId);
   const starting = useChatStore((s) => s.sideChatComposers[childId]?.starting ?? false);
@@ -421,6 +424,7 @@ export function SideChatPane({
               starting={starting}
               onStart={onStart ? startSideChat : undefined}
               ordinarySession={showFullHistory}
+              suggestionsActive={suggestionsActive}
               failedSendDraft={failedSendDraft}
               restoredSendDraft={restoredSendDraft}
               committedBlocks={blocks}
@@ -449,6 +453,7 @@ function SideChatComposer({
   starting,
   onStart,
   ordinarySession,
+  suggestionsActive,
   failedSendDraft,
   restoredSendDraft,
   committedBlocks,
@@ -462,6 +467,7 @@ function SideChatComposer({
   starting: boolean;
   onStart?: (text: string) => Promise<void>;
   ordinarySession: boolean;
+  suggestionsActive: boolean;
   failedSendDraft: ChatState["failedSendDraft"];
   restoredSendDraft: ChatState["restoredSendDraft"];
   committedBlocks: ChatState["blocks"];
@@ -631,6 +637,20 @@ function SideChatComposer({
   }, [autoSend, agentId, send, childId, clearSideChatDraft, refreshLabels]);
 
   const ready = pending ? !starting : agentId !== null;
+  const replySuggestion = useReplySuggestion({
+    sessionId: ordinarySession && !pending ? childId : null,
+    state: paneState,
+    empty:
+      text === "" &&
+      files.length === 0 &&
+      quotes.length === 0 &&
+      ownQueue.length === 0 &&
+      !autoSend,
+    writable: ready && !busy && !controls.unreachable,
+    active: suggestionsActive,
+    surface: dropTarget,
+  });
+
   const canSend = text.trim().length > 0 || (!pending && files.length > 0);
   const showInterrupt = !pending && busy && (!ordinarySession || !canSend);
   const queuesSend =
@@ -723,6 +743,8 @@ function SideChatComposer({
         />
       )}
       <ChatComposer
+        suggestion={replySuggestion.suggestion}
+        onSuggestionHandled={replySuggestion.dismiss}
         keyboard={{
           submitWithModEnter: ordinarySession ? submitWithModEnter : false,
           preventsKeyboardSubmit: false,

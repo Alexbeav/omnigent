@@ -1,3 +1,7 @@
+import {
+  useReplySuggestionsEnabled,
+  writeReplySuggestionsEnabled,
+} from "@/lib/replySuggestionsPreferences";
 /**
  * Settings page (``/settings``).
  *
@@ -1605,6 +1609,33 @@ function OpenLinksInAppControl() {
   );
 }
 
+function ReplySuggestionsControl() {
+  const enabled = useReplySuggestionsEnabled();
+  const labelId = useId();
+  const descriptionId = useId();
+  return (
+    <div className="flex items-start justify-between gap-6">
+      <SettingsLabel
+        label="Suggest my next reply"
+        labelId={labelId}
+        descriptionId={descriptionId}
+        className="flex-1"
+        descriptionClassName="text-ui"
+        description="Suggest a short reply when the current chat finishes. Tab puts it in your draft for editing. Uses an extra model request on your current account. Available for Codex and Claude chats with an economy model. This choice applies to this account in this browser."
+      />
+      <Switch
+        aria-labelledby={labelId}
+        aria-describedby={descriptionId}
+        checked={enabled}
+        onCheckedChange={writeReplySuggestionsEnabled}
+        data-testid="reply-suggestions-toggle"
+        className="mt-0.5 shrink-0"
+        componentId="settings.general.reply_suggestions"
+      />
+    </div>
+  );
+}
+
 function BackgroundSessionTitlesControl() {
   const [enabled, setEnabled] = useState(readBackgroundSessionTitlesEnabled);
   const labelId = useId();
@@ -1716,6 +1747,9 @@ function GeneralSection() {
       <div className="flex flex-col gap-6">
         <SettingsGroup title="Composer" testId="settings-group-composer">
           <ComposerSendShortcutControl />
+          <div className="mt-4 border-t border-border pt-4">
+            <ReplySuggestionsControl />
+          </div>
           <div className="mt-4 border-t border-border pt-4">
             <AlwaysSteerControl />
           </div>
