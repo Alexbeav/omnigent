@@ -26,6 +26,13 @@ A terminal view belongs to its pane, and switching back to Chat restores its com
 Model, reasoning, permission, host, queue, and steering controls remain in each composer.
 Use Load earlier messages to read more history in a pane. New responses do not force the scroll to the bottom while you read older messages.
 
+File links resolve against the chat that contains them, including inactive panes
+with different workspaces. Right-click a file or website link to open it in
+Omnigent, open it in a browser, or copy its destination. File destinations preserve
+their source chat and any cited line or column. Web clients open a new tab in the
+current browser; the desktop app can open the system's default browser.
+Website navigation inside Omnigent requires the desktop app's browser support.
+
 Starting a chat replaces only the selected slot. This applies to the project New session button and menu, sidebar New session, command palette, and new-session shortcut.
 Other chats retain their drafts, scroll positions, and divider widths.
 If you select another pane while creation runs, completion fills the original slot and retains your selection.

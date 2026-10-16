@@ -215,7 +215,7 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
 - **`mobile-labels`, new-session composer:**
   `tests/e2e_ui/mobile/test_composer_model_label_stop_overlap.py::test_new_session_composer_collapses_labels_to_icons_on_mobile`
 
-## Suggested reply verification
+### Suggested reply verification
 
 `web/src/hooks/useReplySuggestion.test.tsx` checks the shared eligibility/cache
 boundary; shared `ChatComposer.test.tsx` checks acceptance and IME/completion

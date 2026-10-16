@@ -241,16 +241,6 @@ the sidebar, then choose a child. The Agents panel still shows the full tree.
 
 ## Driving it with the repro environment
 
-- **`chat-link-menu`, full chat and three panes (browser contract):**
-  `tests/browser_ui/chat/test_transcript_rendering.py::test_file_link_context_menu_targets_its_source_chat`
-  checks file preview, browser-tab navigation and clipboard URLs from the source
-  chat. `test_external_link_click_opens_the_rendered_target` covers website
-  navigation by click, keyboard and context menu with no opener or referrer.
-  Component tests in `web/src/components/blocks/ChatMarkdown.inAppLinkRouting.test.tsx`
-  check explicit desktop routing independently of the click preference.
-  The component suite checks the desktop bridge contract; it does not launch
-  the installed desktop app or prove which OS browser receives its request.
-
 Preconditions: a running instance (`verify-env start`, then `verify-env
 doctor`), the built web UI, and at least one session (the `seeded_session`
 fixture creates one). Run each test through the instance:
@@ -263,6 +253,16 @@ verify-env run -- python -m pytest <test> --ui-skip-build --video=on \
 Tests that stop a runner, restart the server, or read the database cannot run
 through `verify-env run`. They are marked "own environment" below; run them with
 plain `uv run pytest`, which starts a private server for the test.
+
+- **`chat-link-menu`, full chat and three panes (browser contract):**
+  `tests/browser_ui/chat/test_transcript_rendering.py::test_file_link_context_menu_targets_its_source_chat`
+  checks file preview, browser-tab navigation and clipboard URLs from the source
+  chat. `test_external_link_click_opens_the_rendered_target` covers website
+  navigation by click, keyboard and context menu with no opener or referrer.
+  Component tests in `web/src/components/blocks/ChatMarkdown.inAppLinkRouting.test.tsx`
+  check explicit desktop routing independently of the click preference.
+  The component suite checks the desktop bridge contract; it does not launch
+  the installed desktop app or prove which OS browser receives its request.
 
 - **`child-discovery`:** `web/src/shell/SidebarChildSessions.test.tsx` checks
   child status, navigation context, and closed-child filtering.

@@ -19,7 +19,7 @@ from omnigent.stores.conversation_store.sqlalchemy_store import SqlAlchemyConver
 pytestmark = pytest.mark.asyncio
 
 
-def append(store, session_id, response_id, role="assistant", text="Here is the diff."):
+def append(store, session_id, response_id, role="assistant", text="Here is the diff.", **metadata):
     return store.append(
         session_id,
         [
@@ -35,6 +35,7 @@ def append(store, session_id, response_id, role="assistant", text="Here is the d
                             "text": text,
                         }
                     ],
+                    **metadata,
                 ),
             )
         ],
@@ -128,6 +129,53 @@ async def test_missing_runner_and_stale_turn_are_graceful(db_uri):
         assert (await client.post(url, json={**body, "source_response_id": "old"})).json()[
             "status"
         ] == "stale"
+
+
+@pytest.mark.parametrize("cancelled", [None, False, True])
+async def test_persisted_question_gate_reads_older_history(db_uri, cancelled):
+    from omnigent.entities.conversation import AsyncQuestionReply, AsyncUserInput
+
+    store = SqlAlchemyConversationStore(db_uri)
+    conv = store.create_conversation(kind="default")
+    append(
+        store,
+        conv.id,
+        "question",
+        async_user_input=AsyncUserInput(call_id="ask", questions=[{"title": "Which format?"}]),
+    )
+    source = store.list_items(conv.id).data[0]
+    if cancelled is not None:
+        append(
+            store,
+            conv.id,
+            "reply",
+            "user",
+            async_question_reply=AsyncQuestionReply(
+                source_item_id=source.id,
+                cancelled=cancelled,
+                answers={} if cancelled else {"ask:0": "Markdown"},
+            ),
+        )
+    for index in range(8):
+        append(store, conv.id, f"recent-{index}")
+    router = APIRouter()
+    register_reply_suggestion_routes(
+        router,
+        conversation_store=store,
+        runner_router=None,
+        auth_provider=None,
+        permission_store=None,
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/v1")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://server"
+    ) as client:
+        response = await client.post(
+            f"/v1/sessions/{conv.id}/next-reply",
+            json={"enabled": True, "source_response_id": "recent-7", "request_id": "typed-gate"},
+        )
+    assert response.json()["status"] == ("stale" if cancelled is None else "unsupported")
 
 
 async def test_async_question_and_preemptive_cancel_never_generate(db_uri, monkeypatch):

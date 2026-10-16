@@ -102,6 +102,9 @@ fields and `asyncUserInput` / `asyncQuestionReply` transcript blocks. Both gates
 consume these fields structurally on this branch; integration must preserve their
 hydration and source-item correlation, including cancelled replies. Outstanding
 questions must remain ineligible even when no elicitation or `blockedOn` exists.
+Combined server tests persist typed questions and replies in the real store.
+They cover an unanswered question older than the initial history page, and confirm
+that an answer or dismissal releases the generation gate.
 
 Primary CLI references: [Claude environment variables](https://code.claude.com/docs/en/env-vars),
 [Claude CLI flags](https://code.claude.com/docs/en/cli-reference), and

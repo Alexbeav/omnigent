@@ -210,4 +210,5 @@ native Claude, in full chat and ordinary panes. It defaults off and is not deplo
 The installed Codex prediction method remains unimplemented; native desktop beta
 entitlement does not cover this extra request. Integration must retain the pending
 async-question gate and the current-session provider/account resolution.
-This chat still uses native Codex directly, and OMP coordination remains deferred.
+This chat still uses native Codex directly. The [isolated OMP pilot](primary-platform-omp.md)
+is installed on Eagle WSL and awaits its separate OpenAI sign-in before worker qualification.
