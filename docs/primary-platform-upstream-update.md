@@ -492,5 +492,15 @@ No further development, host upgrade, deployment, or automatic update check is s
 Resume only when Alex requests more work or an update check.
 
 Deployment, rollback and verification facts remain in this record and the homelab Infrastructure-State note, server plan and monthly change log.
-The NAS Compose configuration is local commit `de7d20d63df0999bbaa76643eb9dab949245b4df` and was not pushed to its infrastructure remote.
+The NAS Compose configuration is commit `de7d20d63df0999bbaa76643eb9dab949245b4df`, pushed to `Alexbeav/homelab-ulduar` main on 2026-10-16 at Alex's request.
 Credentials, database backups, raw logs and temporary demo captures remain outside the application Git history.
+
+## NAS deployment repository push, 2026-10-16
+
+Alex requested the NAS deployment push after the application closeout.
+All eight pending Omnigent deployment and HTTPS commits are pushed to `Alexbeav/homelab-ulduar` main.
+The remote head matches `de7d20d63df0999bbaa76643eb9dab949245b4df`.
+The commits change only the deployment README, Omnigent example environment values, and the Omnigent Compose file.
+The push used normal history advancement. The live Compose file and uncommitted monitoring edit remain unchanged.
+No service was restarted. Infrastructure state was updated before the server plan and monthly change log.
+Private verification is under `.omnigent/verify/nas-deployment-push-20261016/`.
