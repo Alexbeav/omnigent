@@ -99,3 +99,9 @@ On 2026-10-17, Alex also completed a human two-question round trip in this Codex
 chat after restarting Pegasus WSL onto source `225e7f7af`. Both selected answers
 arrived together as a structured reply. This verifies live choice submission;
 custom text and pane routing remain covered by the isolated browser journeys.
+
+Alex subsequently confirmed Claude's multiple-choice form and completed a live
+Cline two-question form after the private MCP launch fix. Cline received
+**Green** and **Just confirm receipt** as an ordinary user reply and acknowledged
+both choices. All three provider question paths now have human confirmation;
+custom text and every pane position retain their separate automated coverage.

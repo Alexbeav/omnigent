@@ -326,9 +326,12 @@ The live [Cline test chat](https://omnigent.ulduar.crosstalkis.com/c/3761b068055
 then called `sys_agent_list` successfully and posted one `sys_ask_user` message
 with two questions, both option lists and a deterministic reply ID. A read-only
 API check and a live Chromium screenshot confirmed the card, choices and custom
-answer control. Alex's Cline answer submission remains pending. The current NAS
-frontend still uses the older **Codex question** heading; the generic heading
-is committed but has not been deployed there.
+answer control. Alex then requested a fresh question set, submitted **Green**
+and **Just confirm receipt**, and Cline acknowledged both selections. The user
+confirmed that questions work. This establishes the live human answer round
+trip for Cline as well as the earlier Codex test and reported Claude test.
+The current NAS frontend still uses the older **Codex question** heading; the
+generic heading is committed but has not been deployed there.
 
 The focused ACP/runner/feature-map group passed **440 tests** with retries off;
 the file-settings subprocess regression fails against the previous launcher.
@@ -338,3 +341,21 @@ including `cline-mcp-full-final.log`, `cline-live-question.json`, and
 `cline-live-question-card.png`. The screenshot is local evidence, not a
 committed product asset. Restore `config-before-cline-mcp.yaml` from that
 directory and reconnect idle Cline chats to roll back the launch configuration.
+
+### Remaining work after question acceptance, 2026-10-17
+
+The question controls are accepted by Alex on Codex, Claude and Cline. The
+remaining work is separate from that completed fix:
+
+| Work | Current boundary |
+| --- | --- |
+| Deploy the pending web bundle | The NAS still shows the old **Codex question** heading. No server protocol or schema change is needed for the working Cline transport. |
+| Qualify other hosts | The new MCP command launch was activated on Pegasus WSL. Other hosts need the source update, their platform's process-local environment command, and a fresh question round trip. |
+| Restore this coordinator's peer route | Its current pinned agent permits child messaging only, so the request to PS1 Manager was rejected. Refresh the intended agent definition through the supported workflow before retrying; do not bypass the scope gate. |
+| Run the PS1 model/effort benchmark | Five bounded candidates were drafted from the manager's readable records; the manager has not supplied its own task recommendations. Pin fixtures and acceptance checks, then compare quality, usage, latency, review and repair costs. No gauntlet has run. |
+| Prepare upstream contributions | The question tool and Cline launch change need focused current-upstream comparison and contribution preparation. Existing contributions retain their recorded coordination/review work. |
+| Optional OMP/Hermes layer | The documented OMP pilot still needs separate qualification of provider access, two-turn persistence and actual worker coordination. It is not on this chat's execution path. |
+
+Suggested next replies are already implemented and deployed separately; they
+remain opt-in and consume extra model usage. They are not an unfinished part
+of the accepted structured-question work.
