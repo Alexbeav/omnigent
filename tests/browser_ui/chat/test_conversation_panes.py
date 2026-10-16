@@ -7,7 +7,11 @@ from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Page, expect
 
-from tests.browser_ui.chat.session_contract import ChatSessionContract, list_payload
+from tests.browser_ui.chat.session_contract import (
+    ChatSessionContract,
+    install_chat_session_routes,
+    list_payload,
+)
 
 
 def test_three_chat_columns_resize_independently(
@@ -16,13 +20,19 @@ def test_three_chat_columns_resize_independently(
     tmp_path,
 ) -> None:
     chat = chat_session_contract
+    install_chat_session_routes(
+        ChatSessionContract(page, chat.contract, chat.stream, session_id="browser-pane-five")
+    )
     secondary_ids = ("browser-pane-two", "browser-pane-three")
     rows = [chat._session()]
-    for index, session_id in enumerate(secondary_ids, start=2):
+    for index, session_id in enumerate(
+        (*secondary_ids, "browser-pane-four", "browser-pane-five"), start=2
+    ):
         row = {**chat._session(), "id": session_id, "title": f"Browser pane {index}"}
         rows.append(row)
         chat.contract.json(f"/v1/sessions/{session_id}", row)
         chat.contract.json(f"/v1/sessions/{session_id}/items", list_payload([]))
+        chat.contract.json(f"/v1/sessions/{session_id}/child_sessions", list_payload([]))
         chat.contract.sse(f"/v1/sessions/{session_id}/stream")
         chat.contract.json(
             f"/v1/sessions/{session_id}/events",
@@ -72,11 +82,21 @@ def test_three_chat_columns_resize_independently(
     expect(right_target).to_be_visible()
     right_edge = right_target.bounding_box()
     assert right_edge is not None
+    primary_box = page.get_by_role("region", name="Primary chat").bounding_box()
+    assert primary_box is not None
+    assert abs(right_edge["width"] - primary_box["width"] / 2) <= 1
+    assert (
+        abs(right_edge["x"] + right_edge["width"] - primary_box["x"] - primary_box["width"]) <= 1
+    )
+    expect(page.get_by_text("Drop to open in new window", exact=True)).to_have_count(0)
     page.mouse.move(
         right_edge["x"] + right_edge["width"] / 2,
         right_edge["y"] + 200,
         steps=8,
     )
+    expect(right_target).to_have_attribute("data-active", "true")
+    expect(page.get_by_test_id("chat-split-preview")).to_contain_text("Open in split view")
+    page.screenshot(path=str(tmp_path / "split-preview-right.png"))
     page.mouse.up()
     ordered_panes = page.locator("section[data-pane-id]")
     expect(ordered_panes).to_have_count(2)
@@ -96,6 +116,9 @@ def test_three_chat_columns_resize_independently(
     left_edge = left_target.bounding_box()
     assert left_edge is not None
     page.mouse.move(left_edge["x"] + left_edge["width"] / 2, left_edge["y"] + 200, steps=8)
+    expect(left_target).to_have_attribute("data-active", "true")
+    expect(page.get_by_test_id("chat-split-preview")).to_contain_text("Split view")
+    page.screenshot(path=str(tmp_path / "split-preview-left.png"))
     page.mouse.up()
     expect(ordered_panes.first).to_have_attribute("data-pane-id", secondary_ids[0])
     assert ordered_panes.evaluate_all("panes => panes.map(pane => pane.dataset.paneId)") == [
@@ -181,7 +204,7 @@ def test_three_chat_columns_resize_independently(
     page.mouse.move(primary_header["x"] + 200, primary_header["y"] + 4)
     page.mouse.down()
     page.mouse.move(primary_header["x"] + 220, primary_header["y"] + 4)
-    expect(page.get_by_test_id("chat-detach-target")).to_be_visible()
+    expect(page.get_by_test_id("chat-detach-target")).to_have_count(0)
     page.keyboard.press("Escape")
     page.mouse.move(1620, 200)
     page.mouse.up()
@@ -198,7 +221,7 @@ def test_three_chat_columns_resize_independently(
             primary_header["x"] + 220,
             primary_header["y"] + 4,
         )
-        expect(page.get_by_test_id("chat-detach-target")).to_be_visible()
+        expect(page.get_by_test_id("chat-detach-target")).to_have_count(0)
         # CDP still delivers this captured pointer release just beyond Chromium's viewport.
         page.mouse.move(1620, 200, steps=8)
         page.mouse.up()
@@ -215,11 +238,8 @@ def test_three_chat_columns_resize_independently(
         page.mouse.move(header["x"] + 80, header["y"] + header["height"] / 2)
         page.mouse.down()
         page.mouse.move(header["x"] + 100, header["y"] + header["height"] / 2, steps=3)
-        detach = page.get_by_test_id("chat-detach-target")
-        expect(detach).to_be_visible()
-        detach_box = detach.bounding_box()
-        assert detach_box is not None
-        page.mouse.move(detach_box["x"] + 10, detach_box["y"] + 200, steps=8)
+        expect(page.get_by_test_id("chat-detach-target")).to_have_count(0)
+        page.mouse.move(1620, 200, steps=8)
         page.mouse.up()
     popout = opened.value
     expect(popout).to_have_title("Popout verification")
@@ -237,7 +257,7 @@ def test_three_chat_columns_resize_independently(
         sidebar_source["y"] + sidebar_source["height"] / 2,
         steps=3,
     )
-    expect(page.get_by_text("Drop to open in new window", exact=True)).to_be_visible()
+    expect(page.get_by_text("Drop to open in new window", exact=True)).to_have_count(0)
     page.keyboard.press("Escape")
     page.mouse.up()
     expect(page.get_by_text("Drop to open in new window", exact=True)).to_be_hidden()
@@ -256,17 +276,67 @@ def test_three_chat_columns_resize_independently(
             sidebar_source["y"] + sidebar_source["height"] / 2,
             steps=3,
         )
-        sidebar_detach = page.get_by_text("Drop to open in new window", exact=True)
-        expect(sidebar_detach).to_be_visible()
-        sidebar_detach_box = sidebar_detach.bounding_box()
-        assert sidebar_detach_box is not None
-        page.mouse.move(sidebar_detach_box["x"] + 10, sidebar_detach_box["y"] + 250, steps=8)
+        expect(page.get_by_text("Drop to open in new window", exact=True)).to_have_count(0)
+        page.mouse.move(1620, 250, steps=8)
         page.mouse.up()
     sidebar_popout = sidebar_opened.value
     expect(sidebar_popout).to_have_title("Popout verification")
     assert urlparse(sidebar_popout.url).path == f"/c/{secondary_ids[0]}"
     assert sidebar_popout.evaluate("window.opener === null")
     sidebar_popout.close()
+
+    source = page.locator('[data-sidebar-session-id="browser-pane-four"]').bounding_box()
+    assert source is not None
+    page.mouse.move(source["x"] + 70, source["y"] + source["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(source["x"] + 85, source["y"] + source["height"] / 2, steps=3)
+    expect(page.locator('[data-testid^="chat-split-"]')).to_have_count(0)
+    page.mouse.move(1599, 250, steps=8)
+    page.mouse.up()
+    expect(ordered_panes).to_have_count(3)
+    assert len(page.context.pages) == page_count
+
+    # A sidebar choice replaces only the active pane; existing chats are focused.
+    second.fill("Draft retained in the other pane")
+    third.click()
+    expect(pane_three).to_have_attribute("data-active-pane", "true")
+    page.get_by_role("link", name="Browser pane 4", exact=True).click()
+    expect(ordered_panes).to_have_count(3)
+    expect(ordered_panes.last).to_have_attribute("data-pane-id", "browser-pane-four")
+    expect(ordered_panes.last).to_have_attribute("data-active-pane", "true")
+    assert urlparse(page.url).path == f"/c/{chat.session_id}"
+    expect(primary).to_have_value("Draft for the first chat")
+    expect(second).to_have_value("Draft retained in the other pane")
+    page.get_by_role("link", name="Browser pane 2", exact=True).click()
+    expect(ordered_panes.first).to_have_attribute("data-active-pane", "true")
+    expect(ordered_panes).to_have_count(3)
+    retained_width = ordered_panes.first.bounding_box()["width"]
+    page.get_by_role("link", name="Browser pane 5", exact=True).click()
+    expect(ordered_panes.first).to_have_attribute("data-pane-id", "browser-pane-five")
+    assert abs(ordered_panes.first.bounding_box()["width"] - retained_width) <= 1
+    page.get_by_role("link", name="Browser pane 2", exact=True).click()
+    expect(second).to_have_value("Draft retained in the other pane")
+    assert abs(ordered_panes.first.bounding_box()["width"] - retained_width) <= 1
+
+    primary.click()
+    page.get_by_role("link", name="Browser pane 5", exact=True).click()
+    expect(page.get_by_role("region", name="Primary chat")).to_have_attribute(
+        "data-pane-id", "browser-pane-five"
+    )
+    assert urlparse(page.url).path == "/c/browser-pane-five"
+    expect(ordered_panes.first).to_have_attribute("data-pane-id", secondary_ids[0])
+    expect(ordered_panes.last).to_have_attribute("data-pane-id", "browser-pane-four")
+    expect(second).to_have_value("Draft retained in the other pane")
+    page.get_by_role("link", name=rows[0]["title"], exact=True).click()
+    expect(primary).to_have_value("Draft for the first chat")
+    expect(ordered_panes).to_have_count(3)
+    page.get_by_role("region", name="Chat: Browser pane 4").get_by_test_id(
+        "side-chat-input"
+    ).click()
+    page.get_by_role("link", name="Browser pane 3", exact=True).click()
+    expect(third).to_have_value("Draft for the third chat")
+    expect(ordered_panes.last).to_have_attribute("data-active-pane", "true")
+    page.screenshot(path=str(tmp_path / "active-pane-replacement.png"))
 
     page.get_by_role("button", name="Close Browser pane 3 pane").click()
     expect(panes).to_have_count(2)

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { buildPanePopoutUrl, normalizePaneIds, normalizePaneOrder } from "./ConversationPanes";
+import {
+  buildPanePopoutUrl,
+  ConversationPanes,
+  normalizePaneIds,
+  normalizePaneOrder,
+} from "./ConversationPanes";
 import { isChatDetachPoint } from "./chatDetach";
 
 vi.mock("@/components/chat/SideChatPane", () => ({
@@ -8,6 +13,29 @@ vi.mock("@/components/chat/SideChatPane", () => ({
 }));
 
 describe("conversation panes", () => {
+  it("marks the active pane and selects a pane on pointer or keyboard focus", () => {
+    const activate = vi.fn();
+    render(
+      <ConversationPanes
+        primary={<input aria-label="Primary draft" />}
+        primaryId="a"
+        paneOrder={["a", "b"]}
+        activePaneId="b"
+        onActivate={activate}
+        conversations={[{ id: "b", title: "Second" }] as never}
+        onClose={vi.fn()}
+        onPopout={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Chat: Second" })).toHaveAttribute(
+      "data-active-pane",
+      "true",
+    );
+    fireEvent.pointerDown(screen.getByRole("region", { name: "Chat: Second" }), { button: 0 });
+    expect(activate).toHaveBeenLastCalledWith("b");
+    fireEvent.focus(screen.getByRole("textbox", { name: "Primary draft" }));
+    expect(activate).toHaveBeenLastCalledWith("a");
+  });
   it("keeps at most two unique secondary sessions", () => {
     expect(normalizePaneIds("a", "b,b,a,c,d")).toEqual(["b", "c"]);
   });
@@ -17,8 +45,7 @@ describe("conversation panes", () => {
     expect(normalizePaneOrder("a", ["b", "c"], "missing,c,c")).toEqual(["c", "a", "b"]);
   });
 
-  it("renders a secondary on either side of the primary in the requested order", async () => {
-    const { ConversationPanes } = await import("./ConversationPanes");
+  it("renders a secondary on either side of the primary in the requested order", () => {
     const { container } = render(
       <ConversationPanes
         primary={<div>primary</div>}
@@ -41,9 +68,11 @@ describe("conversation panes", () => {
     ).toEqual(["b", "a", "c"]);
   });
 
-  it("recognizes only the outer detach edge and outside releases", () => {
+  it("detaches only outside the viewport, leaving the right edge for splits", () => {
     expect(isChatDetachPoint(951, 200, 1000, 800)).toBe(false);
-    expect(isChatDetachPoint(952, 200, 1000, 800)).toBe(true);
+    expect(isChatDetachPoint(952, 200, 1000, 800)).toBe(false);
+    expect(isChatDetachPoint(999, 200, 1000, 800)).toBe(false);
+    expect(isChatDetachPoint(1000, 200, 1000, 800)).toBe(true);
     expect(isChatDetachPoint(1001, 200, 1000, 800)).toBe(true);
     expect(isChatDetachPoint(500, 200, 1000, 800)).toBe(false);
   });
@@ -59,8 +88,7 @@ describe("conversation panes", () => {
     expect(url.hash).toBe("");
   });
 
-  it("resizes a secondary pane with the keyboard", async () => {
-    const { ConversationPanes } = await import("./ConversationPanes");
+  it("resizes a secondary pane with the keyboard", () => {
     render(
       <ConversationPanes
         primary={<div>primary</div>}
@@ -82,8 +110,7 @@ describe("conversation panes", () => {
     expect(pane).toHaveStyle({ flex: "0 0 580px" });
   });
 
-  it("pops out a pane only after its header reaches the detach edge", async () => {
-    const { ConversationPanes } = await import("./ConversationPanes");
+  it("pops out a header only outside the page without a separate drop indicator", () => {
     const onPopout = vi.fn();
     render(
       <ConversationPanes
@@ -100,17 +127,20 @@ describe("conversation panes", () => {
     pane.setPointerCapture = vi.fn();
     fireEvent.pointerDown(header, { button: 0, pointerId: 1, clientX: 500, clientY: 20 });
     fireEvent.pointerMove(pane, { pointerId: 1, clientX: 600, clientY: 20 });
-    expect(screen.getByTestId("chat-detach-target")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-detach-target")).not.toBeInTheDocument();
     fireEvent.pointerUp(pane, { pointerId: 1, clientX: window.innerWidth - 1, clientY: 20 });
-    expect(onPopout).toHaveBeenCalledExactlyOnceWith("b");
+    expect(onPopout).not.toHaveBeenCalled();
 
     fireEvent.pointerDown(header, { button: 0, pointerId: 2, clientX: 500, clientY: 20 });
-    fireEvent.pointerCancel(pane, { pointerId: 2 });
+    fireEvent.pointerUp(pane, { pointerId: 2, clientX: window.innerWidth + 1, clientY: 20 });
+    expect(onPopout).toHaveBeenCalledExactlyOnceWith("b");
+
+    fireEvent.pointerDown(header, { button: 0, pointerId: 3, clientX: 500, clientY: 20 });
+    fireEvent.pointerCancel(pane, { pointerId: 3 });
     expect(onPopout).toHaveBeenCalledTimes(1);
   });
 
-  it("shares cancellation and outside release behavior with the primary header", async () => {
-    const { ConversationPanes } = await import("./ConversationPanes");
+  it("shares cancellation and outside release behavior with the primary header", () => {
     const onPopout = vi.fn();
     render(
       <ConversationPanes

@@ -2,8 +2,15 @@ import { useChildSessions } from "@/hooks/useChildSessions";
 import { Link, useLocation } from "@/lib/routing";
 import { sessionNavigationSearch } from "@/lib/sessionNavigation";
 import { childStatus } from "./subagentStatus";
+import type { MouseEventHandler } from "react";
 
-export function SidebarChildSessions({ conversationId }: { conversationId: string }) {
+export function SidebarChildSessions({
+  conversationId,
+  onNavigate,
+}: {
+  conversationId: string;
+  onNavigate?: MouseEventHandler<HTMLAnchorElement>;
+}) {
   const { children } = useChildSessions(conversationId);
   const location = useLocation();
   const visible = children.filter((child) => child.labels?.["omnigent.closed"] !== "true");
@@ -22,6 +29,7 @@ export function SidebarChildSessions({ conversationId }: { conversationId: strin
             return (
               <li key={child.id}>
                 <Link
+                  onClick={onNavigate}
                   aria-label={`${title}: ${status}`}
                   to={{
                     pathname: `/c/${encodeURIComponent(child.id)}`,

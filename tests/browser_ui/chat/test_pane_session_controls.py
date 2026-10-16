@@ -72,6 +72,7 @@ def test_each_pane_changes_its_own_model_effort_and_permissions(
             make_session_route(row, vendor),
         )
         chat.contract.json(f"/v1/sessions/{session_id}/items", list_payload([]))
+        chat.contract.json(f"/v1/sessions/{session_id}/child_sessions", list_payload([]))
         chat.contract.sse(f"/v1/sessions/{session_id}/stream")
 
     chat.contract.json("/v1/sessions", list_payload(rows))
@@ -177,6 +178,7 @@ def test_secondary_pane_queue_and_steer_stay_on_that_session(
     )
     chat.contract.json(f"/v1/sessions/{secondary_id}", secondary)
     chat.contract.json(f"/v1/sessions/{secondary_id}/items", list_payload([]))
+    chat.contract.json(f"/v1/sessions/{secondary_id}/child_sessions", list_payload([]))
     chat.contract.route(re.compile(rf"^{session_url}/stream(?:\?.*)?$"), stream)
     chat.contract.route(re.compile(rf"^{session_url}/events(?:\?.*)?$"), post_event)
 

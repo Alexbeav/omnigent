@@ -82,7 +82,7 @@ function snapshot(id: string, parentSessionId: string | null): Session {
   } as unknown as Session;
 }
 
-function renderAt(initialEntry: string) {
+function renderAt(initialEntry: string, activePaneId?: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -90,8 +90,14 @@ function renderAt(initialEntry: string) {
         <TooltipProvider>
           <MemoryRouter initialEntries={[initialEntry]}>
             <Routes>
-              <Route path="/" element={<Sidebar open onClose={vi.fn()} />} />
-              <Route path="/c/:conversationId" element={<Sidebar open onClose={vi.fn()} />} />
+              <Route
+                path="/"
+                element={<Sidebar open onClose={vi.fn()} activePaneId={activePaneId} />}
+              />
+              <Route
+                path="/c/:conversationId"
+                element={<Sidebar open onClose={vi.fn()} activePaneId={activePaneId} />}
+              />
             </Routes>
           </MemoryRouter>
         </TooltipProvider>
@@ -134,22 +140,24 @@ describe("sidebar highlight while viewing a sub-agent", () => {
     expect(sidebar).not.toHaveClass("md:m-2", "md:rounded-[var(--radius-otto-md)]", "md:border");
   });
 
-  it("highlights the top-level parent row when the active session is its child", async () => {
-    mockConversations([topLevelConv("conv_root"), topLevelConv("conv_other")]);
-    // conv_child is a sub-agent of conv_root and is NOT in the sidebar list.
-    getSessionSlimMock.mockImplementation((id: string) => {
-      if (id === "conv_child") return Promise.resolve(snapshot("conv_child", "conv_root"));
-      if (id === "conv_root") return Promise.resolve(snapshot("conv_root", null));
-      return Promise.resolve(snapshot(id, null));
-    });
+  it.each([undefined, "conv_child"])(
+    "highlights the parent of an active child pane (%s)",
+    async (activePaneId) => {
+      mockConversations([topLevelConv("conv_root"), topLevelConv("conv_other")]);
+      // conv_child is a sub-agent of conv_root and is NOT in the sidebar list.
+      getSessionSlimMock.mockImplementation((id: string) => {
+        if (id === "conv_child") return Promise.resolve(snapshot("conv_child", "conv_root"));
+        if (id === "conv_root") return Promise.resolve(snapshot("conv_root", null));
+        return Promise.resolve(snapshot(id, null));
+      });
 
-    // Active route is the CHILD — no matching sidebar row.
-    renderAt("/c/conv_child");
+      renderAt(activePaneId ? "/c/conv_other" : "/c/conv_child", activePaneId);
 
-    // Once the parent walk resolves, the root's row carries the highlight.
-    await waitFor(() => expect(rowFor("conv_root")).toHaveClass("bg-[var(--sidebar-active)]"));
-    expect(rowFor("conv_other")).not.toHaveClass("bg-[var(--sidebar-active)]");
-  });
+      // Once the parent walk resolves, the root's row carries the highlight.
+      await waitFor(() => expect(rowFor("conv_root")).toHaveClass("bg-[var(--sidebar-active)]"));
+      expect(rowFor("conv_other")).not.toHaveClass("bg-[var(--sidebar-active)]");
+    },
+  );
 
   it("still highlights a top-level session viewed directly", async () => {
     mockConversations([topLevelConv("conv_root"), topLevelConv("conv_other")]);

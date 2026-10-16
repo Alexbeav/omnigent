@@ -11,7 +11,15 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Outlet, useLocation, useParams, useRebasePath, useSearchParams } from "@/lib/routing";
+import {
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+  useRebasePath,
+  useSearchParams,
+} from "@/lib/routing";
+import { sessionNavigationSearch } from "@/lib/sessionNavigation";
 import { CANVAS_CONVERSATION_MIN_WIDTH, CanvasWorkspace } from "@/canvas/CanvasWorkspace";
 import { isCanvasPathname } from "@/canvas/canvasNavigation";
 import { useCanvasSidebar } from "@/canvas/useCanvasSidebar";
@@ -265,6 +273,7 @@ export function AppShell() {
     extensionId: string;
   }>();
   const location = useLocation();
+  const navigateConversation = useNavigate();
   const rebasePath = useRebasePath();
   const serverInfo = useServerInfo();
   const canvasMode =
@@ -370,6 +379,9 @@ export function AppShell() {
     () => normalizePaneOrder(conversationId, paneIds, paneOrderParam),
     [conversationId, paneIds, paneOrderParam],
   );
+  const [selectedPaneId, setSelectedPaneId] = useState<string | undefined>();
+  const activePaneId =
+    selectedPaneId && paneOrder.includes(selectedPaneId) ? selectedPaneId : conversationId;
   const setPaneLayout = useCallback(
     (ids: string[], order: string[]) => {
       setSearchParams(
@@ -402,12 +414,45 @@ export function AppShell() {
       if (targetIndex < 0) return;
       nextOrder.splice(targetIndex + (side === "right" ? 1 : 0), 0, id);
       setPaneLayout(nextIds, nextOrder);
+      setSelectedPaneId(id);
     },
     [conversationId, paneIds, paneOrder, setPaneLayout],
   );
   const addPane = useCallback(
     (id: string) => placePane(id, paneOrder.at(-1) ?? conversationId ?? "", "right"),
     [conversationId, paneOrder, placePane],
+  );
+  const selectPaneConversation = useCallback(
+    (id: string): boolean => {
+      if (!conversationId || isMobileViewport() || paneOrder.length < 2) return false;
+      if (paneOrder.includes(id)) {
+        setSelectedPaneId(id);
+        return true;
+      }
+      const target = activePaneId ?? conversationId;
+      const nextOrder = paneOrder.map((paneId) => (paneId === target ? id : paneId));
+      if (target === conversationId) {
+        const next = new URLSearchParams(sessionNavigationSearch(location.search));
+        next.set("paneOrder", nextOrder.join(","));
+        navigateConversation({ pathname: `/c/${encodeURIComponent(id)}`, search: `?${next}` });
+      } else {
+        setPaneLayout(
+          paneIds.map((paneId) => (paneId === target ? id : paneId)),
+          nextOrder,
+        );
+      }
+      setSelectedPaneId(id);
+      return true;
+    },
+    [
+      conversationId,
+      paneOrder,
+      activePaneId,
+      paneIds,
+      location.search,
+      navigateConversation,
+      setPaneLayout,
+    ],
   );
   const closePane = useCallback(
     (id: string) => {
@@ -2607,6 +2652,8 @@ export function AppShell() {
               onOpenSearch={handleOpenSearch}
               onSplitConversation={placePane}
               onPopoutConversation={popoutPane}
+              onSelectConversation={selectPaneConversation}
+              activePaneId={activePaneId}
             />
 
             {/* Content region (everything right of the sidebar): a relative
@@ -2653,6 +2700,8 @@ export function AppShell() {
                       header={chatHeader}
                       primaryId={conversationId}
                       paneOrder={paneOrder}
+                      activePaneId={activePaneId}
+                      onActivate={setSelectedPaneId}
                       conversations={allConversations ?? []}
                       onClose={closePane}
                       onPopout={popoutPane}

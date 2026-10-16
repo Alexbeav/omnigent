@@ -217,10 +217,10 @@ recent sessions. Continue pressing Tab (or Shift+Tab) to cycle, release Control
 to switch, or press Escape to cancel.
 
 **Desktop chat panes:** open a session, then choose another session with
-`Add pane…` in its header. Drag a sidebar session to a pane's left or right target to place it on that side. An open session moves without duplication. Use
+`Add pane…` in its header. Drag a sidebar session over a pane's left or right half to preview and place it on that side. An open session moves without duplication. Use
 the external-link button to open a session in a separate browser window.
-Drag a chat header or sidebar row to the marked right edge to request a new window.
-Escape cancels a drag. `panes` and `paneOrder` preserve the layout without changing the primary route. A pane's model, reasoning, permission and host controls belong to that pane.
+The hovered half shows a blurred, blue-outlined split preview. There is no separate window drop indicator. A chat header or sidebar row released outside the viewport can request a new window.
+Click or focus a chat to make it active. A plain sidebar session click replaces only that pane, preserving the other chats and divider positions. Choosing an already-open chat focuses it. Mobile keeps ordinary single-chat navigation, and modified clicks still open tabs. Escape cancels a drag. `panes` and `paneOrder` preserve the layout without changing the primary route during reordering. A pane's model, reasoning, permission and host controls belong to that pane.
 
 **Child chats:** expand the child-chat list beneath the selected session in
 the sidebar, then choose a child. The Agents panel still shows the full tree.
@@ -248,7 +248,7 @@ plain `uv run pytest`, which starts a private server for the test.
 - **`multi-pane`:** `web/src/shell/ConversationPanes.test.tsx` covers the pane
   limit, duplicate removal, and accessible add control. Manually open three
   chats, keep a different draft and scroll position in each, resize each pane,
-  use sidebar edge-drop, and use popout. At a viewport below 768 pixels, only
+  use the half-pane split preview, replace the active chat through the sidebar, and use popout. At a viewport below 768 pixels, only
   the primary chat must remain visible.
 
 - **`pin`:**
@@ -555,8 +555,8 @@ plain `uv run pytest`, which starts a private server for the test.
   collapse navigation that the user has manually expanded. Card dragging must
   not open a session. Workspace must not hide the canvas or change session
   focus; both panels resize to leave room for the conversation controls.
-- Secondary panes are desktop-only. Dragging to the marked right edge requests
-  a popout. A release outside the viewport also works when the browser delivers
+- Secondary panes are desktop-only. A release outside the viewport requests
+  a popout when the browser delivers
   it. Browser policy controls popups and OS desktop drops, so keep the explicit button.
 
 - Browser storage sharing is limited to one desktop window and app run;

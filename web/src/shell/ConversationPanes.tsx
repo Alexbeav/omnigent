@@ -2,11 +2,11 @@ import {
   type CSSProperties,
   type PointerEventHandler,
   type ReactNode,
+  useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { ExternalLinkIcon, XIcon } from "lucide-react";
 import type { Conversation } from "@/hooks/useConversations";
 import { SideChatPane } from "@/components/chat/SideChatPane";
@@ -61,11 +61,9 @@ function usePaneHeaderDetach(onPopout: () => void) {
   const drag = useRef<{ pointerId: number; x: number; y: number; target: HTMLElement } | null>(
     null,
   );
-  const [detaching, setDetaching] = useState(false);
   const cancel = () => {
     const active = drag.current;
     drag.current = null;
-    setDetaching(false);
     if (active?.target.hasPointerCapture?.(active.pointerId)) {
       active.target.releasePointerCapture?.(active.pointerId);
     }
@@ -93,40 +91,20 @@ function usePaneHeaderDetach(onPopout: () => void) {
       target: event.currentTarget,
     };
   };
-  const onPointerMove: PointerEventHandler<HTMLElement> = (event) => {
-    const start = drag.current;
-    if (!start || start.pointerId !== event.pointerId) return;
-    if (!detaching && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 5) {
-      setDetaching(true);
-    }
-  };
   const onPointerUp: PointerEventHandler<HTMLElement> = (event) => {
     const start = drag.current;
     if (!start || start.pointerId !== event.pointerId) return;
     const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 5;
     drag.current = null;
-    setDetaching(false);
     if (moved && isChatDetachPoint(event.clientX, event.clientY)) onPopout();
   };
   return {
     dragProps: {
       onPointerDown,
-      onPointerMove,
       onPointerUp,
       onPointerCancel: cancel,
       onLostPointerCapture: cancel,
     },
-    detachTarget:
-      detaching &&
-      createPortal(
-        <div
-          data-testid="chat-detach-target"
-          className="pointer-events-none fixed top-0 right-0 bottom-0 z-[80] flex w-12 items-center justify-center border-l-2 border-dashed border-primary bg-primary/15 text-xs font-medium text-primary [writing-mode:vertical-rl]"
-        >
-          Drop to open in new window
-        </div>,
-        document.body,
-      ),
   };
 }
 
@@ -135,16 +113,26 @@ function ResizableChatPane({
   label,
   paneId,
   onPopout,
+  active,
+  onActivate,
+  width,
+  paneIndex,
+  onResize,
 }: {
   children: ReactNode;
   label: string;
   paneId: string;
   onPopout: () => void;
+  active?: boolean;
+  onActivate?: () => void;
+  width: number | null;
+  paneIndex: number;
+  onResize: (index: number, width: number) => void;
 }) {
-  const [width, setWidth] = useState<number | null>(null);
+  const setWidth = useCallback((next: number) => onResize(paneIndex, next), [onResize, paneIndex]);
   const sectionRef = useRef<HTMLElement>(null);
   const drag = useRef<{ x: number; width: number } | null>(null);
-  const { dragProps, detachTarget } = usePaneHeaderDetach(onPopout);
+  const { dragProps } = usePaneHeaderDetach(onPopout);
   const constrain = (requested: number) => {
     const section = sectionRef.current;
     const container = section?.parentElement;
@@ -174,19 +162,21 @@ function ResizableChatPane({
       window.removeEventListener("mouseup", stop);
       stop();
     };
-  }, []);
+  }, [setWidth]);
   const resize = (delta: number) =>
     setWidth(constrain((sectionRef.current?.offsetWidth ?? 320) + delta));
   return (
     <section
       ref={sectionRef}
       data-pane-id={paneId}
+      data-active-pane={active}
+      onPointerDownCapture={onActivate}
+      onFocusCapture={onActivate}
       className="relative hidden min-h-0 min-w-80 flex-1 flex-col overflow-hidden border-l border-border bg-background md:flex"
       aria-label={label}
       style={width === null ? undefined : { flex: `0 0 ${width}px` }}
       {...dragProps}
     >
-      {detachTarget}
       <div
         role="separator"
         aria-label={`Resize ${label}`}
@@ -210,6 +200,9 @@ function ResizableChatPane({
         }}
       />
       {children}
+      {active && (
+        <div className="pointer-events-none absolute inset-0 z-30 rounded-sm ring-1 ring-inset ring-blue-500/60" />
+      )}
     </section>
   );
 }
@@ -219,6 +212,8 @@ export function ConversationPanes({
   header,
   primaryId,
   paneOrder,
+  activePaneId,
+  onActivate,
   conversations,
   onClose,
   onPopout,
@@ -227,31 +222,48 @@ export function ConversationPanes({
   header?: ReactNode;
   primaryId?: string;
   paneOrder: string[];
+  activePaneId?: string;
+  onActivate?: (id: string) => void;
   conversations: readonly Conversation[];
   onClose: (id: string) => void;
   onPopout: (id: string) => void;
 }) {
+  // Widths belong to the visible slots, so replacing a chat keeps its divider in place.
+  const [widths, setWidths] = useState<Record<number, number>>({});
+  const resizePane = useCallback((index: number, width: number) => {
+    setWidths((previous) => ({ ...previous, [index]: width }));
+  }, []);
   const primaryDetach = usePaneHeaderDetach(() => {
     if (primaryId) onPopout(primaryId);
   });
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto" data-testid="conversation-panes">
-      {paneOrder.map((id) =>
+      {paneOrder.map((id, index) =>
         id === primaryId ? (
           <section
             key={id}
             data-pane-id={id}
+            data-active-pane={activePaneId === id}
+            onPointerDownCapture={() => onActivate?.(id)}
+            onFocusCapture={() => onActivate?.(id)}
             className="relative flex min-h-0 min-w-0 flex-1 flex-col md:min-w-80"
             aria-label="Primary chat"
-            style={{ "--workspace-panel-offset": "2.75rem" } as CSSProperties}
+            style={
+              {
+                "--workspace-panel-offset": "2.75rem",
+                ...(widths[index] === undefined ? {} : { flex: `0 0 ${widths[index]}px` }),
+              } as CSSProperties
+            }
             {...primaryDetach.dragProps}
           >
-            {primaryDetach.detachTarget}
             <div data-pane-drag-handle className="contents">
               {header}
             </div>
             {primary}
+            {paneOrder.length > 1 && activePaneId === id && (
+              <div className="pointer-events-none absolute inset-0 z-30 hidden rounded-sm ring-1 ring-inset ring-blue-500/60 md:block" />
+            )}
           </section>
         ) : (
           <ResizableChatPane
@@ -259,6 +271,11 @@ export function ConversationPanes({
             label={`Chat: ${sessionLabel(conversations, id)}`}
             paneId={id}
             onPopout={() => onPopout(id)}
+            active={activePaneId === id}
+            onActivate={() => onActivate?.(id)}
+            width={widths[index] ?? null}
+            paneIndex={index}
+            onResize={resizePane}
           >
             <header
               data-pane-drag-handle

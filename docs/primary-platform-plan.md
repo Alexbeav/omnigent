@@ -107,7 +107,7 @@ The provider stays fixed. Each pane reads its own model catalog, reported model 
 The shared picker and explicit conversation targets prevent changes from reaching a neighboring chat.
 Host, permission and Codex Plan controls also belong to the pane.
 
-Drag a header or sidebar row to the marked right edge to request a separate window.
+Use a header popout button or release a dragged header or sidebar row beyond the page to request a separate window.
 Headers handle Escape, pointer cancellation and lost capture.
 An outside-viewport release is supported when the browser delivers it.
 The recorded Chromium release uses browser automation and does not establish real OS desktop-drop behavior.
@@ -116,7 +116,7 @@ Ordinary panes also share queueing, steering, keyboard shortcuts and the Always 
 Queue flushes honor each conversation's live status, including a busy pane with a stale idle sidebar row.
 The add control now lives in the primary header. Sidebar drops place or move a chat on either side of any pane.
 The `paneOrder` query preserves visual order without changing the primary route.
-The outer docking target sits inside the separate window target so they do not overlap.
+The left and right halves now show the split preview; the separate window drop target is removed.
 
 The Claude bridge patch excludes diagnostic `api-request-blob` snapshots from transcript forwarding.
 These snapshots duplicated real user records and could expose native reminders.
@@ -198,6 +198,6 @@ reused an old shared runner and reproduced duplication; it does not validate run
 Existing polluted history remains unchanged.
 
 Reload [the live UI](http://172.16.1.8:8090) with **Ctrl+Shift+R**.
-Drag sidebar chats to the marked left/right targets, change a secondary pane's model and reasoning,
+Drag sidebar chats over the left/right halves, change a secondary pane's model and reasoning,
 and queue a follow-up while that pane works. Its send-now arrow or the default Ctrl/Command+Enter shortcut steers only that pane.
-The outer window target or header popout button opens a separate window. Browser policy controls OS desktop drops.
+The header popout button or an outside-page release requests a separate window. Browser policy controls OS desktop drops.

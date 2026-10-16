@@ -354,3 +354,21 @@ The existing native Codex chat passes a new-domain page read, snapshot, typing, 
 The owned test tab was closed, and no external form was submitted.
 Claude/Cline browser turns and persistence across a Firefox restart remain unproven.
 This configuration change requires no server image or web bundle rebuild.
+
+## Split preview and active-pane follow-up, 2026-10-16
+
+The separate right-edge window drop target is removed.
+Each chat's left and right halves now show a blue-outlined, blurred split preview on hover.
+The header popout buttons and supported outside-page releases still request a separate window.
+Clicking or focusing a chat marks its pane active.
+A plain sidebar session click replaces that pane and retains the other chats, drafts, positions and divider widths.
+Choosing an already-open chat focuses its pane without duplication.
+Mobile single-chat navigation and modified browser clicks retain their normal paths.
+
+The focused shell component suite passes 192 tests.
+The isolated browser journey covers preview geometry, both directions, reordering, the three-chat limit, cancellation, popouts and active-pane replacement.
+Its primary and secondary replacements retain the other drafts, restore a replaced draft and keep the divider positions.
+All three browser journeys pass, including per-pane model, permission, queue and steer controls.
+Frontend lint, type checking, pre-commit hooks and 231 feature-map contract tests pass.
+The [pane guide](primary-platform-panes.md) contains human verification steps.
+Private browser captures and validation logs are under `.omnigent/verify/drag-preview-20261016/`.
