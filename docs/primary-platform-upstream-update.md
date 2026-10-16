@@ -522,3 +522,86 @@ The commits change only the deployment README, Omnigent example environment valu
 The push used normal history advancement. The live Compose file and uncommitted monitoring edit remain unchanged.
 No service was restarted. Infrastructure state was updated before the server plan and monthly change log.
 Private verification is under `.omnigent/verify/nas-deployment-push-20261016/`.
+
+## Question-controls rollout and contributions, 2026-10-17
+
+Application source `910495755434bb66348afcdb25d1d325cd4b73ba` is deployed to
+the NAS. The immutable image is
+`registry.crosstalkis.com/omnigent-server:sha-910495755@sha256:878b9d527a0fb964b785805ba89559f360b04fefe7b0293f8b3f46f132dd58f0`.
+It carries the seven changed Python files and a fresh 525-file web build over
+the previous frozen image. Dependencies and migrations are unchanged. The generic
+**Questions** heading is now served; all 524 static responses match their build
+hashes, and LAN/public index responses match the server's base-path rewrite.
+
+An isolated restored database preserved conversation, item, account and file
+fingerprints across two candidate starts and a rollback to the old image. All 98
+dependency distributions matched. Production cutover retained all 195
+conversations and 83,991 original items, with zero missing identifiers and schema
+`mm1a2b3c4d5e` unchanged. All 30 other containers retained their identities, start
+times and states. The private backup and rollback Compose file are under
+`/volume1/docker/stacks/omnigent/backups/question-controls-20261017-910495755/`.
+The dump is 100,431,756 bytes, SHA-256
+`c7cadb363bb6e33de336c5fa70f69cd65607c2851281aed2b274f3c1845faf23`.
+Deployment commit `60ee0d09a3a4b994089f0295ae0f2a0e76e7a5e6` is pushed to
+`Alexbeav/homelab-ulduar` main; the monitoring edit is preserved.
+
+Six reachable idle hosts now use the pinned source with original host identities
+and silent startup preserved: Eagle Windows, Eagle WSL, Pegasus Windows,
+Athena-Lpt, Steam Deck and macbook. Pegasus WSL's working `0d3c2686` host was
+not restarted. Rocky remains offline and unchanged. All six updated hosts report
+Cline 3.0.72, but only Eagle Windows and Athena-Lpt passed automated
+question/answer/acknowledgement canaries. Athena required **Allow once** under its
+existing permission mode. The other four returned an unexplained
+`inner executor error: Internal error` before posting questions; authentication
+failure is not established. All 11 owned fleet test chats are stopped and
+archived. Fleet debugging is paused, with successful changes and rollback
+receipts preserved. These synthetic checks are separate from Alex's earlier
+human acceptance on this coordinator's host.
+
+The coordinator's original user-agent bundle was updated through the supported
+owner-only session-agent API, adding only `peer_messaging: true`. Following the
+normal NAS restart, the same `sys_session_send` tool delivered independent peer
+messages, and PS1 Manager replied with task constraints and resource guidance.
+No alternate dispatch route, direct database edit or scope bypass was used.
+
+The private five-task benchmark has a rejecting baseline and 92 passing
+known-good checks. Partial work outputs and provider usage are retained, including
+workspace-placement failures and turns whose actual native effort was `xhigh`
+instead of requested low/high. Those turns are excluded from the comparison.
+Further Pegasus benchmark work is excluded while G124 needs its memory. Mac
+preflight found no existing CMake/CTest or admitted lane, and the manager requested
+an explicitly incomplete matrix. No Mac tool installation, provider turn or
+compiler run was made. No model-efficiency ranking or completed review gauntlet
+is claimed.
+
+Focused contributions were ported to current upstream without fork-only docs or
+pane dependencies:
+
+| Contribution | Publication and validation |
+| --- | --- |
+| ACP per-chat MCP launch settings | Draft [PR #10561](https://github.com/omnigent-ai/omnigent/pull/10561), branch `contrib/acp-mcp-launch-settings`, source `bc9c3a800`. 166 tests and applicable pre-commit hooks passed. |
+| Structured question controls | Branch `contrib/structured-question-controls` at `3ebc6ad4a`, tracked by [issue #10562](https://github.com/omnigent-ai/omnigent/issues/10562). 1,179 backend/E2E/map checks, 657 frontend tests and six browser journeys passed. The UI PR awaits real GitHub demo attachment URLs; reviewed screenshots and the complete PR body remain outside Git. |
+| Link-menu browser fixture correction | [PR #10492](https://github.com/omnigent-ai/omnigent/pull/10492), source `d4f45d5b0`. Both previously failing browser cases pass after fixing the response fixture and strengthening the page-error assertion. |
+| ACP permission-mode rebase | [PR #7375](https://github.com/omnigent-ai/omnigent/pull/7375), source `50148ff45`. 233 focused checks and applicable hooks passed before an exact-lease push. |
+
+[PR #10431](https://github.com/omnigent-ai/omnigent/pull/10431) still needs
+maintainer review/approval. The pane proposal
+[issue #10429](https://github.com/omnigent-ai/omnigent/issues/10429) still overlaps
+[PR #6758](https://github.com/omnigent-ai/omnigent/pull/6758); no competing pane PR
+was opened. Local test results do not claim all GitHub CI gates have passed.
+No GitHub comments or merges were made in this contribution pass.
+
+To verify the deployed UI, refresh it and request a fresh structured question in
+a working provider chat. Select an option and submit; the answer must reach that
+source chat. To enable optional next replies, choose **Settings → General →
+Composer → Suggest my next reply** in each browser. Leave the active empty
+composer focused after a new native Codex/Claude reply, then press **Tab** or
+**Right Arrow** to accept the suggestion into an editable draft. Acceptance never
+sends it. This adds model usage and does not support Cline yet.
+
+Operational state was updated first in the homelab Infrastructure-State note,
+then the server plan. The monthly change-log file returned a OneDrive I/O error
+and was left intact. Private execution/rollback evidence remains under
+`~/.local/state/omnigent-investigations/rollout-20261017/`; benchmark fixtures,
+raw transcripts, credentials and demo media remain outside the application Git
+history.

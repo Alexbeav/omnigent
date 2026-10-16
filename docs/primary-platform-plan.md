@@ -330,8 +330,9 @@ answer control. Alex then requested a fresh question set, submitted **Green**
 and **Just confirm receipt**, and Cline acknowledged both selections. The user
 confirmed that questions work. This establishes the live human answer round
 trip for Cline as well as the earlier Codex test and reported Claude test.
-The current NAS frontend still uses the older **Codex question** heading; the
-generic heading is committed but has not been deployed there.
+At this verification point, the NAS frontend still used the older **Codex
+question** heading. The fleet/NAS rollout below subsequently deployed the generic
+heading.
 
 The focused ACP/runner/feature-map group passed **440 tests** with retries off;
 the file-settings subprocess regression fails against the previous launcher.
@@ -349,11 +350,11 @@ remaining work is separate from that completed fix:
 
 | Work | Current boundary |
 | --- | --- |
-| Deploy the pending web bundle | The NAS still shows the old **Codex question** heading. No server protocol or schema change is needed for the working Cline transport. |
-| Qualify other hosts | The new MCP command launch was activated on Pegasus WSL. Other hosts need the source update, their platform's process-local environment command, and a fresh question round trip. |
-| Restore this coordinator's peer route | Its current pinned agent permits child messaging only, so the request to PS1 Manager was rejected. Refresh the intended agent definition through the supported workflow before retrying; do not bypass the scope gate. |
-| Run the PS1 model/effort benchmark | Five bounded candidates were drafted from the manager's readable records; the manager has not supplied its own task recommendations. Pin fixtures and acceptance checks, then compare quality, usage, latency, review and repair costs. No gauntlet has run. |
-| Prepare upstream contributions | The question tool and Cline launch change need focused current-upstream comparison and contribution preparation. Existing contributions retain their recorded coordination/review work. |
+| Deploy the pending web bundle | Complete: source `910495755` is live on the NAS with the generic **Questions** heading. All 524 static responses and the server-rewritten LAN/public index match the tested build. Compose commit `60ee0d09a` is pushed to the deployment repository. |
+| Qualify other hosts | Six reachable hosts updated with original identities and silent startup preserved. Automated Cline question/answer canaries pass on Eagle Windows and Athena-Lpt. Eagle WSL, Pegasus Windows, Steam Deck and macbook still return an unexplained `Internal error`; fleet debugging is paused. Rocky is offline and unchanged. |
+| Restore this coordinator's peer route | Complete: the supported owner-only session-agent update added `peer_messaging: true`; after the ordinary NAS restart, `sys_session_send` delivered independent peer messages and PS1 Manager replied. No scope bypass was used. |
+| Run the PS1 model/effort benchmark | Five private fixtures and 92 known-good checks are pinned; the baseline rejects all five tasks. Manager constraints were incorporated. Work outputs exist, but setup failures and incorrect native effort invalidate a complete comparison. Further Pegasus work is excluded for G124. Mac admission found no existing CMake/CTest; the matrix and reviews remain incomplete, with no model-efficiency recommendation. |
+| Prepare upstream contributions | Focused ACP MCP launch contribution is draft [PR #10561](https://github.com/omnigent-ai/omnigent/pull/10561). The question branch is pushed and tracked by [#10562](https://github.com/omnigent-ai/omnigent/issues/10562); its UI PR awaits real GitHub demo attachments. Existing link-menu and ACP-permission contributions were corrected/rebased and validated. |
 | Optional OMP/Hermes layer | The documented OMP pilot still needs separate qualification of provider access, two-turn persistence and actual worker coordination. It is not on this chat's execution path. |
 
 Suggested next replies are already implemented and deployed separately; they

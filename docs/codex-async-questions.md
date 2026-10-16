@@ -105,3 +105,14 @@ Cline two-question form after the private MCP launch fix. Cline received
 **Green** and **Just confirm receipt** as an ordinary user reply and acknowledged
 both choices. All three provider question paths now have human confirmation;
 custom text and every pane position retain their separate automated coverage.
+
+The NAS rollout on 2026-10-17 deployed source `910495755` and the generic
+**Questions** heading. Six other reachable hosts received that source and the
+process-local Cline MCP launch configuration, preserving their host identities
+and silent startup. Automated Cline question/answer canaries passed on Eagle
+Windows and Athena-Lpt. Eagle WSL, Pegasus Windows, Steam Deck and macbook still
+return an unexplained Cline internal error before posting a question, despite
+CLI 3.0.72. Their readiness report alone is not proof of question delivery.
+Fleet debugging is paused; Rocky is offline and unchanged. See the
+[current rollout boundary](primary-platform-plan.md#remaining-work-after-question-acceptance-2026-10-17)
+before moving a working chat between hosts.
