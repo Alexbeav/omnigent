@@ -5,6 +5,32 @@ The isolated branch is `upgrade/v0.18-primary` in `~/Projects/omnigent-upgrade`.
 Qualification and deployment results are recorded below.
 The deployed application is `38f30aa96`, preserving [the primary platform work](primary-platform-plan.md).
 
+## Contribution status checked on 2026-10-16
+
+No new upstream PR for the primary-platform enhancements is submitted yet.
+The integrated fork and the focused image branch are pushed to Alex's repository.
+The live upstream main snapshot is `ac8eb013758bd05112eecbd65129aa11475a555a`.
+The older base references below remain the upgrade research and qualification pins.
+Refresh each contribution against current main before submitting it.
+
+The existing [Windows workspace PR #7370](https://github.com/omnigent-ai/omnigent/pull/7370) is open.
+Its DCO check requires action because commit `d088602b2615260a9837693c3528515fe841a233` lacks a sign-off.
+The existing [ACP permission PR #7375](https://github.com/omnigent-ai/omnigent/pull/7375) is also open.
+Its reported Maintainer Approval check fails, while DCO and the reported test checks pass.
+These are current check results, not a new maintainer review or proof of current-main compatibility.
+
+Upstream merged the [Claude transcript fix #10293](https://github.com/omnigent-ai/omnigent/pull/10293) and [ACP readiness map #7544](https://github.com/omnigent-ai/omnigent/pull/7544).
+Compare any additional create-time readiness guard separately before proposing it.
+The image fallback branch passes its recorded focused checks, but [#8391](https://github.com/omnigent-ai/omnigent/pull/8391) still has direct overlap.
+The related peer messaging, pane layout, side-chat and background-host PRs in the disposition table remain open.
+
+First address the existing PR blockers and compare current upstream behavior.
+Then prepare child-chat sidebar visibility, pane layout/docking, and dependent pane controls and queue/steer as separate changes.
+Capture fresh browser evidence for each UI contribution.
+Coordinate the peer-message API and image overlap before publishing competing changes.
+The Firefox bridge is a documented local MCP integration and adds no application patch to submit.
+Private API snapshots are under `.omnigent/verify/upstream-pr-status-20261016/`.
+
 ## Recommended targets
 
 Use release `v0.18.0` plus our required enhancements as the default deployment target.
@@ -82,7 +108,7 @@ No upstream issue, comment or PR was published during this investigation.
 | Group | Deployment treatment | Upstream treatment |
 | --- | --- | --- |
 | Image MIME fallback | Port the filename fallback for empty/generic MIME while retaining rejection of explicit conflicting types. | A focused branch on pinned main reproduces the bug, then passes 21 attachment tests. Open [#8391](https://github.com/omnigent-ai/omnigent/pull/8391) has equivalent fallback inside a broader redesign; coordinate before submitting. [#10045](https://github.com/omnigent-ai/omnigent/pull/10045) overlaps the same files. |
-| ACP agent readiness | Keep agent-specific `acp:<slug>` readiness and legacy-host unknown behavior. | Review overlap with open [#7544](https://github.com/omnigent-ai/omnigent/pull/7544). Its launch-gate alignment and our false-positive prevention need a semantic comparison. Avoid a duplicate PR. |
+| ACP agent readiness | Keep agent-specific `acp:<slug>` readiness and legacy-host unknown behavior. | [#7544](https://github.com/omnigent-ai/omnigent/pull/7544) merged at `2026-10-15T23:58:57Z`. Compare the new readiness-map behavior with our additional create-time guard before proposing any remaining change. Avoid a duplicate PR. |
 | Peer messaging and native grants | Preserve our same-owner authorization, provenance, loop/rate controls, and pinned-agent behavior. | Coordinate with open [#7965](https://github.com/omnigent-ai/omnigent/pull/7965) and sibling-team [#4232](https://github.com/omnigent-ai/omnigent/pull/4232). Discuss API and defaults before proposing another implementation. |
 | Desktop panes and docking | Port ordered three-pane layout, draft/stream isolation, resizing, both docking directions, header actions and safe popouts. | Separate feature proposal and base layout PR. Review Canvas split-panel [#7431](https://github.com/omnigent-ai/omnigent/pull/7431) for shared layout ideas. |
 | Pane configuration | Port the shared picker and explicit conversation targets after the layout. | Separate dependent PR, based on main's newer SDK reasoning-effort support. |
