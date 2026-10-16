@@ -247,12 +247,12 @@ export function ConversationPanes({
             data-active-pane={activePaneId === id}
             onPointerDownCapture={() => onActivate?.(id)}
             onFocusCapture={() => onActivate?.(id)}
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col md:min-w-80"
+            className="relative flex min-h-0 min-w-0 flex-1 flex-col md:min-w-80 md:[flex:var(--pane-flex)]"
             aria-label="Primary chat"
             style={
               {
                 "--workspace-panel-offset": "2.75rem",
-                ...(widths[index] === undefined ? {} : { flex: `0 0 ${widths[index]}px` }),
+                "--pane-flex": widths[index] === undefined ? "1 1 0%" : `0 0 ${widths[index]}px`,
               } as CSSProperties
             }
             {...primaryDetach.dragProps}

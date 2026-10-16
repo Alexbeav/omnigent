@@ -343,9 +343,22 @@ def test_three_chat_columns_resize_independently(
     page.get_by_role("combobox", name="Add chat pane").select_option(secondary_ids[1])
     expect(third).to_have_value("Draft for the third chat")
 
+    source = page.locator(f'[data-sidebar-session-id="{chat.session_id}"]').bounding_box()
+    assert source is not None
+    page.mouse.move(source["x"] + 70, source["y"] + source["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(source["x"] + 85, source["y"] + source["height"] / 2, steps=3)
+    target = page.get_by_test_id(f"chat-split-{secondary_ids[0]}-left").bounding_box()
+    assert target is not None
+    page.mouse.move(target["x"] + target["width"] / 2, target["y"] + 200, steps=8)
+    page.mouse.up()
+    expect(ordered_panes.first).to_have_attribute("data-pane-id", chat.session_id)
+    assert abs(ordered_panes.first.bounding_box()["width"] - retained_width) <= 1
+
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.get_by_role("region", name="Chat: Browser pane 2")).to_be_hidden()
     expect(page.get_by_role("region", name="Chat: Browser pane 3")).to_be_hidden()
     expect(page.get_by_role("region", name="Primary chat")).to_be_visible()
+    assert page.get_by_role("region", name="Primary chat").bounding_box()["width"] <= 390
 
     assert not chat.contract.violations, chat.contract.violations

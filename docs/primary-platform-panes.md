@@ -40,6 +40,7 @@ The split-preview and active-pane follow-up passes the browser journey in `test_
 It covers both drop directions, reordering, cancellation, the three-chat limit and outside-page popouts without the removed indicator.
 Sidebar replacement preserves the other chats, their drafts and divider widths for both primary and secondary replacements.
 Selecting an already-open chat focuses that pane, and returning to a replaced chat restores its draft.
+After moving the primary chat into a resized slot, the phone layout still fits its 390-pixel viewport.
 The focused shell component checks pass 192 tests.
 Screenshots and recordings are private under `.omnigent/verify/drag-preview-20261016/`.
 
@@ -53,7 +54,7 @@ pnpm --dir web exec vitest run src/shell/ConversationPanes.test.tsx src/componen
 On 2026-10-16 (local time), frontend lint, type checking, and the final production build passed.
 Earlier pane-control checks passed 585 store tests, 361 composer tests and 192 other pane/shell/bubble component tests.
 
-The three isolated Chromium journeys in `tests/browser_ui/chat/test_conversation_panes.py` and `test_pane_session_controls.py` passed again in 14.43 seconds against the final split-preview build.
+The three isolated Chromium journeys in `tests/browser_ui/chat/test_conversation_panes.py` and `test_pane_session_controls.py` passed again in 14.90 seconds against the final split-preview build.
 They verify each pane's model, reasoning, permission and queue controls, including busy-stream/idle-sidebar disagreement.
 It opened one pane through the header add control and another through sidebar drop. A left drop placed a secondary before the primary, and a right drop placed another after it.
 It showed three columns at 1600 by 900 pixels, separate drafts, and a send routed only to its secondary session.

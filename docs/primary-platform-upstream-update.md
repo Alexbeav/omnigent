@@ -369,6 +369,8 @@ The focused shell component suite passes 192 tests.
 The isolated browser journey covers preview geometry, both directions, reordering, the three-chat limit, cancellation, popouts and active-pane replacement.
 Its primary and secondary replacements retain the other drafts, restore a replaced draft and keep the divider positions.
 All three browser journeys pass, including per-pane model, permission, queue and steer controls.
+Desktop slot widths apply only from 768 pixels upward, so a reordered primary chat fits the phone viewport.
+The browser regression first reproduced a 479-pixel pane on a 390-pixel screen, then passed with the responsive width rule.
 Frontend lint, type checking, pre-commit hooks and 231 feature-map contract tests pass.
 The [pane guide](primary-platform-panes.md) contains human verification steps.
 Private browser captures and validation logs are under `.omnigent/verify/drag-preview-20261016/`.
