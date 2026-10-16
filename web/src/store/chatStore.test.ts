@@ -1968,6 +1968,26 @@ describe("chatStore — switchTo", () => {
     expect(state.hasMoreHistory).toBe(true);
   });
 
+  it("loads an inactive pane's earlier messages without changing the active conversation", async () => {
+    const items = Array.from({ length: INITIAL_WINDOW_ITEMS + 5 }, (_, idx) =>
+      userMessage(`pane_${idx}`, `pane message ${idx}`),
+    );
+    seedSession("conv_pane_history", items);
+    seedSession("conv_active_history", []);
+    await useChatStore.getState().switchTo("conv_pane_history");
+    await useChatStore.getState().switchTo("conv_active_history");
+
+    await useChatStore.getState().loadMoreHistory("conv_pane_history");
+
+    expect(conversationRegistry.peek("conv_pane_history")!.getState().blocks).toHaveLength(
+      items.length,
+    );
+    expect(useChatStore.getState().conversationId).toBe("conv_active_history");
+    expect(useChatStore.getState().blocks).toEqual([]);
+    await useChatStore.getState().loadMoreHistory("missing_pane");
+    expect(conversationRegistry.peek("missing_pane")).toBeUndefined();
+  });
+
   it("applies a scroll-up page that resolves after navigating away and back", async () => {
     // This used to be "drops a stale page": navigating away destroyed the window
     // and re-hydrated it on return, so an in-flight cursor-relative page was

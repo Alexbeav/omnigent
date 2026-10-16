@@ -1198,6 +1198,7 @@ function WorkspacePanelImpl({
   const rail = (
     <aside
       aria-label="Workspace"
+      data-session-id={conversationId}
       aria-hidden={!open}
       inert={inert}
       // The resize hook can starve the rail to width 0 while it stays mounted;

@@ -186,7 +186,7 @@ export function RoutingProvider({ value, children }: RoutingProviderProps) {
 }
 
 /** The active implementation — provider value, or react-router-dom fallback. */
-function useRouting(): RoutingApi {
+export function useRouting(): RoutingApi {
   return useContext(RoutingContext) ?? reactRouterRouting;
 }
 

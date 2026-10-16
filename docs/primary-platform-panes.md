@@ -1,12 +1,12 @@
 # Primary platform chat panes
 
-This first version shows one primary chat and up to two secondary chats on desktop. Each secondary pane owns its transcript stream, composer, and scroll container. Mobile hides secondary panes and keeps the primary chat.
+Desktop shows up to three equal chat panes. Each pane owns its transcript stream, composer, and scroll container. A shared toolbar above the columns follows the selected chat. Mobile shows the selected chat.
 
 ## User paths
 
 Use `Add pane…` in the primary header as the keyboard and screen-reader path. Drag a sidebar session over the left or right half of a pane to place it on that side. The hovered half shows a blurred preview with a blue outline and a Split view label. Drag an already-open session to move it without creating a duplicate. Use the external-link button in a pane header to open that session in a separate browser window.
 
-The `panes` URL query stores the two secondary session IDs. The optional `paneOrder` query stores their visual order, including a secondary chat to the left of the primary. The primary route and its state stay fixed when its position changes. Duplicate IDs and the primary session ID are removed. The layout caps the result at three total chats.
+The route identifies the selected chat. The `panes` URL query stores the other session IDs, and `paneOrder` stores all visual positions. Reordering does not change the selection. Duplicate IDs are removed, and the layout caps the result at three total chats.
 
 ## Active pane
 
@@ -20,8 +20,17 @@ Drag a divider, or focus it and press Left/Right, to resize only its two neighbo
 Each chat keeps a minimum width of 320 pixels.
 Click an already-open session in the sidebar to focus its existing pane.
 
-Replacing the primary chat updates the main route while retaining the secondary panes and their order.
-Replacing a secondary chat updates the layout query without changing the primary route.
+Selecting any pane updates the route and shared toolbar without remounting the other chat surfaces.
+Share, session menus, agent information, Terminal, and Workspace actions target the selected session.
+A terminal view belongs to its pane, and switching back to Chat restores its composer.
+Model, reasoning, permission, host, queue, and steering controls remain in each composer.
+Use Load earlier messages to read more history in a pane. New responses do not force the scroll to the bottom while you read older messages.
+
+Starting a chat replaces only the selected slot. This applies to the project New session button and menu, sidebar New session, command palette, and new-session shortcut.
+Other chats retain their drafts, scroll positions, and divider widths.
+If you select another pane while creation runs, completion fills the original slot and retains your selection.
+If creation fails, that slot restores the unsent prompt.
+The temporary `new` layout ID is a blank composer, never a server session ID.
 Mobile uses the ordinary single-chat navigation.
 Control/Command-click and middle-click keep the normal browser tab behavior.
 The keyboard Add pane control and explicit popout buttons remain available.
@@ -39,38 +48,27 @@ References:
 
 ## Tested evidence
 
-The split-preview and active-pane follow-up passes the browser journey in `test_conversation_panes.py`.
-It covers both drop directions, reordering, cancellation, the three-chat limit and outside-page popouts without the removed indicator.
-Sidebar replacement preserves the other chats, their drafts and divider widths for both primary and secondary replacements.
-Selecting an already-open chat focuses that pane, and returning to a replaced chat restores its draft.
-After moving the primary chat into a resized slot, the phone layout still fits its 390-pixel viewport.
-The focused shell component checks pass 195 tests.
-The resize regression covers both dividers with the primary chat on the left, in the middle and on the right.
-Pointer drags and keyboard arrows change only the adjacent pair and retain the third chat's width.
-The split-preview captures are private under `.omnigent/verify/drag-preview-20261016/`.
-The divider-fix captures and logs are private under `.omnigent/verify/pane-resize-20261016/`.
+The isolated Chromium journeys in `test_conversation_panes.py` and `test_pane_session_controls.py` cover these paths:
+
+- Both split directions, reordering, cancellation, the three-chat limit, and explicit and outside-page popouts.
+- Both resize dividers in all chat orders, with pointer and keyboard input.
+- Sidebar replacement and selection without losing other drafts or slot widths.
+- Share permissions, Workspace, and Terminal controls for the selected session.
+- Project creation in the selected slot, foreground and background completion, and failed creation with draft recovery.
+- Sidebar, shortcut, and command-palette new chats without collapsing the layout.
+- Per-pane model, reasoning, permissions, queue, and steering, including a busy stream with an idle sidebar.
+- A 390-pixel phone viewport after moving a chat into a resized slot.
+
+Component and store tests also cover initial prompt delivery once, navigation under a rebased URL, inactive-pane history loading, and scroll anchoring.
+Private logs and recordings are under `.omnigent/verify/active-pane-controls-20261016/`.
+These browser tests use isolated session contracts. They do not send real provider prompts or prove an OS desktop drop.
 
 Run these commands from the repository root:
 
 ```sh
 pnpm --dir web run type-check
-pnpm --dir web exec vitest run src/shell/ConversationPanes.test.tsx src/components/chat/SideChatPane.test.tsx
+pnpm --dir web exec vitest run src/shell/ConversationPanes.test.tsx src/components/chat/SideChatPane.test.tsx src/lib/routing.test.tsx
 ```
-
-On 2026-10-16 (local time), frontend lint, type checking, and the final production build passed.
-Earlier pane-control checks passed 585 store tests, 361 composer tests and 192 other pane/shell/bubble component tests.
-
-The three isolated Chromium journeys in `tests/browser_ui/chat/test_conversation_panes.py` and `test_pane_session_controls.py` passed again in 18.19 seconds against the divider-fix build.
-They verify each pane's model, reasoning, permission and queue controls, including busy-stream/idle-sidebar disagreement.
-It opened one pane through the header add control and another through sidebar drop. A left drop placed a secondary before the primary, and a right drop placed another after it.
-It showed three columns at 1600 by 900 pixels, separate drafts, and a send routed only to its secondary session.
-Keyboard and pointer resizing change the two chats next to the selected divider.
-At 390 by 844 pixels, the secondary panes were hidden.
-The sidebar showed a working child with a direct link.
-
-Local screenshots and recordings are under `.omnigent/verify/`. The final browser result is `final-pane-browser.xml`.
-The primary header stays inside the primary column so its controls cannot cover secondary-pane controls.
-Read-only shared sessions show their transcript without a send composer.
 
 ## Human verification
 
@@ -82,7 +80,7 @@ Read-only shared sessions show their transcript without a send composer.
    Focus each divider and use Left/Right arrows to repeat with the keyboard.
 5. Drag a sidebar session over the left half of the primary pane, then another over its right half. Make sure that the visual order matches each drop, the primary route and draft stay fixed, and reload keeps the order. Drag an open chat to reposition it without a duplicate.
 6. Use only the keyboard to choose `Add pane…`, close a pane, and open a pane in a new window.
-7. Resize below 768 pixels. Make sure that only the primary chat is visible.
+7. Select a different pane, then resize below 768 pixels. Make sure that only the selected chat is visible.
 8. In a secondary pane, choose another model and reasoning level from its model pill.
    Make sure that the primary chat keeps its model and draft.
 9. Drag a primary or secondary header beyond the page and release it.
@@ -97,6 +95,14 @@ Read-only shared sessions show their transcript without a send composer.
     Edit or remove a queued message, or use its send-now arrow to steer the active turn.
     Ctrl+Enter (Command+Enter on macOS) sends that pane's whole queue immediately with the default shortcut setting.
     Make sure that the primary draft and queue stay unchanged.
+
+12. Select each pane and open Share, then Workspace. Make sure that each action belongs to the selected session.
+    Open Terminal in a native session, then return to Chat. Make sure that the other composers stay visible.
+13. Select the middle pane, then choose New session in a project. Send a prompt.
+    Make sure that the new chat replaces only that slot and the other drafts and divider widths remain.
+    Repeat with sidebar New session, the new-session shortcut, and the command palette.
+14. Load earlier messages in a long chat. Read older content while another response arrives.
+    Make sure that the pane keeps your reading position and other chats stay unchanged.
 
 ## Limits and unproven behavior
 

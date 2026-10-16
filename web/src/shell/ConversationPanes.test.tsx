@@ -7,12 +7,69 @@ import {
   normalizePaneOrder,
 } from "./ConversationPanes";
 import { isChatDetachPoint } from "./chatDetach";
+import {
+  TerminalFirstContextProvider,
+  useTerminalFirst,
+  type TerminalFirstContextValue,
+} from "./TerminalFirstContext";
 
 vi.mock("@/components/chat/SideChatPane", () => ({
   SideChatPane: ({ childId }: { childId: string }) => <div>pane:{childId}</div>,
 }));
+vi.mock("@/hooks/useSession", () => ({
+  useSession: () => ({ session: { permissionLevel: 4 } }),
+}));
+vi.mock("./MainTerminalView", () => ({
+  MainTerminalView: ({ conversationId }: { conversationId: string }) => {
+    const terminal = useTerminalFirst();
+    return (
+      <button type="button" onClick={() => terminal?.setView("chat")}>
+        Close shell {conversationId}
+      </button>
+    );
+  },
+}));
 
 describe("conversation panes", () => {
+  it("closes a retained inactive shell without changing the active session's view", () => {
+    const setView = vi.fn();
+    const terminal: TerminalFirstContextValue = {
+      isClaudeNative: false,
+      isNativeWrapper: true,
+      isTerminalFirst: true,
+      isShellView: true,
+      view: "terminal",
+      terminalViewKey: "terminal:shell",
+      setView,
+      terminalsAvailable: true,
+      terminalStartingUp: false,
+    };
+    const panes = (active: string) => (
+      <TerminalFirstContextProvider value={terminal}>
+        <ConversationPanes
+          primary={null}
+          primaryId={active}
+          paneOrder={["a", "b"]}
+          activePaneId={active}
+          conversations={[]}
+          onClose={vi.fn()}
+          onPopout={vi.fn()}
+          uniform
+        />
+      </TerminalFirstContextProvider>
+    );
+    const view = render(panes("a"));
+    expect(screen.getByRole("button", { name: "Close shell a" })).toBeVisible();
+    view.rerender(panes("b"));
+    expect(screen.getByRole("button", { name: "Close shell b" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close shell a" }));
+    expect(setView).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Close shell a" })).toBeNull();
+    expect(screen.getByText("pane:a")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Close shell b" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close shell b" }));
+    expect(setView).toHaveBeenCalledExactlyOnceWith("chat");
+  });
   it("marks the active pane and selects a pane on pointer or keyboard focus", () => {
     const activate = vi.fn();
     render(

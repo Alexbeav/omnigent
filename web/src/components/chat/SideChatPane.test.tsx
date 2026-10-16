@@ -7,11 +7,12 @@ import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as sessionsApi from "@/lib/sessionsApi";
 import type * as ChatStoreModule from "@/store/chatStore";
-import { useChatStore, type ChatState } from "@/store/chatStore";
+import { useChatStore, setPendingInitialPrompt, type ChatState } from "@/store/chatStore";
 import { conversationRegistry } from "@/store/conversationRegistry";
 import { SideChatPane } from "./SideChatPane";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { clearSessionDrafts, getSessionDraft } from "@/lib/sessionDrafts";
+import type { UserMessageBlock } from "@/lib/blocks";
 
 vi.mock("@/store/chatStore", async (importOriginal) => ({
   ...(await importOriginal<typeof ChatStoreModule>()),
@@ -93,6 +94,77 @@ it("keeps an ordinary pane draft across unmount", () => {
 
   renderPane(<SideChatPane childId={childId} showFullHistory />);
   expect(screen.getByTestId("side-chat-input")).toHaveValue("draft for this pane");
+});
+
+it("sends a newly created pane's initial prompt once and pins its session", async () => {
+  setPendingInitialPrompt(childId, { text: "First message for this pane", skill: null });
+  conversationRegistry.acquire(childId).setState({ boundAgentId: null, loadingConversation: true });
+  const first = renderPane(
+    <StrictMode>
+      <SideChatPane childId={childId} showFullHistory />
+    </StrictMode>,
+  );
+  expect(send).not.toHaveBeenCalled();
+  act(() =>
+    conversationRegistry
+      .acquire(childId)
+      .setState({ boundAgentId: "agent_side", loadingConversation: false }),
+  );
+  await waitFor(() =>
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      "First message for this pane",
+      "agent_side",
+      undefined,
+      { pinnedConversationId: childId },
+    ),
+  );
+  first.unmount();
+  renderPane(<SideChatPane childId={childId} showFullHistory />);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+it("loads older history for its own pane and preserves the reading position", () => {
+  const message = (id: string): UserMessageBlock => ({
+    type: "user_message",
+    ctx: { agent: null, depth: 0, turn: 0, timestamp: 0, responseId: id, itemId: id },
+    content: [{ type: "input_text", text: id }],
+  });
+  const entry = conversationRegistry.acquire(childId);
+  entry.setState({ blocks: [message("recent")], hasMoreHistory: true });
+  const load = vi.fn<ChatState["loadMoreHistory"]>().mockImplementation(async () => {
+    entry.setState({ loadingMoreHistory: true });
+  });
+  useChatStore.setState({ loadMoreHistory: load });
+  renderPane(<SideChatPane childId={childId} showFullHistory />);
+  const button = screen.getByRole("button", { name: "Load earlier messages" });
+  const transcript = button.parentElement!;
+  let height = 1000;
+  Object.defineProperties(transcript, {
+    scrollHeight: { get: () => height },
+    clientHeight: { value: 300 },
+  });
+  transcript.scrollTop = 80;
+  fireEvent.scroll(transcript);
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockClear();
+  fireEvent.click(button);
+  expect(load).toHaveBeenCalledExactlyOnceWith(childId);
+  expect(button).toBeDisabled();
+  height = 1400;
+  act(() =>
+    entry.setState({
+      blocks: [message("older"), message("recent")],
+      loadingMoreHistory: false,
+      hasMoreHistory: false,
+    }),
+  );
+  expect(transcript.scrollTop).toBe(480);
+  expect(scroll).not.toHaveBeenCalled();
+  act(() => entry.setState({ blocks: [message("older"), message("recent"), message("newer")] }));
+  expect(scroll).not.toHaveBeenCalled();
+  transcript.scrollTop = 1100;
+  fireEvent.scroll(transcript);
+  act(() => entry.setState({ blocks: [message("latest")] }));
+  expect(scroll).toHaveBeenCalled();
 });
 
 describe("ordinary pane queue", () => {

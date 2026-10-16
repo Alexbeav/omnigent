@@ -19,6 +19,10 @@ import {
   useRebasePath,
   useSearchParams,
 } from "@/lib/routing";
+import type { NavigateOptions, To } from "react-router-dom";
+import { ConversationPaneRouting } from "./ConversationPaneRouting";
+import { NewChatLandingScreen } from "./NewChatDialog";
+import { useIsMobileViewport } from "@/hooks/useIsMobileViewport";
 import { sessionNavigationSearch } from "@/lib/sessionNavigation";
 import { CANVAS_CONVERSATION_MIN_WIDTH, CanvasWorkspace } from "@/canvas/CanvasWorkspace";
 import { isCanvasPathname } from "@/canvas/canvasNavigation";
@@ -37,7 +41,7 @@ import { useIsEmbedded } from "@/lib/embedded";
 import { AgentInfoContent, agentHasInfo } from "@/components/AgentInfo";
 import { useIdleNotifications } from "@/hooks/useIdleNotifications";
 import { ArcaShutdownToast } from "@/components/ArcaShutdownToast";
-import { useSeedReadState } from "@/hooks/useUnseenConversations";
+import { useMarkConversationSeen, useSeedReadState } from "@/hooks/useUnseenConversations";
 import { useIOSViewportLock } from "@/hooks/useIOSViewportLock";
 import { readFilesPanelPreferences, writeFilesPanelPreferences } from "@/lib/filesPanelPreferences";
 import { useOptimisticTitle } from "@/lib/optimisticTitles";
@@ -369,19 +373,87 @@ export function AppShell() {
   // Live open fraction (0→1) while the iOS edge-swipe drags the sidebar; null
   // when not dragging. Drives the mobile overlay's finger-tracking transform.
   const [sidebarDragProgress, setSidebarDragProgress] = useState<number | null>(null);
+  const mobilePanes = useIsMobileViewport();
+  const paneSessionId = conversationId ?? "new";
   const panesParam = searchParams.get("panes");
   const paneOrderParam = searchParams.get("paneOrder");
   const paneIds = useMemo(
-    () => normalizePaneIds(conversationId, panesParam),
-    [conversationId, panesParam],
+    () => normalizePaneIds(paneSessionId, panesParam),
+    [paneSessionId, panesParam],
   );
   const paneOrder = useMemo(
-    () => normalizePaneOrder(conversationId, paneIds, paneOrderParam),
-    [conversationId, paneIds, paneOrderParam],
+    () => normalizePaneOrder(paneSessionId, paneIds, paneOrderParam),
+    [paneSessionId, paneIds, paneOrderParam],
   );
-  const [selectedPaneId, setSelectedPaneId] = useState<string | undefined>();
-  const activePaneId =
-    selectedPaneId && paneOrder.includes(selectedPaneId) ? selectedPaneId : conversationId;
+  const activePaneId = paneSessionId;
+  const splitPanes = paneIds.length > 0 && !mobilePanes;
+  const navigatePane = (
+    id: string,
+    order: string[],
+    destination?: To,
+    options?: NavigateOptions,
+  ) => {
+    const next = new URLSearchParams(sessionNavigationSearch(location.search));
+    if (destination) {
+      const incoming =
+        typeof destination === "string"
+          ? new URL(destination, window.location.origin).search
+          : destination.search;
+      for (const [key, value] of new URLSearchParams(incoming)) next.set(key, value);
+      if (id === "new" && !new URLSearchParams(incoming).has("project")) next.delete("project");
+    }
+    const others = order.filter((pane) => pane !== id);
+    if (others.length) next.set("panes", others.join(","));
+    else next.delete("panes");
+    next.set("paneOrder", order.join(","));
+    navigateConversation(
+      {
+        pathname: id === "new" ? "/" : `/c/${encodeURIComponent(id)}`,
+        search: `?${next}`,
+        hash:
+          typeof destination === "string"
+            ? new URL(destination, window.location.origin).hash
+            : destination?.hash,
+      },
+      options,
+    );
+  };
+  const handlePaneNavigation = (to: To, options?: NavigateOptions): boolean => {
+    if (!splitPanes) return false;
+    if (
+      typeof to === "string" &&
+      new URL(to, window.location.origin).origin !== window.location.origin
+    )
+      return false;
+    const pathname =
+      typeof to === "string" ? new URL(to, window.location.origin).pathname : to.pathname;
+    let id: string;
+    if (pathname === "/" || pathname === rebasePath("/")) id = "new";
+    else {
+      const prefix = pathname?.startsWith(rebasePath("/c/")) ? rebasePath("/c/") : "/c/";
+      if (!pathname?.startsWith(prefix)) return false;
+      id = decodeURIComponent(pathname.slice(prefix.length));
+      if (!id || id.includes("/")) return false;
+    }
+    const order = paneOrder.includes(id)
+      ? paneOrder
+      : paneOrder.map((pane) => (pane === paneSessionId ? id : pane));
+    navigatePane(id, order, to, options);
+    return true;
+  };
+  const layoutRef = useRef({ order: paneOrder, active: paneSessionId, navigatePane });
+  layoutRef.current = { order: paneOrder, active: paneSessionId, navigatePane };
+  const navigateCreatedPane = useCallback((id: string, previous = "new") => {
+    const layout = layoutRef.current;
+    if (!layout.order.includes(previous)) return;
+    const order = layout.order.map((pane) => (pane === previous ? id : pane));
+    layout.navigatePane(layout.active === previous ? id : layout.active, order, undefined, {
+      replace: true,
+    });
+  }, []);
+  useEffect(() => {
+    if (splitPanes) void useChatStore.getState().switchTo(conversationId ?? null);
+  }, [splitPanes, conversationId]);
   const setPaneLayout = useCallback(
     (ids: string[], order: string[]) => {
       setSearchParams(
@@ -389,7 +461,7 @@ export function AppShell() {
           const next = new URLSearchParams(previous);
           if (ids.length > 0) next.set("panes", ids.join(","));
           else next.delete("panes");
-          const defaultOrder = [conversationId, ...ids].filter(Boolean);
+          const defaultOrder = [paneSessionId, ...ids].filter(Boolean);
           if (order.join(",") === defaultOrder.join(",")) next.delete("paneOrder");
           else next.set("paneOrder", order.join(","));
           return next;
@@ -397,76 +469,41 @@ export function AppShell() {
         { replace: true },
       );
     },
-    [conversationId, setSearchParams],
+    [paneSessionId, setSearchParams],
   );
   const placePane = useCallback(
     (id: string, targetId: string, side: "left" | "right") => {
-      if (!conversationId || id === targetId) return;
-      const alreadyOpen = id === conversationId || paneIds.includes(id);
+      if (!paneSessionId || id === targetId) return;
+      const alreadyOpen = id === paneSessionId || paneIds.includes(id);
       if (!alreadyOpen && paneIds.length >= MAX_CHAT_PANES - 1) return;
       const nextIds = alreadyOpen
         ? paneIds
-        : normalizePaneIds(conversationId, [...paneIds, id].join(","));
-      const nextOrder = normalizePaneOrder(conversationId, nextIds, paneOrder.join(",")).filter(
+        : normalizePaneIds(paneSessionId, [...paneIds, id].join(","));
+      const nextOrder = normalizePaneOrder(paneSessionId, nextIds, paneOrder.join(",")).filter(
         (paneId) => paneId !== id,
       );
       const targetIndex = nextOrder.indexOf(targetId);
       if (targetIndex < 0) return;
       nextOrder.splice(targetIndex + (side === "right" ? 1 : 0), 0, id);
       setPaneLayout(nextIds, nextOrder);
-      setSelectedPaneId(id);
     },
-    [conversationId, paneIds, paneOrder, setPaneLayout],
+    [paneSessionId, paneIds, paneOrder, setPaneLayout],
   );
   const addPane = useCallback(
-    (id: string) => placePane(id, paneOrder.at(-1) ?? conversationId ?? "", "right"),
-    [conversationId, paneOrder, placePane],
+    (id: string) => placePane(id, paneOrder.at(-1) ?? paneSessionId ?? "", "right"),
+    [paneSessionId, paneOrder, placePane],
   );
-  const selectPaneConversation = useCallback(
-    (id: string): boolean => {
-      if (!conversationId || isMobileViewport() || paneOrder.length < 2) return false;
-      if (paneOrder.includes(id)) {
-        setSelectedPaneId(id);
-        return true;
-      }
-      const target = activePaneId ?? conversationId;
-      const nextOrder = paneOrder.map((paneId) => (paneId === target ? id : paneId));
-      if (target === conversationId) {
-        const next = new URLSearchParams(sessionNavigationSearch(location.search));
-        next.set("paneOrder", nextOrder.join(","));
-        navigateConversation({ pathname: `/c/${encodeURIComponent(id)}`, search: `?${next}` });
-      } else {
-        setPaneLayout(
-          paneIds.map((paneId) => (paneId === target ? id : paneId)),
-          nextOrder,
-        );
-      }
-      setSelectedPaneId(id);
-      return true;
-    },
-    [
-      conversationId,
-      paneOrder,
-      activePaneId,
-      paneIds,
-      location.search,
-      navigateConversation,
-      setPaneLayout,
-    ],
-  );
-  const closePane = useCallback(
-    (id: string) => {
-      const nextIds = paneIds.filter((paneId) => paneId !== id);
-      setPaneLayout(
-        nextIds,
-        paneOrder.filter((paneId) => paneId !== id),
-      );
-    },
-    [paneIds, paneOrder, setPaneLayout],
-  );
+  const selectPaneConversation = (id: string): boolean =>
+    handlePaneNavigation(`/c/${encodeURIComponent(id)}`);
+  const closePane = (id: string) => {
+    const order = paneOrder.filter((pane) => pane !== id);
+    const next = id === paneSessionId ? order[0] : paneSessionId;
+    if (next) navigatePane(next, order, undefined, { replace: true });
+  };
   const popoutPane = useCallback(
     (id: string) => {
       const url = buildPanePopoutUrl(window.location.href, id, rebasePath);
+      if (id === "new") url.pathname = rebasePath("/");
       window.open(url, "_blank", "popup,noopener,noreferrer");
     },
     [rebasePath],
@@ -687,6 +724,7 @@ export function AppShell() {
     if (!serverConversationId) return null;
     return allConversations?.find((c) => c.id === serverConversationId) ?? null;
   }, [serverConversationId, allConversations]);
+  useMarkConversationSeen(splitPanes ? serverConversationId : undefined, activeConv?.updated_at);
   // A temporary row is display-only: it can supply optimistic breadcrumb
   // text, but must not participate in permissions, actions, or server hooks.
   const provisionalConv = useMemo(() => {
@@ -1845,7 +1883,9 @@ export function AppShell() {
       setCommandPaletteOpen((prev) => !sessionSearch || !prev);
     },
   );
-  useNewSessionHotkey(!isEmbedded);
+  useNewSessionHotkey(!isEmbedded, undefined, () => {
+    if (!handlePaneNavigation("/")) navigateConversation("/");
+  });
   useSettingsHotkey();
 
   // Mobile back button: close the open file and return to the files/changes
@@ -2478,7 +2518,7 @@ export function AppShell() {
               type="button"
               size="icon-xs"
               variant="ghost"
-              aria-label="Open primary chat in a new window"
+              aria-label="Open active chat in a new window"
               onClick={() => popoutPane(conversationId)}
             >
               <ExternalLinkIcon className="size-4" />
@@ -2562,7 +2602,7 @@ export function AppShell() {
     />
   );
 
-  return (
+  const shell = (
     <FileViewerContext.Provider value={fileViewerContextValue}>
       <TerminalFirstContextProvider value={terminalFirstContextValue}>
         <ForkDialogContextProvider value={forkDialogContextValue}>
@@ -2653,7 +2693,7 @@ export function AppShell() {
               onSplitConversation={placePane}
               onPopoutConversation={popoutPane}
               onSelectConversation={selectPaneConversation}
-              activePaneId={activePaneId}
+              activePaneId={conversationId}
             />
 
             {/* Content region (everything right of the sidebar): a relative
@@ -2694,14 +2734,48 @@ export function AppShell() {
                   data-shell-header={extensionOwnsHeader ? "hidden" : "visible"}
                   data-session-id={conversationId}
                 >
-                  {conversationId ? (
+                  {splitPanes ? (
+                    <>
+                      <div
+                        className="relative h-14 shrink-0"
+                        data-testid="active-pane-toolbar"
+                        data-session-id={conversationId}
+                        style={{ "--workspace-panel-offset": "0px" } as CSSProperties}
+                      >
+                        {chatHeader}
+                      </div>
+                      <ConversationPanes
+                        primary={null}
+                        primaryId={paneSessionId}
+                        paneOrder={paneOrder}
+                        activePaneId={activePaneId}
+                        onActivate={(id) => {
+                          if (id !== paneSessionId) navigatePane(id, paneOrder);
+                        }}
+                        conversations={allConversations ?? []}
+                        onClose={closePane}
+                        onPopout={popoutPane}
+                        renderPane={(id) =>
+                          id === "new" ? (
+                            <NewChatLandingScreen
+                              onPaneNavigate={navigateCreatedPane}
+                              autoFocus={id === paneSessionId}
+                            />
+                          ) : isTempConvId(id) ? (
+                            <div role="status" className="p-4 text-muted-foreground">
+                              Starting session…
+                            </div>
+                          ) : undefined
+                        }
+                        uniform
+                      />
+                    </>
+                  ) : conversationId ? (
                     <ConversationPanes
                       primary={<Outlet />}
                       header={chatHeader}
                       primaryId={conversationId}
-                      paneOrder={paneOrder}
-                      activePaneId={activePaneId}
-                      onActivate={setSelectedPaneId}
+                      paneOrder={[conversationId]}
                       conversations={allConversations ?? []}
                       onClose={closePane}
                       onPopout={popoutPane}
@@ -3007,6 +3081,9 @@ export function AppShell() {
         </ForkDialogContextProvider>
       </TerminalFirstContextProvider>
     </FileViewerContext.Provider>
+  );
+  return (
+    <ConversationPaneRouting onNavigate={handlePaneNavigation}>{shell}</ConversationPaneRouting>
   );
 }
 

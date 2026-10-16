@@ -1,7 +1,14 @@
 import { cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { MemoryRouter, type To } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { basenamedRouting, Link as RoutingLink, reactRouterRouting } from "./routing";
+import {
+  basenamedRouting,
+  Link as RoutingLink,
+  reactRouterRouting,
+  RoutingProvider,
+  useRouting,
+} from "./routing";
+import { ConversationPaneRouting } from "@/shell/ConversationPaneRouting";
 import { setOmnigentHostConfig } from "@/lib/host";
 
 // `basenamedRouting` is the embed seam: it rebases web's absolute
@@ -158,5 +165,48 @@ describe("Link analytics (componentId)", () => {
     renderLink({});
     fireEvent.click(screen.getByRole("link", { name: "Tasks" }));
     expect(analytics).not.toHaveBeenCalled();
+  });
+});
+
+describe("pane navigation", () => {
+  it.each(["", "/mount"])("preserves drafts and ordinary navigation under %s", (mount) => {
+    function PaneProbe() {
+      const navigate = useRouting().useNavigate();
+      const location = useRouting().useLocation();
+      return (
+        <>
+          <input aria-label="Pane draft" />
+          <RoutingLink to="/?project=Example">New in project</RoutingLink>
+          <button type="button" onClick={() => navigate("/")}>
+            New via command
+          </button>
+          <RoutingLink to="/settings">Settings</RoutingLink>
+          <output>{location.pathname}</output>
+        </>
+      );
+    }
+    const first = vi.fn((_to: To, _options?: { replace?: boolean }) => true);
+    const next = vi.fn((to: To) => to !== "/settings");
+    const tree = (onNavigate: typeof first) => (
+      <MemoryRouter initialEntries={[`${mount}/c/one`]}>
+        <RoutingProvider value={basenamedRouting(mount)}>
+          <ConversationPaneRouting onNavigate={onNavigate}>
+            <PaneProbe />
+          </ConversationPaneRouting>
+        </RoutingProvider>
+      </MemoryRouter>
+    );
+    const view = render(tree(first));
+    const draft = screen.getByRole("textbox", { name: "Pane draft" });
+    fireEvent.change(draft, { target: { value: "Keep this draft" } });
+    fireEvent.click(screen.getByRole("link", { name: "New in project" }));
+    expect(first).toHaveBeenCalledWith("/?project=Example", expect.anything());
+    view.rerender(tree(next));
+    expect(screen.getByRole("textbox", { name: "Pane draft" })).toBe(draft);
+    expect(draft).toHaveValue("Keep this draft");
+    fireEvent.click(screen.getByRole("button", { name: "New via command" }));
+    expect(next).toHaveBeenCalledWith("/", undefined);
+    fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+    expect(screen.getByRole("status")).toHaveTextContent(`${mount}/settings`);
   });
 });

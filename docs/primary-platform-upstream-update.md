@@ -429,3 +429,30 @@ The Compose pin is local NAS commit `ffb1a78962a9ea72960f5526cbfd797e8934ece8` a
 The monitoring edit and provider hosts remain untouched.
 Private evidence: `.omnigent/verify/pane-resize-20261016/verification.md`, `deployment.json` and `live-verification.json`.
 To test, refresh the browser, drag each divider in both directions, then move the primary chat and repeat.
+
+## Equal pane controls and project creation, 2026-10-16
+
+The full toolbar now follows the selected chat above the desktop columns.
+Share, session menus, agent information, Terminal, and Workspace actions use that session.
+Selecting another pane updates the route while the chat surfaces retain their drafts and scroll state.
+Only the shell binds the selected session stream, which avoids competing bindings during startup.
+
+New-session navigation replaces only the selected slot, including project buttons and menus, sidebar New session, shortcut, and command palette.
+A new chat that finishes in the background fills its original slot without stealing the current selection.
+A failed creation restores the unsent prompt in that slot.
+Ordinary split panes also load earlier history for their own session and preserve the reading position.
+The native terminal view belongs to its pane, and Chat restores its composer.
+
+The existing browser scenarios now exercise the selected-session route with stable pane selectors.
+The new creation variants reuse the browser session fixture and explicit session, project, sharing and event-stream contracts.
+The local hostname alias permits Share in the isolated browser without a real account or external request.
+The contracts cover foreground creation, background creation, and failure, with one initial send only on success.
+Private evidence is under `.omnigent/verify/active-pane-controls-20261016/`.
+Upstream PR publication remains deferred for Alex to test this UI follow-up.
+
+Qualification passed 964 component checks, 746 history/store/pane checks, and 654 final creation/pane/terminal checks.
+Feature-map contracts pass 232 tests. The production build, frontend lint, type checking, documentation links and pre-commit pass.
+A background failure regression also confirms that the restored composer does not steal selection through automatic focus.
+The inactive shell-close regression confirms that closing its shell does not change the selected chat view.
+
+All six isolated Chromium journeys pass against the final rebuilt UI in 38.89 seconds. Final recordings and captures are under `.omnigent/verify/active-pane-controls-20261016/browser-qualified/`.

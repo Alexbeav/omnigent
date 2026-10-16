@@ -12,6 +12,11 @@ import type { Conversation } from "@/hooks/useConversations";
 import { SideChatPane } from "@/components/chat/SideChatPane";
 import { Button } from "@/components/ui/button";
 import { sessionNavigationSearch } from "@/lib/sessionNavigation";
+import { TerminalFirstContextProvider, useTerminalFirst } from "./TerminalFirstContext";
+import { MainTerminalView } from "./MainTerminalView";
+import { useSession } from "@/hooks/useSession";
+import { isOwnerLevel } from "@/lib/permissionsApi";
+import { retrySession } from "@/lib/sessionsApi";
 import { isChatDetachPoint } from "./chatDetach";
 
 export const MAX_CHAT_PANES = 3;
@@ -108,6 +113,60 @@ function usePaneHeaderDetach(onPopout: () => void) {
   };
 }
 
+function PaneSessionSurface({
+  conversationId,
+  active,
+}: {
+  conversationId: string;
+  active: boolean;
+}) {
+  const terminal = useTerminalFirst();
+  const { session } = useSession(conversationId);
+  const savedTerminal = useRef(terminal);
+  const [, refreshView] = useState(0);
+  const savedView = useRef<{ show: boolean; key: string | null }>({ show: false, key: null });
+  if (active) {
+    savedTerminal.current = terminal;
+    savedView.current = {
+      show: terminal?.isTerminalFirst === true && terminal.view === "terminal",
+      key: terminal?.terminalViewKey ?? null,
+    };
+  }
+  const { show, key } = savedView.current;
+  return (
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div className={show ? "hidden" : "min-h-0 flex-1"}>
+        <SideChatPane childId={conversationId} showFullHistory streamBoundByShell={active} />
+      </div>
+      {show && (
+        <TerminalFirstContextProvider
+          value={
+            savedTerminal.current && {
+              ...savedTerminal.current,
+              setView: (view) => {
+                if (active) terminal?.setView(view);
+                else {
+                  savedView.current.show = view === "terminal";
+                  refreshView((value) => value + 1);
+                }
+              },
+            }
+          }
+        >
+          <MainTerminalView
+            conversationId={conversationId}
+            initialTerminalKey={key}
+            readOnly={!isOwnerLevel(session?.permissionLevel ?? null)}
+            onResume={async () => {
+              await retrySession(conversationId);
+            }}
+          />
+        </TerminalFirstContextProvider>
+      )}
+    </div>
+  );
+}
+
 function ChatPane({
   children,
   label,
@@ -170,6 +229,8 @@ export function ConversationPanes({
   conversations,
   onClose,
   onPopout,
+  renderPane,
+  uniform = false,
 }: {
   primary: ReactNode;
   header?: ReactNode;
@@ -180,6 +241,8 @@ export function ConversationPanes({
   conversations: readonly Conversation[];
   onClose: (id: string) => void;
   onPopout: (id: string) => void;
+  renderPane?: (id: string) => ReactNode;
+  uniform?: boolean;
 }) {
   // Widths belong to the visible slots, so replacing a chat keeps its divider in place.
   const [widths, setWidths] = useState<number[]>([]);
@@ -262,7 +325,7 @@ export function ConversationPanes({
               )
             }
           >
-            {isPrimary ? (
+            {isPrimary && !uniform ? (
               <>
                 <div data-pane-drag-handle className="contents">
                   {header}
@@ -276,7 +339,7 @@ export function ConversationPanes({
                   className="flex h-12 shrink-0 cursor-grab select-none items-center gap-2 border-b border-border px-3 active:cursor-grabbing"
                 >
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {sessionLabel(conversations, id)}
+                    {id === "new" ? "New session" : sessionLabel(conversations, id)}
                   </span>
                   <Button
                     type="button"
@@ -298,7 +361,12 @@ export function ConversationPanes({
                   </Button>
                 </header>
                 <div className="min-h-0 flex-1">
-                  <SideChatPane childId={id} showFullHistory />
+                  {renderPane?.(id) ??
+                    (uniform ? (
+                      <PaneSessionSurface conversationId={id} active={activePaneId === id} />
+                    ) : (
+                      <SideChatPane childId={id} showFullHistory />
+                    ))}
                 </div>
               </>
             )}

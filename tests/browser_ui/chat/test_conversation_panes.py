@@ -28,6 +28,9 @@ def test_three_chat_columns_resize_independently(
     for index, session_id in enumerate(
         (*secondary_ids, "browser-pane-four", "browser-pane-five"), start=2
     ):
+        install_chat_session_routes(
+            ChatSessionContract(page, chat.contract, chat.stream, session_id=session_id)
+        )
         row = {**chat._session(), "id": session_id, "title": f"Browser pane {index}"}
         rows.append(row)
         chat.contract.json(f"/v1/sessions/{session_id}", row)
@@ -67,7 +70,9 @@ def test_three_chat_columns_resize_independently(
     )
     add_pane = page.get_by_role("combobox", name="Add chat pane")
     assert add_pane.evaluate("element => element.closest('header') !== null")
-    header_box = page.get_by_role("region", name="Primary chat").locator("header").bounding_box()
+    header_box = (
+        page.locator(f'section[data-pane-id="{chat.session_id}"]').locator("header").bounding_box()
+    )
     add_box = add_pane.bounding_box()
     assert header_box is not None and add_box is not None
     assert add_box["y"] + add_box["height"] <= header_box["y"] + header_box["height"]
@@ -82,7 +87,7 @@ def test_three_chat_columns_resize_independently(
     expect(right_target).to_be_visible()
     right_edge = right_target.bounding_box()
     assert right_edge is not None
-    primary_box = page.get_by_role("region", name="Primary chat").bounding_box()
+    primary_box = page.locator(f'section[data-pane-id="{chat.session_id}"]').bounding_box()
     assert primary_box is not None
     assert abs(right_edge["width"] - primary_box["width"] / 2) <= 1
     assert (
@@ -145,17 +150,19 @@ def test_three_chat_columns_resize_independently(
     ]
 
     expect(
-        page.get_by_role("region", name="Primary chat").get_by_role("separator")
+        page.locator(f'section[data-pane-id="{chat.session_id}"]').get_by_role("separator")
     ).to_be_visible()
     panes = page.locator("[data-testid=conversation-panes] > section")
     expect(panes).to_have_count(3)
-    expect(page.get_by_role("region", name="Chat: Browser pane 2")).to_be_visible()
-    expect(page.get_by_role("region", name="Chat: Browser pane 3")).to_be_visible()
-    primary = page.get_by_role("region", name="Primary chat").get_by_placeholder("Send a message…")
-    second = page.get_by_role("region", name="Chat: Browser pane 2").get_by_test_id(
+    expect(page.locator(f'section[data-pane-id="{secondary_ids[0]}"]')).to_be_visible()
+    expect(page.locator(f'section[data-pane-id="{secondary_ids[1]}"]')).to_be_visible()
+    primary = page.locator(f'section[data-pane-id="{chat.session_id}"]').get_by_test_id(
         "side-chat-input"
     )
-    third = page.get_by_role("region", name="Chat: Browser pane 3").get_by_test_id(
+    second = page.locator(f'section[data-pane-id="{secondary_ids[0]}"]').get_by_test_id(
+        "side-chat-input"
+    )
+    third = page.locator(f'section[data-pane-id="{secondary_ids[1]}"]').get_by_test_id(
         "side-chat-input"
     )
     primary.fill("Draft for the first chat")
@@ -204,7 +211,10 @@ def test_three_chat_columns_resize_independently(
                 assert abs(dragged[slot] - after[slot] - delta) <= 2
 
     resize_boundaries()
-    assert parse_qs(urlparse(page.url).query)["panes"] == [",".join(secondary_ids)]
+    assert set(parse_qs(urlparse(page.url).query)["panes"][0].split(",")) == {
+        chat.session_id,
+        secondary_ids[0],
+    }
     page.screenshot(path=str(tmp_path / "three-chat-columns.png"), full_page=True)
 
     chat.contract.route(
@@ -216,7 +226,7 @@ def test_three_chat_columns_resize_independently(
         ),
     )
     primary_header = (
-        page.get_by_role("region", name="Primary chat").locator("header").bounding_box()
+        page.locator(f'section[data-pane-id="{chat.session_id}"]').locator("header").bounding_box()
     )
     assert primary_header is not None
     page_count = len(page.context.pages)
@@ -250,7 +260,7 @@ def test_three_chat_columns_resize_independently(
     assert primary_popout.evaluate("window.opener === null")
     primary_popout.close()
 
-    pane_three = page.get_by_role("region", name="Chat: Browser pane 3")
+    pane_three = page.locator(f'section[data-pane-id="{secondary_ids[1]}"]')
     header = pane_three.locator("header").bounding_box()
     assert header is not None
     with page.context.expect_page() as opened:
@@ -323,7 +333,7 @@ def test_three_chat_columns_resize_independently(
     expect(ordered_panes).to_have_count(3)
     expect(ordered_panes.last).to_have_attribute("data-pane-id", "browser-pane-four")
     expect(ordered_panes.last).to_have_attribute("data-active-pane", "true")
-    assert urlparse(page.url).path == f"/c/{chat.session_id}"
+    assert urlparse(page.url).path == "/c/browser-pane-four"
     expect(primary).to_have_value("Draft for the first chat")
     expect(second).to_have_value("Draft retained in the other pane")
     page.get_by_role("link", name="Browser pane 2", exact=True).click()
@@ -339,8 +349,8 @@ def test_three_chat_columns_resize_independently(
 
     primary.click()
     page.get_by_role("link", name="Browser pane 5", exact=True).click()
-    expect(page.get_by_role("region", name="Primary chat")).to_have_attribute(
-        "data-pane-id", "browser-pane-five"
+    expect(page.locator('section[data-pane-id="browser-pane-five"]')).to_have_attribute(
+        "data-active-pane", "true"
     )
     assert urlparse(page.url).path == "/c/browser-pane-five"
     expect(ordered_panes.first).to_have_attribute("data-pane-id", secondary_ids[0])
@@ -349,7 +359,7 @@ def test_three_chat_columns_resize_independently(
     page.get_by_role("link", name=rows[0]["title"], exact=True).click()
     expect(primary).to_have_value("Draft for the first chat")
     expect(ordered_panes).to_have_count(3)
-    page.get_by_role("region", name="Chat: Browser pane 4").get_by_test_id(
+    page.locator('section[data-pane-id="browser-pane-four"]').get_by_test_id(
         "side-chat-input"
     ).click()
     page.get_by_role("link", name="Browser pane 3", exact=True).click()
@@ -388,9 +398,11 @@ def test_three_chat_columns_resize_independently(
     resize_boundaries()
 
     page.set_viewport_size({"width": 390, "height": 844})
-    expect(page.get_by_role("region", name="Chat: Browser pane 2")).to_be_hidden()
-    expect(page.get_by_role("region", name="Chat: Browser pane 3")).to_be_hidden()
-    expect(page.get_by_role("region", name="Primary chat")).to_be_visible()
-    assert page.get_by_role("region", name="Primary chat").bounding_box()["width"] <= 390
+    expect(page.locator(f'section[data-pane-id="{secondary_ids[0]}"]')).to_be_hidden()
+    expect(page.locator(f'section[data-pane-id="{secondary_ids[1]}"]')).to_be_hidden()
+    expect(page.locator(f'section[data-pane-id="{chat.session_id}"]')).to_be_visible()
+    assert (
+        page.locator(f'section[data-pane-id="{chat.session_id}"]').bounding_box()["width"] <= 390
+    )
 
     assert not chat.contract.violations, chat.contract.violations

@@ -41,6 +41,7 @@ import { ReplyDraftBlocks } from "@/components/composer/ReplyDraftBlocks";
 import { Button } from "@/components/ui/button";
 import {
   EMPTY_SIDE_CHAT_COMPOSER,
+  consumePendingInitialPrompt,
   useChatStore,
   ensureConversationStreamed,
   committedItemProvesDelivery,
@@ -118,6 +119,7 @@ export function SideChatPane({
   onStart,
   readOnly: restoredReadOnly = false,
   showFullHistory = false,
+  streamBoundByShell = false,
 }: {
   childId: string;
   selectionParentId?: string;
@@ -126,6 +128,8 @@ export function SideChatPane({
   readOnly?: boolean;
   /** Render an ordinary session in a split pane instead of hiding forked history. */
   showFullHistory?: boolean;
+  /** The active split pane shares the shell's existing stream binding. */
+  streamBoundByShell?: boolean;
 }) {
   const pending = isPendingSideChat(childId);
   const starting = useChatStore((s) => s.sideChatComposers[childId]?.starting ?? false);
@@ -148,8 +152,8 @@ export function SideChatPane({
   // here. The store guards a double-bind and re-binds a failed entry, so
   // re-mounts / tab switches / retries are cheap.
   useEffect(() => {
-    if (!pending) void ensureConversationStreamed(childId);
-  }, [pending, childId]);
+    if (!pending && !streamBoundByShell) void ensureConversationStreamed(childId);
+  }, [pending, childId, streamBoundByShell]);
   // A real tab reads the child entry; a pending tab has none (null → empty).
   const state = useConversationEntryState(pending ? null : childId);
   const {
@@ -165,7 +169,23 @@ export function SideChatPane({
     conversationLoadError,
     failedSendDraft,
     restoredSendDraft,
+    hasMoreHistory,
+    loadingMoreHistory,
   } = state;
+
+  useEffect(() => {
+    if (!showFullHistory || pending || loadingConversation || !boundAgentId) return;
+    const prompt = consumePendingInitialPrompt(childId);
+    if (!prompt) return;
+    const store = useChatStore.getState();
+    if (prompt.skill) {
+      void store.sendSlashCommand(prompt.skill.name, prompt.skill.args, boundAgentId, {
+        pinnedConversationId: childId,
+      });
+    } else {
+      void store.send(prompt.text, boundAgentId, prompt.files, { pinnedConversationId: childId });
+    }
+  }, [showFullHistory, pending, loadingConversation, boundAgentId, childId]);
 
   // Hide the forked-in history: snapshot the item ids present once hydration
   // settles, then render only what arrives after (the side chat's own turns).
@@ -257,13 +277,30 @@ export function SideChatPane({
   const interruptReady =
     !usesNativeSideChatFork(sessionHarness) || activeResponse?.state === "streaming";
 
-  // Keep the newest content in view. A side chat is short and non-virtualized,
-  // so a bottom sentinel scrolled on each change is enough.
   const transcriptRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [bubbles.length, activeResponse]);
+  const followLatest = useRef(true);
+  const historyAnchor = useRef<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const transcript = transcriptRef.current;
+    if (historyAnchor.current) {
+      if (!loadingMoreHistory && transcript) {
+        const { top, height } = historyAnchor.current;
+        transcript.scrollTop = top + transcript.scrollHeight - height;
+        historyAnchor.current = null;
+      }
+    } else if (!showFullHistory || followLatest.current) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
+  }, [bubbles, activeResponse, loadingMoreHistory, showFullHistory]);
+
+  const loadEarlier = () => {
+    const transcript = transcriptRef.current;
+    if (!transcript || loadingMoreHistory) return;
+    followLatest.current = false;
+    historyAnchor.current = { top: transcript.scrollTop, height: transcript.scrollHeight };
+    void useChatStore.getState().loadMoreHistory(childId);
+  };
 
   const loadFailed = !pending && conversationLoadError !== null && bubbles.length === 0;
   const isEmpty = bubbles.length === 0 && !loadingConversation && !loadFailed && !showsWorking;
@@ -291,7 +328,25 @@ export function SideChatPane({
   return (
     <ConversationScopeContext.Provider value={childId}>
       <div className="side-chat-backdrop flex h-full min-h-0 flex-col">
-        <div ref={transcriptRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4">
+        <div
+          ref={transcriptRef}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4"
+          onScroll={(event) => {
+            if (historyAnchor.current) return;
+            const el = event.currentTarget;
+            followLatest.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          }}
+        >
+          {showFullHistory && hasMoreHistory && (
+            <Button
+              variant="ghost"
+              className="mb-4 shrink-0"
+              disabled={loadingMoreHistory}
+              onClick={loadEarlier}
+            >
+              {loadingMoreHistory ? "Loading earlier messages…" : "Load earlier messages"}
+            </Button>
+          )}
           {loadFailed ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
               <TriangleAlertIcon className="size-6 text-muted-foreground" />

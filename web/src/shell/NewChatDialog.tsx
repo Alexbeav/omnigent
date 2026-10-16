@@ -2111,7 +2111,13 @@ export function resetLandingDraft(): void {
   writeLandingDraft(null);
 }
 
-export function NewChatLandingScreen() {
+export function NewChatLandingScreen({
+  onPaneNavigate,
+  autoFocus = true,
+}: {
+  onPaneNavigate?: (id: string, previous?: string) => void;
+  autoFocus?: boolean;
+} = {}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -5356,6 +5362,10 @@ export function NewChatLandingScreen() {
       if (localConv === null) return;
       const stillOnTempRoute = stillViewingLocalSession(localConv.tempConvId);
       const wasViewing = removeLocalConversation(localConv.tempConvId);
+      if (onPaneNavigate) {
+        onPaneNavigate("new", localConv.tempConvId);
+        return;
+      }
       // Gated on `wasViewing` (not `onScreenRef` — the landing already unmounted).
       if (wasViewing && stillOnTempRoute) {
         navigate(returnToCanvas ? { pathname: "/", search: `?${searchParams.toString()}` } : "/");
@@ -5587,7 +5597,10 @@ export function NewChatLandingScreen() {
             // real host (null for a sandbox create).
             hostId: sandboxSelected ? null : selectedHostId,
           });
-          if (localConv !== null) navigate(sessionLocation(localConv.tempConvId));
+          if (localConv !== null) {
+            if (onPaneNavigate) onPaneNavigate(localConv.tempConvId);
+            else navigate(sessionLocation(localConv.tempConvId));
+          }
         } catch {
           /* non-fatal: the response still opens the server session */
         }
@@ -5846,10 +5859,15 @@ export function NewChatLandingScreen() {
           files,
           localConv.pendingMsgTempId,
           skill,
-          returnToCanvas ? (_to, options) => navigate(sessionLocation(data.id), options) : navigate,
+          onPaneNavigate
+            ? () => {}
+            : returnToCanvas
+              ? (_to, options) => navigate(sessionLocation(data.id), options)
+              : navigate,
           () => stillViewingLocalSession(tempConvId),
           localProject,
         );
+        if (onPaneNavigate) onPaneNavigate(data.id, tempConvId);
         void queryClient.refetchQueries({ queryKey: ["conversations"] });
       } else {
         // Server-first: a pending custom agent (or no client cache in tests).
@@ -5857,7 +5875,8 @@ export function NewChatLandingScreen() {
         recordOptimisticTitle(data.id, initialPrompt);
         void queryClient.refetchQueries({ queryKey: ["conversations"] });
         setPendingInitialPrompt(data.id, { text: initialPrompt, skill, files });
-        if (onScreenRef.current && window.location.href === createLocation) {
+        if (onPaneNavigate) onPaneNavigate(data.id);
+        else if (onScreenRef.current && window.location.href === createLocation) {
           navigate(sessionLocation(data.id));
         }
       }
@@ -6545,7 +6564,7 @@ export function NewChatLandingScreen() {
                 placeholder: pillSkills.length > 0 ? "" : placeholderText,
                 "aria-label": placeholderText,
                 rows: 1,
-                autoFocus: !isMobileViewport,
+                autoFocus: autoFocus && !isMobileViewport,
                 "data-testid": "new-chat-landing-input",
               }}
               slots={{

@@ -1302,7 +1302,7 @@ export interface ChatActions {
    * No-ops when `hasMoreHistory` is false, `loadingMoreHistory` is true,
    * or there is no active conversation / oldest-item cursor yet.
    */
-  loadMoreHistory: () => Promise<void>;
+  loadMoreHistory: (conversationId?: string) => Promise<void>;
   /** Flash a bubble briefly; rapid calls reschedule so the latest target wins. */
   flashUserMessage: (itemId: string) => void;
   /** Queue an "@"-mention chip into the active composer from outside it. */
@@ -3347,9 +3347,11 @@ export const useChatStore = create<ChatState>((_rootSet, get) => ({
     }
   },
 
-  loadMoreHistory: async () => {
+  loadMoreHistory: async (targetId) => {
+    const source = targetId === undefined ? get() : setterForState(targetId);
+    if (!source) return;
     const { conversationId, oldestItemId, loadingMoreHistory, hasMoreHistory, historyGeneration } =
-      get();
+      source;
     if (!conversationId || !oldestItemId || loadingMoreHistory || !hasMoreHistory) return;
     // Pin the originating conversation: this page belongs to it, and it may be
     // backgrounded before the fetch lands. Resolving the target afterwards would

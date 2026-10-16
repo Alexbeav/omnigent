@@ -221,7 +221,9 @@ to switch, or press Escape to cancel.
 the external-link button to open a session in a separate browser window.
 The hovered half shows a blurred, blue-outlined split preview. There is no separate window drop indicator. A chat header or sidebar row released outside the viewport can request a new window.
 Drag either divider, or focus it and use Left/Right arrows, to resize its two adjacent chats. Both dividers work with the primary chat on the left, in the middle or on the right.
-Click or focus a chat to make it active. A plain sidebar session click replaces only that pane, preserving the other chats and divider positions. Choosing an already-open chat focuses it. Mobile keeps ordinary single-chat navigation, and modified clicks still open tabs. Escape cancels a drag. `panes` and `paneOrder` preserve the layout without changing the primary route during reordering. A pane's model, reasoning, permission and host controls belong to that pane.
+Click or focus a chat to make it active. A plain sidebar session click replaces only that pane, preserving the other chats and divider positions. Choosing an already-open chat focuses it. Mobile keeps ordinary single-chat navigation, and modified clicks still open tabs. Escape cancels a drag. `panes` and `paneOrder` preserve the layout without changing the primary route during reordering. The route and full shared toolbar follow the selected chat. Share, session menus, agent information, Terminal, and Workspace actions target it. A pane's model, reasoning, permission and host controls belong to that pane. Load earlier messages reads that pane's history without changing the selection.
+
+Starting a session from a project button or menu, sidebar New session, shortcut, or command palette replaces only the selected slot. Other chats keep their drafts and widths. Creation that completes in the background fills its original slot without changing the current selection. A failed creation restores its unsent prompt.
 
 **Child chats:** expand the child-chat list beneath the selected session in
 the sidebar, then choose a child. The Agents panel still shows the full tree.
@@ -252,7 +254,10 @@ plain `uv run pytest`, which starts a private server for the test.
   drives both dividers by pointer and keyboard with the primary on the left, in the middle and on the right.
   Manually open three chats, keep a different draft and scroll position in each, resize both adjacent pairs,
   use the half-pane split preview, replace the active chat through the sidebar, and use popout. At a viewport below 768 pixels, only
-  the primary chat must remain visible.
+  the selected chat must remain visible.
+  `tests/browser_ui/chat/test_pane_session_controls.py::test_active_pane_toolbar_and_project_creation_keep_other_chats`
+  covers selected-session Share and Workspace controls, Terminal/Chat switching, project creation, background completion and failure,
+  plus sidebar, shortcut and palette creation. `web/src/lib/routing.test.tsx` covers plain and rebased navigation interception.
 
 - **`pin`:**
   `tests/e2e_ui/sessions/test_sidebar_pin_unpin.py::test_unpin_moves_session_back_to_recent`

@@ -3,10 +3,14 @@
 import json
 import re
 
+import pytest
 from playwright.sync_api import Page, Route, expect
 
+from tests._helpers.picker_routes import OWN_AGENTS
 from tests.browser_ui.chat.session_contract import (
+    ChatSessionContract,
     _ChatSseStream,
+    install_chat_session_routes,
     list_payload,
     model_option,
     session_status_event,
@@ -28,6 +32,17 @@ def test_each_pane_changes_its_own_model_effort_and_permissions(
     changes = []
     for vendor in ("codex", "claude"):
         session_id = f"pane-{vendor}"
+        install_chat_session_routes(
+            ChatSessionContract(
+                page,
+                chat.contract,
+                chat.stream,
+                session_id=session_id,
+                harness=chat.harness,
+                models=chat.models,
+                selected_model=chat.selected_model,
+            )
+        )
         models = [
             {
                 **model_option(
@@ -73,16 +88,29 @@ def test_each_pane_changes_its_own_model_effort_and_permissions(
         )
         chat.contract.json(f"/v1/sessions/{session_id}/items", list_payload([]))
         chat.contract.json(f"/v1/sessions/{session_id}/child_sessions", list_payload([]))
-        chat.contract.sse(f"/v1/sessions/{session_id}/stream")
 
+    chat.contract.json(
+        "/v1/hosts",
+        {
+            "hosts": [
+                {
+                    "host_id": chat.host_id,
+                    "name": "Browser host",
+                    "owner": "local",
+                    "status": "online",
+                    "configured_harnesses": {"codex-native": True, "claude-native": True},
+                }
+            ]
+        },
+    )
     chat.contract.json("/v1/sessions", list_payload(rows))
     page.set_viewport_size({"width": 1600, "height": 1000})
     page.goto(chat.url + "?panes=pane-codex,pane-claude")
-    primary = page.get_by_role("region", name="Primary chat")
-    primary.get_by_placeholder("Send a message…").fill("Keep the primary draft")
+    primary = page.locator(f'section[data-pane-id="{chat.session_id}"]')
+    primary.get_by_test_id("side-chat-input").fill("Keep the primary draft")
 
     for vendor in ("codex", "claude"):
-        pane = page.get_by_role("region", name=f"Chat: {vendor.title()} pane")
+        pane = page.locator(f'section[data-pane-id="pane-{vendor}"]')
         pane.get_by_test_id("side-chat-input").fill(f"Keep the {vendor} draft")
         expect(pane.get_by_test_id("composer-config-gear")).to_be_visible()
         expect(pane.get_by_test_id("composer-host-icon")).to_be_visible()
@@ -97,9 +125,7 @@ def test_each_pane_changes_its_own_model_effort_and_permissions(
         page.keyboard.press("Escape")
         page.keyboard.press("Escape")
         expect(page.get_by_test_id("composer-agent-menu")).to_have_count(0)
-        expect(primary.get_by_placeholder("Send a message…")).to_have_value(
-            "Keep the primary draft"
-        )
+        expect(primary.get_by_test_id("side-chat-input")).to_have_value("Keep the primary draft")
         expect(pane.get_by_test_id("side-chat-input")).to_have_value(f"Keep the {vendor} draft")
 
     assert changes == [
@@ -113,7 +139,7 @@ def test_each_pane_changes_its_own_model_effort_and_permissions(
     assert not chat.session_patches
     page.reload()
     for vendor in ("codex", "claude"):
-        pane = page.get_by_role("region", name=f"Chat: {vendor.title()} pane")
+        pane = page.locator(f'section[data-pane-id="pane-{vendor}"]')
         expect(pane.get_by_test_id("composer-agent-config-value")).to_contain_text(
             f"{vendor.title()} model b"
         )
@@ -135,6 +161,9 @@ def test_secondary_pane_queue_and_steer_stay_on_that_session(
     secondary_id = "pane-queue-steer"
     secondary_stream = _ChatSseStream()
     secondary_posts: list[dict] = []
+    install_chat_session_routes(
+        ChatSessionContract(page, chat.contract, chat.stream, session_id=secondary_id)
+    )
     secondary = {
         **chat._session(),
         "id": secondary_id,
@@ -176,7 +205,10 @@ def test_secondary_pane_queue_and_steer_stay_on_that_session(
             }
         },
     )
-    chat.contract.json(f"/v1/sessions/{secondary_id}", secondary)
+    live_status = {"value": "running"}
+    chat.contract.json(
+        f"/v1/sessions/{secondary_id}", lambda _: {**secondary, "status": live_status["value"]}
+    )
     chat.contract.json(f"/v1/sessions/{secondary_id}/items", list_payload([]))
     chat.contract.json(f"/v1/sessions/{secondary_id}/child_sessions", list_payload([]))
     chat.contract.route(re.compile(rf"^{session_url}/stream(?:\?.*)?$"), stream)
@@ -186,9 +218,9 @@ def test_secondary_pane_queue_and_steer_stay_on_that_session(
         secondary_stream.emit(session_status_event(secondary_id, "running", response_id="busy"))
         page.set_viewport_size({"width": 1400, "height": 900})
         page.goto(chat.url + f"?panes={secondary_id}")
-        pane = page.get_by_role("region", name="Chat: Queue and steer pane")
-        primary = page.get_by_role("region", name="Primary chat").get_by_placeholder(
-            "Send a message…"
+        pane = page.locator(f'section[data-pane-id="{secondary_id}"]')
+        primary = page.locator(f'section[data-pane-id="{chat.session_id}"]').get_by_test_id(
+            "side-chat-input"
         )
         primary.fill("Primary draft must remain")
         composer = pane.get_by_test_id("side-chat-input")
@@ -231,6 +263,7 @@ def test_secondary_pane_queue_and_steer_stay_on_that_session(
                 and request.url.endswith(f"/v1/sessions/{secondary_id}/events")
             )
         ):
+            live_status["value"] = "idle"
             secondary_stream.emit(session_status_event(secondary_id, "idle", response_id="busy"))
         for _ in range(50):
             if len(secondary_posts) == 2:
@@ -238,6 +271,7 @@ def test_secondary_pane_queue_and_steer_stay_on_that_session(
             page.wait_for_timeout(20)
         assert posted_texts() == ["Edited queued message", "Flush only after idle"]
 
+        live_status["value"] = "running"
         secondary_stream.emit(
             session_status_event(secondary_id, "running", response_id="steer-all")
         )
@@ -263,3 +297,211 @@ def test_secondary_pane_queue_and_steer_stay_on_that_session(
         assert not chat.contract.violations, chat.contract.violations
     finally:
         secondary_stream.close()
+
+
+@pytest.mark.parametrize("background,succeeds", [(False, True), (True, True), (True, False)])
+def test_active_pane_toolbar_and_project_creation_keep_other_chats(
+    page: Page, chat_session_contract, tmp_path, background, succeeds
+) -> None:
+    chat = chat_session_contract
+    chat.contract.base_url = chat.base_url.replace("127.0.0.1", "omnigent.localhost")
+
+    def deny_alias(route):
+        if route.request.resource_type in ("fetch", "xhr", "eventsource"):
+            chat.contract.violations.append(f"{route.request.method} {route.request.url}")
+            route.abort("blockedbyclient")
+        else:
+            route.continue_()
+
+    page.context.route(chat.base_url + "/**", deny_alias)
+    ids = (chat.session_id, "toolbar-left", "toolbar-right")
+    handles = []
+    for session_id in (*ids, "toolbar-created"):
+        handle = ChatSessionContract(
+            page,
+            chat.contract,
+            chat.stream,
+            session_id=session_id,
+            harness="pi-native",
+            agent_id="ag_pi_browser",
+        )
+        handle.update_session(
+            title=session_id,
+            permission_level=4,
+            project_id="browser-project",
+            labels={
+                "omni_project": "Browser project",
+                "omnigent.wrapper": "pi-native-ui",
+                "omnigent.ui": "terminal",
+            },
+        )
+        install_chat_session_routes(handle)
+        handles.append(handle)
+        chat.contract.json(f"/v1/sessions/{session_id}/policies", list_payload([]))
+        chat.contract.json(f"/v1/sessions/{session_id}/owner", {"owner": "local"})
+        chat.contract.json(
+            f"/v1/sessions/{session_id}/permissions", {"permissions": [], "next_cursor": None}
+        )
+    chat.contract.json(
+        "/v1/info",
+        {
+            "accounts_enabled": True,
+            "single_user": False,
+            "needs_setup": False,
+            "sharing_mode": "on",
+            "public_sharing_enabled": False,
+            "features": {},
+            "managed_sandboxes_enabled": False,
+            "smart_routing_enabled": False,
+        },
+    )
+    chat.contract.json("/v1/sessions", list_payload([handle._session() for handle in handles[:3]]))
+    chat.contract.json(
+        "/v1/sessions/projects",
+        [{"id": "browser-project", "name": "Browser project", "icon": None}],
+    )
+    chat.contract.json(
+        "/v1/agents",
+        list_payload(
+            [
+                {
+                    "id": "ag_pi_browser",
+                    "name": "pi-native-ui",
+                    "harness": "pi-native",
+                    "skills": [],
+                    "mcp_servers": [],
+                    "policies": [],
+                }
+            ]
+        ),
+    )
+    chat.contract.json(OWN_AGENTS, list_payload([]))
+    chat.contract.json("/v1/policy-registry", list_payload([]))
+    chat.contract.json(
+        "/v1/projects/browser-project",
+        {
+            "id": "browser-project",
+            "name": "Browser project",
+            "config": {
+                "host_id": chat.host_id,
+                "workspace": "/work/repo",
+                "agent_id": "ag_pi_browser",
+                "use_worktree": False,
+            },
+        },
+    )
+    chat.contract.json("/v1/skills", {"skills": []})
+    creates = []
+    held = []
+
+    def create(route):
+        if route.request.method != "POST":
+            route.fallback()
+            return
+        creates.append(route.request.post_data_json)
+        held.append(route)
+
+    chat.contract.route(re.compile(rf"^{re.escape(chat.base_url)}/v1/sessions(?:\?.*)?$"), create)
+    recent = json.dumps({chat.host_id: ["/work/repo"]})
+    page.add_init_script(
+        f"localStorage.setItem('omnigent:recent-workspaces', JSON.stringify({recent}))"
+    )
+    page.set_viewport_size({"width": 1800, "height": 1000})
+    page.goto(chat.url + "?panes=toolbar-left,toolbar-right")
+    panes = [page.locator(f'section[data-pane-id="{session_id}"]') for session_id in ids]
+    toolbar = page.get_by_test_id("active-pane-toolbar")
+    for index, pane in enumerate(panes):
+        pane.get_by_test_id("side-chat-input").fill(f"Draft {index}")
+        expect(toolbar).to_have_attribute("data-session-id", ids[index])
+        expect(toolbar).to_contain_text(ids[index])
+        with page.expect_request(
+            lambda request, session_id=ids[index]: request.url.endswith(
+                f"/v1/sessions/{session_id}/permissions"
+            )
+        ):
+            toolbar.get_by_role("button", name="Share session", exact=True).click()
+        expect(page.get_by_role("dialog", name="Share this session")).to_be_visible()
+        page.keyboard.press("Escape")
+        toolbar.get_by_role("button", name="Expand right panel", exact=True).click()
+        expect(page.get_by_role("complementary", name="Workspace")).to_have_attribute(
+            "data-session-id", ids[index]
+        )
+        toolbar.get_by_role("button", name="Collapse right panel", exact=True).click()
+        page.wait_for_timeout(400)
+    toolbar.get_by_role("button", name="Terminal view", exact=True).click()
+    expect(panes[2].get_by_test_id("side-chat-input")).to_be_hidden()
+    expect(panes[0].get_by_test_id("side-chat-input")).to_be_visible()
+    expect(panes[1].get_by_test_id("side-chat-input")).to_be_visible()
+    toolbar.get_by_role("button", name="Chat view", exact=True).click()
+    expect(panes[2].get_by_test_id("side-chat-input")).to_have_value("Draft 2")
+    panes[1].get_by_test_id("side-chat-input").click()
+    sizes = [pane.bounding_box()["width"] for pane in panes]
+    page.get_by_role("link", name="New session in Browser project", exact=True).click()
+    expect(page.locator('section[data-pane-id="new"]')).to_be_visible()
+    expect(page.locator("section[data-pane-id]")).to_have_count(3)
+    expect(panes[0].get_by_test_id("side-chat-input")).to_have_value("Draft 0")
+    expect(panes[2].get_by_test_id("side-chat-input")).to_have_value("Draft 2")
+    landing = page.get_by_test_id("new-chat-landing-input")
+    expect(landing).to_have_attribute("placeholder", "Start a new session in Browser project")
+    landing.fill("Create only in this pane")
+    with page.expect_request(
+        lambda request: request.method == "POST" and request.url.endswith("/v1/sessions")
+    ):
+        landing.press("Enter")
+    expect(page.get_by_text("Starting session…", exact=True)).to_be_visible()
+    if background:
+        panes[2].get_by_test_id("side-chat-input").click()
+        expect(toolbar).to_have_attribute("data-session-id", ids[2])
+    if not succeeds:
+        held[0].fulfill(status=500, json={"error": {"message": "Controlled create failure"}})
+        restored = page.locator('section[data-pane-id="new"]')
+        expect(restored.get_by_test_id("new-chat-landing-input")).to_have_value(
+            "Create only in this pane"
+        )
+        expect(toolbar).to_have_attribute("data-session-id", ids[2])
+        expect(page.locator("section[data-pane-id]")).to_have_count(3)
+        expect(panes[0].get_by_test_id("side-chat-input")).to_have_value("Draft 0")
+        expect(panes[2].get_by_test_id("side-chat-input")).to_have_value("Draft 2")
+        assert not any(handle.event_posts for handle in handles)
+        assert not chat.contract.violations, chat.contract.violations
+        return
+    with page.expect_request(
+        lambda request: (
+            request.method == "POST"
+            and request.url.endswith("/v1/sessions/toolbar-created/events")
+        )
+    ):
+        held[0].fulfill(json={"id": "toolbar-created"})
+    created = page.locator('section[data-pane-id="toolbar-created"]')
+    expect(created).to_be_visible()
+    expect(page.locator("section[data-pane-id]")).to_have_count(3)
+    expect(toolbar).to_have_attribute(
+        "data-session-id", ids[2] if background else "toolbar-created"
+    )
+    expect(panes[0].get_by_test_id("side-chat-input")).to_have_value("Draft 0")
+    expect(panes[2].get_by_test_id("side-chat-input")).to_have_value("Draft 2")
+    assert creates[0]["project_id"] == "browser-project"
+    assert len(handles[-1].event_posts) == 1
+    assert (
+        handles[-1].event_posts[0]["body"]["data"]["content"][0]["text"]
+        == "Create only in this pane"
+    )
+    assert abs(created.bounding_box()["width"] - sizes[1]) <= 1
+    page.screenshot(path=str(tmp_path / "active-toolbar-project-creation.png"), full_page=True)
+    for trigger in ("shortcut", "sidebar", "palette"):
+        panes[2].get_by_test_id("side-chat-input").click()
+        expect(toolbar).to_have_attribute("data-session-id", ids[2])
+        if trigger == "shortcut":
+            page.keyboard.press("Control+Alt+N")
+        elif trigger == "sidebar":
+            page.get_by_test_id("new-chat-button").click()
+        else:
+            page.keyboard.press("Control+k")
+            page.get_by_role("option", name="New chat", exact=True).click()
+        expect(page.locator('section[data-pane-id="new"]')).to_be_visible()
+        expect(page.locator("section[data-pane-id]")).to_have_count(3)
+        expect(panes[0].get_by_test_id("side-chat-input")).to_have_value("Draft 0")
+        expect(created).to_be_visible()
+        page.get_by_role("link", name="toolbar-right", exact=True).click()
+        expect(panes[2].get_by_test_id("side-chat-input")).to_have_value("Draft 2")
+    assert not chat.contract.violations, chat.contract.violations
