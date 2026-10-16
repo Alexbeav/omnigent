@@ -282,7 +282,7 @@ class Conversation:
 
 
 class AsyncUserInputQuestion(BaseModel):
-    """One Codex async question, without a native question id."""
+    """One asynchronous question, without a native question id."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
     title: str = Field(min_length=1)

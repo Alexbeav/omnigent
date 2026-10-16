@@ -245,3 +245,47 @@ question/answer delivery, duplicate suppression and working prediction requests 
 both providers. NAS Compose commit `840a0b2733180f651dc87b9e988b90009caedb8c` is pushed;
 the unrelated monitoring edit is preserved. Current operational state and backup
 metadata remain in the homelab state note and host-upgrade runbook.
+
+## Question controls follow-up, 2026-10-16
+
+The failed Codex test after moving this chat to Pegasus came from a host-version
+mismatch. Pegasus still ran `38f30aa96`, whose forwarder drops native asynchronous
+question metadata. The current fork already retains it, and server `dc94d2137`
+already understands the structured message and ordinary reply contracts.
+
+Native Claude Code uses its existing `AskUserQuestion` hook. New regressions
+exercise selections, custom answers, denial and empty responses in all three
+permission modes. Cline CLI 3.0.72 does not connect its native question callback
+to ACP, so the framework now exposes `sys_ask_user` through the existing tool
+relay. It returns an acknowledgement after question persistence; answers arrive
+as ordinary user messages. Existing policy decisions are still enforced. No
+server protocol change or permission-as-answer workaround is needed.
+
+The shared asynchronous card is now labelled **Questions**, not **Codex question**.
+Its ten browser-contract journeys cover Codex, Cline and native Claude in full
+chat and split panes, including custom answers and source-chat routing after
+focus changes. Native hooks, forwarding, server replies, tool registration,
+policy handling, retained MCP operations and component tests also passed.
+These isolated checks do not claim a fresh live-provider round trip on Pegasus.
+
+The pinned Pegasus candidate is staged separately at
+`/home/alexbeav/Projects/omnigent-host-question-controls/.venv-host`.
+The systemd user service's question-controls drop-in selects that interpreter
+for its next start and preserves the existing silent-start unit and PATH
+drop-in. The old running service and active chats were not stopped.
+After all Pegasus WSL chats are idle, activate it from a Pegasus WSL terminal:
+
+```bash
+env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user restart omnigent-host.service
+```
+
+Resume a chat and ask for two structured questions. For Codex use the async
+question tool, for Claude use `AskUserQuestion`, and for Cline use `sys_ask_user`.
+Choose one suggested option and one custom answer, focus a different pane, then
+Submit. Both answers must reach only the source chat and leave ordinary drafts
+unchanged. Old plain-text questions do not gain controls.
+
+The NAS server was not changed in this follow-up: Pegasus has no working SSH
+route to it, and the remote deployment helper could not be tasked through this
+session's child-only messaging scope. The generic heading awaits a later web
+deployment; the existing server already supports the functional host changes.

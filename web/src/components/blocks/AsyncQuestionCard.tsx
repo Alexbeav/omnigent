@@ -129,9 +129,9 @@ export function AsyncQuestionCard({ itemId, prompt }: { itemId: string; prompt: 
       data-testid="async-question-card"
       data-source-item-id={itemId}
       className="my-3 rounded-md border p-3 text-sm"
-      aria-label="Codex question"
+      aria-label="Questions"
     >
-      <p className="mb-2 font-medium">Codex question</p>
+      <p className="mb-2 font-medium">Questions</p>
       {shown ? (
         <>
           <p role="status">

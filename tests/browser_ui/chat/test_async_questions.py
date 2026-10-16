@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page, Route, expect
+from playwright.sync_api import Page, Request, Route, expect
 
 from tests.browser_ui.chat.session_contract import (
     ChatSessionContract,
@@ -20,9 +20,16 @@ from tests.browser_ui.chat.session_contract import (
 
 
 @pytest.mark.parametrize(
-    ("pane_count", "source_index"),
-    [(1, 0), (3, 0), (3, 1), (3, 2)],
-    ids=["full-chat", "pane-1", "pane-2", "pane-3"],
+    ("pane_count", "source_index", "harness"),
+    [
+        (1, 0, "codex"),
+        (3, 0, "codex"),
+        (3, 1, "codex"),
+        (3, 2, "codex"),
+        (1, 0, "acp:cline"),
+        (3, 1, "acp:cline"),
+    ],
+    ids=["full-chat", "pane-1", "pane-2", "pane-3", "cline-full-chat", "cline-pane"],
 )
 def test_async_questions_survive_reload_and_reply_to_the_source_chat(
     page: Page,
@@ -30,6 +37,7 @@ def test_async_questions_survive_reload_and_reply_to_the_source_chat(
     tmp_path: Path,
     pane_count: int,
     source_index: int,
+    harness: str,
 ) -> None:
     # LAN HTTP has no SubtleCrypto. Exercise that boundary in the built SPA too.
     page.add_init_script("Object.defineProperty(window.crypto, 'subtle', { value: undefined })")
@@ -47,6 +55,7 @@ def test_async_questions_survive_reload_and_reply_to_the_source_chat(
         rows = []
         sources = []
         for index, handle in enumerate(chats):
+            handle.harness = harness
             handle.update_session(title=f"Question chat {index + 1}")
             source = message_item(
                 f"source-{handle.session_id}",
@@ -94,6 +103,7 @@ def test_async_questions_survive_reload_and_reply_to_the_source_chat(
             else page.locator(f'section[data-pane-id="{source_chat.session_id}"]')
         )
         card = root.get_by_test_id("async-question-card")
+        expect(card.get_by_text("Questions", exact=True)).to_be_visible()
         original = root.get_by_text(
             f"Original native question text {source_index + 1}.", exact=True
         )
@@ -200,3 +210,121 @@ def test_async_questions_survive_reload_and_reply_to_the_source_chat(
         assert len(posted) == 1
         assert all(not handle.event_posts for handle in chats)
         page.screenshot(path=str(tmp_path / "question-answer-restored.png"))
+
+
+@pytest.mark.parametrize(
+    ("pane_count", "source_index"),
+    [(1, 0), (3, 0), (3, 1), (3, 2)],
+    ids=["full-chat", "pane-1", "pane-2", "pane-3"],
+)
+def test_native_claude_questions_reply_through_the_source_hook(
+    page: Page,
+    chat_session_contract: ChatSessionContract,
+    tmp_path: Path,
+    pane_count: int,
+    source_index: int,
+) -> None:
+    """A native hook answer remains separate from drafts and ordinary messages."""
+    chat = chat_session_contract
+    page.emulate_media(color_scheme="dark")
+    page.set_viewport_size({"width": 1800, "height": 1100})
+    with ExitStack() as cleanup:
+        chats = [chat]
+        for index in range(1, pane_count):
+            stream = _ChatSseStream()
+            cleanup.callback(stream.close)
+            sibling = ChatSessionContract(
+                page, chat.contract, stream, session_id=f"claude-question-pane-{index}"
+            )
+            install_chat_session_routes(sibling)
+            chats.append(sibling)
+        for handle in chats:
+            handle.harness = "claude-native"
+            handle.set_items(
+                [
+                    message_item(
+                        "waiting-" + handle.session_id,
+                        "assistant",
+                        "Waiting for input.",
+                        response_id="native-question-turn",
+                    )
+                ]
+            )
+        chat.contract.json("/v1/sessions", list_payload([c._session() for c in chats]))
+        source = chats[source_index]
+        elicitation_id = "elicit_claude_browser_questions"
+        resolve = f"/v1/sessions/{source.session_id}/elicitations/{elicitation_id}/resolve"
+
+        def resolved(_request: Request) -> dict[str, object]:
+            source.update_session(pending_elicitations=[])
+            return {}
+
+        chat.contract.json(resolve, resolved, method="POST")
+        page.goto(chat.url)
+        for count, sibling in enumerate(chats[1:], start=2):
+            page.get_by_role("combobox", name="Add chat pane").select_option(sibling.session_id)
+            expect(page.locator("section[data-pane-id]")).to_have_count(count)
+        source.wait_for_stream()
+        event = {
+            "event": "response.elicitation_request",
+            "data": {
+                "elicitation_id": elicitation_id,
+                "response_id": "native-question-turn",
+                "params": {
+                    "mode": "form",
+                    "message": "Claude has two questions",
+                    "phase": "permission_request",
+                    "policy_name": "claude_native_permission",
+                    "content_preview": "",
+                    "requestedSchema": {},
+                    "ask_user_question": {
+                        "questions": [
+                            {
+                                "question": "Which colour?",
+                                "options": [{"label": "Blue"}, {"label": "Green"}],
+                                "multiSelect": False,
+                            },
+                            {
+                                "question": "Which test mode?",
+                                "options": [{"label": "Fast"}, {"label": "Thorough"}],
+                                "multiSelect": False,
+                            },
+                        ]
+                    },
+                },
+            },
+        }
+        source.update_session(pending_elicitations=[{"type": event["event"], **event["data"]}])
+        source.emit(event)
+        root = (
+            page
+            if pane_count == 1
+            else page.locator(f'section[data-pane-id="{source.session_id}"]')
+        )
+        card = root.get_by_test_id("approval-card")
+        expect(card.get_by_test_id("ask-user-question-form")).to_be_visible()
+        composer = (
+            root.get_by_label("Message the agent")
+            if pane_count == 1
+            else root.get_by_test_id("side-chat-input")
+        )
+        composer.fill("Keep this independent draft")
+        card.get_by_label("Blue", exact=True).check()
+        card.get_by_role("button", name="Next").click()
+        card.get_by_placeholder("Type something").fill("My own test mode")
+        if pane_count == 3:
+            other = chats[(source_index + 1) % pane_count]
+            page.locator(f'section[data-pane-id="{other.session_id}"]').get_by_test_id(
+                "side-chat-input"
+            ).fill("Other draft")
+        page.screenshot(path=str(tmp_path / "native-claude-questions.png"))
+        with page.expect_request(
+            lambda r: r.method == "POST" and r.url.endswith(resolve)
+        ) as submitted:
+            card.get_by_role("button", name="Submit").click()
+        body = submitted.value.post_data_json
+        assert body["action"] == "accept"
+        assert body["content"] == {"Which colour?": "Blue", "Which test mode?": "My own test mode"}
+        expect(composer).to_have_value("Keep this independent draft")
+        expect(card.get_by_role("button", name="Submit")).to_have_count(0)
+        assert all(not c.event_posts for c in chats)
