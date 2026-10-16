@@ -3,9 +3,27 @@
 Status: v0.18.0 server deployed on 2026-10-16 after Alex approved the stable target.
 The isolated branch is `upgrade/v0.18-primary` in `~/Projects/omnigent-upgrade`.
 Qualification and deployment results are recorded below.
-The deployed server keeps the qualified `38f30aa96` backend with UI source `23fa26945`, preserving [the primary platform work](primary-platform-plan.md).
+The upgrade records below describe earlier snapshots. The current complete-source
+deployment and owner setup steps are recorded in [the primary platform plan](primary-platform-plan.md#suggested-replies-2026-10-16).
 
 ## Contribution status checked on 2026-10-16
+
+The chat-link context menu is submitted as [PR #10492](https://github.com/omnigent-ai/omnigent/pull/10492),
+closing [feature issue #10490](https://github.com/omnigent-ai/omnigent/issues/10490).
+Branch `contrib/chat-link-menu`, head `f4dc0ec52`, starts from upstream `ce8066dd7`;
+it contains only the link menu, shared opening helpers, focused tests and feature-map update.
+It passes 95 component checks, eight Chromium browser-contract journeys, 266 feature-map checks,
+build, types, documentation links and applicable pre-commit hooks.
+The four new menu regressions fail against unchanged upstream code.
+The browser journeys cover actual clipboard writes, new tabs and popup fallback;
+desktop routing uses a simulated bridge and does not establish native OS browser behavior.
+The Demo section embeds the sanitized capture uploaded through GitHub's PR editor.
+The PR is ready for review; maintainer approval is required. No demo media is committed.
+Private evidence is under
+`~/.local/state/omnigent-investigations/link-menu-upstream/`.
+Maintainer [PR #9910](https://github.com/omnigent-ai/omnigent/pull/9910) overlaps in the renderer,
+but adds Copy path rather than the browser choices or navigable file-preview URL.
+Both the issue and PR describe that overlap for rebase coordination.
 
 Child-chat sidebar visibility is submitted as [PR #10431](https://github.com/omnigent-ai/omnigent/pull/10431), closing [feature issue #10430](https://github.com/omnigent-ai/omnigent/issues/10430).
 Its isolated branch `contrib/sidebar-child-chats` starts at upstream snapshot `b6119bb8470624d22cc142691871dba155e75063`.
