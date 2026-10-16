@@ -574,13 +574,22 @@ an explicitly incomplete matrix. No Mac tool installation, provider turn or
 compiler run was made. No model-efficiency ranking or completed review gauntlet
 is claimed.
 
+The final partial report records six qualified, unscored outputs: four Cline and
+one each at verified GPT low/high. Nine work cells and all ten reviews remain
+unrun. All 16 benchmark chats are stopped and archived, transcripts exported,
+and all 82 receipt-matched residual processes are gone, including 75 directly
+signalled PIDs. The shared host and coordinator remain running. Windows had
+5.48 GiB available, below the manager's 8 GiB gate; no cache/VM changes or
+unrelated process kills were made. The complete private report is
+`omnigent-benchmark-20261017/results/final-partial/FINAL-MATRIX-SO-FAR.md`.
+
 Focused contributions were ported to current upstream without fork-only docs or
 pane dependencies:
 
 | Contribution | Publication and validation |
 | --- | --- |
 | ACP per-chat MCP launch settings | Draft [PR #10561](https://github.com/omnigent-ai/omnigent/pull/10561), branch `contrib/acp-mcp-launch-settings`, source `bc9c3a800`. 166 tests and applicable pre-commit hooks passed. |
-| Structured question controls | Branch `contrib/structured-question-controls` at `3ebc6ad4a`, tracked by [issue #10562](https://github.com/omnigent-ai/omnigent/issues/10562). 1,179 backend/E2E/map checks, 657 frontend tests and six browser journeys passed. The UI PR awaits real GitHub demo attachment URLs; reviewed screenshots and the complete PR body remain outside Git. |
+| Structured question controls | Draft [PR #10575](https://github.com/omnigent-ai/omnigent/pull/10575), branch `contrib/structured-question-controls` at `3ebc6ad4a`, closes [issue #10562](https://github.com/omnigent-ai/omnigent/issues/10562). 1,179 backend/E2E/map checks, 657 frontend tests and six browser journeys passed. All three reviewed screenshots are embedded as real GitHub attachments, with anonymous downloads verified byte-for-byte. No media was committed. |
 | Link-menu browser fixture correction | [PR #10492](https://github.com/omnigent-ai/omnigent/pull/10492), source `d4f45d5b0`. Both previously failing browser cases pass after fixing the response fixture and strengthening the page-error assertion. |
 | ACP permission-mode rebase | [PR #7375](https://github.com/omnigent-ai/omnigent/pull/7375), source `50148ff45`. 233 focused checks and applicable hooks passed before an exact-lease push. |
 
