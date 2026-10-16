@@ -57,6 +57,7 @@ Claude's real hook entry point with a mocked HTTP server is covered by
 - A suggested choice is not user authorization until Submit.
 - Native blocking questions, Claude hooks, and MCP questions use their existing approval cards and response channels.
 - Cline's ACP permission choices cannot carry a question answer; its fallback uses the Omnigent tool connection.
+- Cline CLI 3.0.72 needs the private MCP settings launch in [the ACP guide](../docs/AGENT_YAML_SPEC.md#custom-acp-agents). A ready relay log alone does not prove that the agent loaded the tools.
 - A host update is required even when the web server already has the question controls. After moving a chat to an older host, request a fresh question only after upgrading its runtime.
 - Plain prose, generic tool output, and old question messages without structured data do not gain controls.
 - Browser fixtures prove the real renderer and HTTP/SSE client boundaries, but do not prove delivery to a live provider.

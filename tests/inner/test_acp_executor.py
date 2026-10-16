@@ -1787,7 +1787,29 @@ def test_harness_wrap_reads_env_passthrough_names(monkeypatch: pytest.MonkeyPatc
 # the client for permission, and — once the client answers — finishes the tool
 # card, streams closing text, and returns the prompt with a stop reason + usage.
 _FAKE_ACP_AGENT = r"""
-import sys, json
+import sys, json, asyncio, os
+
+mcp_settings = None
+if "--mcp-settings" in sys.argv:
+    with open(sys.argv[sys.argv.index("--mcp-settings") + 1]) as f:
+        mcp_settings = json.load(f)
+
+async def probe_mcp():
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    spec = mcp_settings["mcpServers"]["omnigent"]
+    async with stdio_client(StdioServerParameters(
+        command=spec["command"], args=spec["args"], env={**os.environ, **spec["env"]}
+    )) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            listed = await session.list_tools()
+            assert [t.name for t in listed.tools] == ["sys_ask_user"]
+            result = await session.call_tool("sys_ask_user", {"questions": [
+                {"title": "Which colour?", "options": ["Blue", "Green"]}
+            ]})
+            assert not result.isError
+            assert "fixture-question-posted" in str(result.content)
 
 def send(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
@@ -1817,6 +1839,8 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "fake-session-1"}})
     elif method == "session/prompt":
         sid = msg["params"]["sessionId"]
+        if mcp_settings is not None:
+            asyncio.run(probe_mcp())
         chunk(sid, "agent_thought_chunk", "planning")
         chunk(sid, "agent_message_chunk", "Hello ")
         update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "shell",
@@ -1841,13 +1865,34 @@ for line in sys.stdin:
 
 
 @pytest.mark.asyncio
-async def test_end_to_end_against_fake_acp_agent(tmp_path: Path) -> None:
+@pytest.mark.parametrize("file_mcp", [False, True])
+async def test_end_to_end_against_fake_acp_agent(tmp_path: Path, file_mcp: bool) -> None:
     agent_path = tmp_path / "fake_acp_agent.py"
     agent_path.write_text(_FAKE_ACP_AGENT)
     command = shlex.join([sys.executable, str(agent_path)])
+    if file_mcp:
+        command += " --mcp-settings {omnigent_mcp_config}"
 
     ex = AcpExecutor(AcpAgentConfig(command=command, name="Fake"))
     approvals: list[tuple[str, dict]] = []
+    posted: list[tuple[str, dict]] = []
+
+    async def tool_executor(name: str, args: dict) -> dict:
+        posted.append((name, args))
+        return {"status": "fixture-question-posted"}
+
+    tools = (
+        [
+            {
+                "name": "sys_ask_user",
+                "description": "Ask structured questions",
+                "parameters": {"type": "object"},
+            }
+        ]
+        if file_mcp
+        else []
+    )
+    ex._tool_executor = tool_executor
 
     async def elicit(tool_name: str, tool_input: dict) -> bool:
         approvals.append((tool_name, tool_input))
@@ -1857,10 +1902,25 @@ async def test_end_to_end_against_fake_acp_agent(tmp_path: Path) -> None:
 
     events = []
     try:
-        async for ev in ex.run_turn([{"role": "user", "content": "hi"}], [], "you are a bot"):
+        async for ev in ex.run_turn([{"role": "user", "content": "hi"}], tools, "you are a bot"):
             events.append(ev)
+        if file_mcp:
+            assert ex._mcp._bridge_dir is not None
+            settings = ex._mcp._bridge_dir / "mcp-settings.json"
+            assert settings.stat().st_mode & 0o777 == 0o600
+            assert "{omnigent_mcp_config}" in ex._argv[-1]
     finally:
         await ex.close()
+    if file_mcp:
+        assert not settings.exists()
+        assert posted == [
+            (
+                "sys_ask_user",
+                {"questions": [{"title": "Which colour?", "options": ["Blue", "Green"]}]},
+            )
+        ]
+    else:
+        assert posted == []
 
     # The permission request surfaced through the elicitation handler.
     assert approvals == [("shell", {"command": "echo hi"})]
@@ -1916,6 +1976,29 @@ def test_mcp_disabled_returns_empty() -> None:
 def test_mcp_no_executor_returns_empty() -> None:
     m = OmnigentAcpMcp("t")
     assert m.session_new_servers(tools=[{"name": "x"}], tool_executor=None, loop=None) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disabled", ["per-agent", "global", "missing-tools"])
+async def test_mcp_settings_command_requires_an_enabled_relay(
+    monkeypatch: pytest.MonkeyPatch, disabled: str
+) -> None:
+    if disabled == "global":
+        monkeypatch.setenv("OMNIGENT_ACP_MCP", "0")
+    ex = AcpExecutor(
+        AcpAgentConfig(
+            command="agent --mcp-config={omnigent_mcp_config}",
+            omnigent_mcp=disabled != "per-agent",
+        )
+    )
+    ex._tool_executor = AsyncMock()
+    ex._omnigent_tools = [] if disabled == "missing-tools" else [{"name": "probe"}]
+    try:
+        with pytest.raises(RuntimeError, match="MCP relay is unavailable"):
+            await ex._start_process()
+        assert ex._proc is None
+    finally:
+        await ex.close()
 
 
 def test_mcp_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:

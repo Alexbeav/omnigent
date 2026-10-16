@@ -13,6 +13,10 @@ conversation, agent, or native request identity is accepted.
 
 This is the question path for Cline over ACP. The installed Cline CLI 3.0.72 does
 not register its SDK's native `ask_question` callback in its ACP adapter. Its
+ACP adapter also ignores the per-session MCP server list. Configure its
+[private MCP settings launch](AGENT_YAML_SPEC.md#custom-acp-agents) before testing
+`sys_ask_user`: creating the relay alone does not establish that Cline loaded it.
+The local runtime keeps that settings file scoped to the calling chat. Its
 **Allow once**, **Allow always**, and **Reject** options remain permission
 decisions. They are not repurposed as question answers. Native Claude Code keeps
 its `AskUserQuestion` hook and returns selected or custom answers through the
