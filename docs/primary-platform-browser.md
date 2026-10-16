@@ -49,9 +49,12 @@ No browser cookies or provider authentication values were copied into this setup
 Install [FoxPilot from Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/foxpilot/) in the usual Firefox profile.
 Keep that Firefox window open.
 Start a fresh Codex, Claude Code or Cline chat on Eagle WSL so it loads the new MCP configuration.
+Open FoxPilot's options and select Automation Mode.
+Turn on Enable Automation Mode and accept Firefox's permission to access all websites once.
+This saved grant removes the per-domain permission requests and enables clicks, typing, snapshots and screenshots.
+Turning Automation Mode off removes the all-websites grant again.
 Ask the chat to use FoxPilot to open `https://example.com` and read its text.
-When Firefox requests access to that domain, grant it in the browser.
-For clicks, typing and screenshots, enable Automation Mode in the FoxPilot options.
+If Automation Mode stays off, reading each new domain requires its own browser permission.
 
 FoxPilot tools include `list-browsers`, `open-browser-tab`, `get-tab-web-content`, `take-snapshot`, `click-element` and `fill-element`.
 The Omnigent `browser_*` tools still target the desktop app's embedded browser.
