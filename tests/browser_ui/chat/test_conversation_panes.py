@@ -144,6 +144,9 @@ def test_three_chat_columns_resize_independently(
         secondary_ids[1],
     ]
 
+    expect(
+        page.get_by_role("region", name="Primary chat").get_by_role("separator")
+    ).to_be_visible()
     panes = page.locator("[data-testid=conversation-panes] > section")
     expect(panes).to_have_count(3)
     expect(page.get_by_role("region", name="Chat: Browser pane 2")).to_be_visible()
@@ -171,20 +174,36 @@ def test_three_chat_columns_resize_independently(
     assert not chat.event_posts
     expect(primary).to_have_value("Draft for the first chat")
     expect(third).to_have_value("Draft for the third chat")
-    before = page.get_by_role("region", name="Chat: Browser pane 2").bounding_box()
-    assert before is not None
 
-    page.get_by_role("separator", name="Resize Chat: Browser pane 2").press("ArrowLeft")
-    after = page.get_by_role("region", name="Chat: Browser pane 2").bounding_box()
-    assert after is not None and after["width"] > before["width"]
-    separator = page.get_by_role("separator", name="Resize Chat: Browser pane 2").bounding_box()
-    assert separator is not None
-    page.mouse.move(separator["x"] + 2, separator["y"] + 150)
-    page.mouse.down()
-    page.mouse.move(separator["x"] - 30, separator["y"] + 150, steps=5)
-    page.mouse.up()
-    dragged = page.get_by_role("region", name="Chat: Browser pane 2").bounding_box()
-    assert dragged is not None and dragged["width"] > after["width"]
+    def resize_boundaries() -> None:
+        expect(ordered_panes.first.get_by_role("separator")).to_have_count(0)
+        for index in (1, 2):
+            handle = ordered_panes.nth(index).get_by_role("separator")
+            expect(handle).to_be_visible()
+            before = ordered_panes.evaluate_all(
+                "panes => panes.map(pane => pane.getBoundingClientRect().width)"
+            )
+            handle.press("ArrowLeft")
+            after = ordered_panes.evaluate_all(
+                "panes => panes.map(pane => pane.getBoundingClientRect().width)"
+            )
+            for slot in range(3):
+                delta = -20 if slot == index - 1 else 20 if slot == index else 0
+                assert abs(after[slot] - before[slot] - delta) <= 2
+            separator = handle.bounding_box()
+            assert separator is not None
+            page.mouse.move(separator["x"] + 2, separator["y"] + 150)
+            page.mouse.down()
+            page.mouse.move(separator["x"] + 17, separator["y"] + 150, steps=5)
+            page.mouse.up()
+            dragged = ordered_panes.evaluate_all(
+                "panes => panes.map(pane => pane.getBoundingClientRect().width)"
+            )
+            for slot in range(3):
+                delta = 15 if slot == index - 1 else -15 if slot == index else 0
+                assert abs(dragged[slot] - after[slot] - delta) <= 2
+
+    resize_boundaries()
     assert parse_qs(urlparse(page.url).query)["panes"] == [",".join(secondary_ids)]
     page.screenshot(path=str(tmp_path / "three-chat-columns.png"), full_page=True)
 
@@ -354,6 +373,19 @@ def test_three_chat_columns_resize_independently(
     page.mouse.up()
     expect(ordered_panes.first).to_have_attribute("data-pane-id", chat.session_id)
     assert abs(ordered_panes.first.bounding_box()["width"] - retained_width) <= 1
+    resize_boundaries()
+
+    source = page.locator(f'[data-sidebar-session-id="{chat.session_id}"]').bounding_box()
+    assert source is not None
+    page.mouse.move(source["x"] + 70, source["y"] + source["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(source["x"] + 85, source["y"] + source["height"] / 2, steps=3)
+    target = page.get_by_test_id(f"chat-split-{secondary_ids[1]}-right").bounding_box()
+    assert target is not None
+    page.mouse.move(target["x"] + target["width"] / 2, target["y"] + 200, steps=8)
+    page.mouse.up()
+    expect(ordered_panes.last).to_have_attribute("data-pane-id", chat.session_id)
+    resize_boundaries()
 
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.get_by_role("region", name="Chat: Browser pane 2")).to_be_hidden()

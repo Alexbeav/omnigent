@@ -102,13 +102,61 @@ describe("conversation panes", () => {
     const separator = screen.getByRole("separator", { name: "Resize Chat: Second" });
     const pane = separator.parentElement!;
     Object.defineProperty(pane, "offsetWidth", { configurable: true, value: 420 });
-    Object.defineProperty(pane.parentElement!, "clientWidth", { configurable: true, value: 900 });
+    const left = pane.previousElementSibling as HTMLElement;
+    Object.defineProperty(left, "offsetWidth", { configurable: true, value: 480 });
     fireEvent.keyDown(separator, { key: "ArrowLeft" });
-    expect(pane).toHaveStyle({ flex: "0 0 440px" });
+    expect(pane.style.getPropertyValue("--pane-flex")).toBe("440 1 440px");
+    expect(left.style.getPropertyValue("--pane-flex")).toBe("460 1 460px");
     Object.defineProperty(pane, "offsetWidth", { configurable: true, value: 575 });
+    Object.defineProperty(left, "offsetWidth", { configurable: true, value: 325 });
     fireEvent.keyDown(separator, { key: "ArrowLeft" });
-    expect(pane).toHaveStyle({ flex: "0 0 580px" });
+    expect(pane.style.getPropertyValue("--pane-flex")).toBe("580 1 580px");
+    expect(left.style.getPropertyValue("--pane-flex")).toBe("320 1 320px");
   });
+
+  it.each([{ order: ["a", "b", "c"] }, { order: ["b", "a", "c"] }, { order: ["b", "c", "a"] }])(
+    "resizes both adjacent pairs with primary in $order",
+    ({ order }) => {
+      const { container } = render(
+        <ConversationPanes
+          primary={<div>primary</div>}
+          primaryId="a"
+          paneOrder={order}
+          conversations={
+            [
+              { id: "b", title: "Second" },
+              { id: "c", title: "Third" },
+            ] as never
+          }
+          onClose={vi.fn()}
+          onPopout={vi.fn()}
+        />,
+      );
+      const panes = Array.from(container.querySelectorAll<HTMLElement>("section[data-pane-id]"));
+      for (const pane of panes) {
+        Object.defineProperty(pane, "offsetWidth", {
+          get: () => {
+            const flex = pane.style.getPropertyValue("--pane-flex");
+            return flex.endsWith("px") ? parseFloat(flex) : 400;
+          },
+        });
+      }
+      expect(panes[0].querySelector('[role="separator"]')).toBeNull();
+      expect(screen.getAllByRole("separator")).toHaveLength(2);
+      for (const index of [1, 2]) {
+        const before = panes.map((pane) => pane.offsetWidth);
+        const handle = panes[index].querySelector('[role="separator"]')!;
+        fireEvent.mouseDown(handle, { clientX: 500 });
+        fireEvent.mouseMove(window, { clientX: 540 });
+        fireEvent.mouseUp(window);
+        expect(panes.map((pane) => pane.offsetWidth)).toEqual(
+          before.map((width, slot) => width + (slot === index - 1 ? 40 : slot === index ? -40 : 0)),
+        );
+        expect(document.body.style.cursor).toBe("");
+        expect(document.body.style.userSelect).toBe("");
+      }
+    },
+  );
 
   it("pops out a header only outside the page without a separate drop indicator", () => {
     const onPopout = vi.fn();

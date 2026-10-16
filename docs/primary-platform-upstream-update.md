@@ -399,3 +399,17 @@ The monitoring edit remains untouched. No provider host or browser profile was r
 Private evidence: `.omnigent/verify/drag-preview-20261016/verification.md`, `candidate.json`, `deployment.json` and `live-verification.json`.
 Human steps are in the [pane guide](primary-platform-panes.md#human-verification).
 Upstream PR submission remains deferred until this UI follow-up is tested by Alex.
+
+## Divider regression follow-up, 2026-10-16
+
+The resize handles previously belonged only to secondary chats.
+A secondary-primary-secondary layout therefore had a handle at the outer left edge and none between the first two chats.
+The existing browser journey reproduces the missing primary divider against the deployed bundle.
+
+Every gap now has a shared resize handle, independent of the chat's role.
+A drag or Left/Right key changes only the adjacent pair and leaves the third chat's width fixed.
+Both neighbors retain a 320-pixel minimum, and slot sizes still survive a sidebar replacement.
+The browser regression exercises both handles with the primary on the left, in the middle and on the right.
+The component cases cover the same three orders, along with the minimum-width boundary.
+All 195 focused component tests and three browser journeys pass, along with 231 feature-map contract tests.
+Final logs and recordings are under `.omnigent/verify/pane-resize-20261016/`.

@@ -15,6 +15,9 @@ A blue outline marks the active pane when multiple chats are open.
 Click another session in the sidebar to replace only the active chat.
 The other chats keep their positions, drafts and scroll state.
 Divider widths stay with their positions when a chat is replaced.
+Every gap between adjacent chats has a resize divider, including when the primary chat is in the middle or on the right.
+Drag a divider, or focus it and press Left/Right, to resize only its two neighbors.
+Each chat keeps a minimum width of 320 pixels.
 Click an already-open session in the sidebar to focus its existing pane.
 
 Replacing the primary chat updates the main route while retaining the secondary panes and their order.
@@ -41,8 +44,11 @@ It covers both drop directions, reordering, cancellation, the three-chat limit a
 Sidebar replacement preserves the other chats, their drafts and divider widths for both primary and secondary replacements.
 Selecting an already-open chat focuses that pane, and returning to a replaced chat restores its draft.
 After moving the primary chat into a resized slot, the phone layout still fits its 390-pixel viewport.
-The focused shell component checks pass 192 tests.
-Screenshots and recordings are private under `.omnigent/verify/drag-preview-20261016/`.
+The focused shell component checks pass 195 tests.
+The resize regression covers both dividers with the primary chat on the left, in the middle and on the right.
+Pointer drags and keyboard arrows change only the adjacent pair and retain the third chat's width.
+The split-preview captures are private under `.omnigent/verify/drag-preview-20261016/`.
+The divider-fix captures and logs are private under `.omnigent/verify/pane-resize-20261016/`.
 
 Run these commands from the repository root:
 
@@ -54,11 +60,11 @@ pnpm --dir web exec vitest run src/shell/ConversationPanes.test.tsx src/componen
 On 2026-10-16 (local time), frontend lint, type checking, and the final production build passed.
 Earlier pane-control checks passed 585 store tests, 361 composer tests and 192 other pane/shell/bubble component tests.
 
-The three isolated Chromium journeys in `tests/browser_ui/chat/test_conversation_panes.py` and `test_pane_session_controls.py` passed again in 14.90 seconds against the final split-preview build.
+The three isolated Chromium journeys in `tests/browser_ui/chat/test_conversation_panes.py` and `test_pane_session_controls.py` passed again in 18.19 seconds against the divider-fix build.
 They verify each pane's model, reasoning, permission and queue controls, including busy-stream/idle-sidebar disagreement.
 It opened one pane through the header add control and another through sidebar drop. A left drop placed a secondary before the primary, and a right drop placed another after it.
 It showed three columns at 1600 by 900 pixels, separate drafts, and a send routed only to its secondary session.
-Keyboard and pointer resizing both changed the selected pane.
+Keyboard and pointer resizing change the two chats next to the selected divider.
 At 390 by 844 pixels, the secondary panes were hidden.
 The sidebar showed a working child with a direct link.
 
@@ -71,7 +77,9 @@ Read-only shared sessions show their transcript without a send composer.
 1. Open a session on a desktop viewport at least 1024 pixels wide.
 2. Choose two different sessions with `Add pane…`. Make sure that three columns appear.
 3. Type a different unsent draft in each composer. Scroll each transcript to a different position. Make sure that neither action changes another pane.
-4. Drag each divider. Make sure that the secondary column changes width and the other chats remain usable.
+4. Drag both dividers in each direction. Make sure that only the two adjacent columns change width.
+   Move the primary chat to each of the three positions and repeat.
+   Focus each divider and use Left/Right arrows to repeat with the keyboard.
 5. Drag a sidebar session over the left half of the primary pane, then another over its right half. Make sure that the visual order matches each drop, the primary route and draft stay fixed, and reload keeps the order. Drag an open chat to reposition it without a duplicate.
 6. Use only the keyboard to choose `Add pane…`, close a pane, and open a pane in a new window.
 7. Resize below 768 pixels. Make sure that only the primary chat is visible.

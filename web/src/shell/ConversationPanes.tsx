@@ -108,7 +108,7 @@ function usePaneHeaderDetach(onPopout: () => void) {
   };
 }
 
-function ResizableChatPane({
+function ChatPane({
   children,
   label,
   paneId,
@@ -116,8 +116,8 @@ function ResizableChatPane({
   active,
   onActivate,
   width,
-  paneIndex,
-  onResize,
+  primary,
+  resizeHandle,
 }: {
   children: ReactNode;
   label: string;
@@ -125,83 +125,36 @@ function ResizableChatPane({
   onPopout: () => void;
   active?: boolean;
   onActivate?: () => void;
-  width: number | null;
-  paneIndex: number;
-  onResize: (index: number, width: number) => void;
+  width?: number;
+  primary: boolean;
+  resizeHandle?: ReactNode;
 }) {
-  const setWidth = useCallback((next: number) => onResize(paneIndex, next), [onResize, paneIndex]);
-  const sectionRef = useRef<HTMLElement>(null);
-  const drag = useRef<{ x: number; width: number } | null>(null);
   const { dragProps } = usePaneHeaderDetach(onPopout);
-  const constrain = (requested: number) => {
-    const section = sectionRef.current;
-    const container = section?.parentElement;
-    if (!container) return Math.max(320, requested);
-    const reserved = Array.from(container.children)
-      .filter((sibling) => sibling !== section && sibling.tagName === "SECTION")
-      .reduce((total, sibling) => {
-        const pane = sibling as HTMLElement;
-        return total + (pane.style.flexBasis ? pane.offsetWidth : 320);
-      }, 0);
-    return Math.max(320, Math.min(requested, container.clientWidth - reserved));
-  };
-  useEffect(() => {
-    const move = (event: MouseEvent) => {
-      if (!drag.current) return;
-      setWidth(constrain(drag.current.width + drag.current.x - event.clientX));
-    };
-    const stop = () => {
-      drag.current = null;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", stop);
-    return () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", stop);
-      stop();
-    };
-  }, [setWidth]);
-  const resize = (delta: number) =>
-    setWidth(constrain((sectionRef.current?.offsetWidth ?? 320) + delta));
   return (
     <section
-      ref={sectionRef}
       data-pane-id={paneId}
       data-active-pane={active}
       onPointerDownCapture={onActivate}
       onFocusCapture={onActivate}
-      className="relative hidden min-h-0 min-w-80 flex-1 flex-col overflow-hidden border-l border-border bg-background md:flex"
+      className={
+        "relative min-h-0 flex-1 flex-col md:min-w-80 md:[flex:var(--pane-flex)] " +
+        (primary
+          ? "flex min-w-0"
+          : "hidden min-w-80 overflow-hidden border-l border-border bg-background md:flex")
+      }
       aria-label={label}
-      style={width === null ? undefined : { flex: `0 0 ${width}px` }}
+      style={
+        {
+          "--workspace-panel-offset": primary ? "2.75rem" : undefined,
+          "--pane-flex": width === undefined ? "1 1 0%" : `${width} 1 ${width}px`,
+        } as CSSProperties
+      }
       {...dragProps}
     >
-      <div
-        role="separator"
-        aria-label={`Resize ${label}`}
-        aria-orientation="vertical"
-        tabIndex={0}
-        className="absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/50"
-        onMouseDown={(event) => {
-          event.preventDefault();
-          drag.current = {
-            x: event.clientX,
-            width: event.currentTarget.parentElement!.offsetWidth,
-          };
-          document.body.style.cursor = "col-resize";
-          document.body.style.userSelect = "none";
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowLeft") resize(20);
-          else if (event.key === "ArrowRight") resize(-20);
-          else return;
-          event.preventDefault();
-        }}
-      />
+      {resizeHandle}
       {children}
       {active && (
-        <div className="pointer-events-none absolute inset-0 z-30 rounded-sm ring-1 ring-inset ring-blue-500/60" />
+        <div className="pointer-events-none absolute inset-0 z-30 hidden rounded-sm ring-1 ring-inset ring-blue-500/60 md:block" />
       )}
     </section>
   );
@@ -229,86 +182,129 @@ export function ConversationPanes({
   onPopout: (id: string) => void;
 }) {
   // Widths belong to the visible slots, so replacing a chat keeps its divider in place.
-  const [widths, setWidths] = useState<Record<number, number>>({});
-  const resizePane = useCallback((index: number, width: number) => {
-    setWidths((previous) => ({ ...previous, [index]: width }));
+  const [widths, setWidths] = useState<number[]>([]);
+  const panesRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ index: number; x: number; widths: number[] } | null>(null);
+  const readWidths = useCallback(
+    () => Array.from(panesRef.current?.children ?? [], (pane) => (pane as HTMLElement).offsetWidth),
+    [],
+  );
+  const resizeBoundary = useCallback((index: number, delta: number, sizes: number[]) => {
+    if (index < 1 || index >= sizes.length) return;
+    const total = sizes[index - 1] + sizes[index];
+    const left = Math.max(320, Math.min(sizes[index - 1] + delta, total - 320));
+    const next = [...sizes];
+    next[index - 1] = left;
+    next[index] = total - left;
+    setWidths(next);
   }, []);
-  const primaryDetach = usePaneHeaderDetach(() => {
-    if (primaryId) onPopout(primaryId);
-  });
+  useEffect(() => {
+    const move = (event: MouseEvent) => {
+      const start = drag.current;
+      if (start) resizeBoundary(start.index, event.clientX - start.x, start.widths);
+    };
+    const stop = () => {
+      if (!drag.current) return;
+      drag.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop);
+    window.addEventListener("blur", stop);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+      window.removeEventListener("blur", stop);
+      stop();
+    };
+  }, [resizeBoundary]);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto" data-testid="conversation-panes">
-      {paneOrder.map((id, index) =>
-        id === primaryId ? (
-          <section
+    <div
+      ref={panesRef}
+      className="flex min-h-0 min-w-0 flex-1 overflow-x-auto"
+      data-testid="conversation-panes"
+    >
+      {paneOrder.map((id, index) => {
+        const isPrimary = id === primaryId;
+        const label = isPrimary ? "Primary chat" : `Chat: ${sessionLabel(conversations, id)}`;
+        return (
+          <ChatPane
             key={id}
-            data-pane-id={id}
-            data-active-pane={activePaneId === id}
-            onPointerDownCapture={() => onActivate?.(id)}
-            onFocusCapture={() => onActivate?.(id)}
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col md:min-w-80 md:[flex:var(--pane-flex)]"
-            aria-label="Primary chat"
-            style={
-              {
-                "--workspace-panel-offset": "2.75rem",
-                "--pane-flex": widths[index] === undefined ? "1 1 0%" : `0 0 ${widths[index]}px`,
-              } as CSSProperties
-            }
-            {...primaryDetach.dragProps}
-          >
-            <div data-pane-drag-handle className="contents">
-              {header}
-            </div>
-            {primary}
-            {paneOrder.length > 1 && activePaneId === id && (
-              <div className="pointer-events-none absolute inset-0 z-30 hidden rounded-sm ring-1 ring-inset ring-blue-500/60 md:block" />
-            )}
-          </section>
-        ) : (
-          <ResizableChatPane
-            key={id}
-            label={`Chat: ${sessionLabel(conversations, id)}`}
+            label={label}
             paneId={id}
+            primary={isPrimary}
             onPopout={() => onPopout(id)}
-            active={activePaneId === id}
+            active={paneOrder.length > 1 && activePaneId === id}
             onActivate={() => onActivate?.(id)}
-            width={widths[index] ?? null}
-            paneIndex={index}
-            onResize={resizePane}
+            width={widths[index]}
+            resizeHandle={
+              index > 0 && (
+                <div
+                  role="separator"
+                  aria-label={`Resize ${label}`}
+                  aria-orientation="vertical"
+                  tabIndex={0}
+                  className="absolute inset-y-0 left-0 z-20 hidden w-1.5 cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/50 md:block"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    drag.current = { index, x: event.clientX, widths: readWidths() };
+                    document.body.style.cursor = "col-resize";
+                    document.body.style.userSelect = "none";
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                    event.preventDefault();
+                    resizeBoundary(index, event.key === "ArrowLeft" ? -20 : 20, readWidths());
+                  }}
+                />
+              )
+            }
           >
-            <header
-              data-pane-drag-handle
-              className="flex h-12 shrink-0 cursor-grab select-none items-center gap-2 border-b border-border px-3 active:cursor-grabbing"
-            >
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {sessionLabel(conversations, id)}
-              </span>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Open ${sessionLabel(conversations, id)} in a new window`}
-                onClick={() => onPopout(id)}
-              >
-                <ExternalLinkIcon />
-              </Button>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Close ${sessionLabel(conversations, id)} pane`}
-                onClick={() => onClose(id)}
-              >
-                <XIcon />
-              </Button>
-            </header>
-            <div className="min-h-0 flex-1">
-              <SideChatPane childId={id} showFullHistory />
-            </div>
-          </ResizableChatPane>
-        ),
-      )}
+            {isPrimary ? (
+              <>
+                <div data-pane-drag-handle className="contents">
+                  {header}
+                </div>
+                {primary}
+              </>
+            ) : (
+              <>
+                <header
+                  data-pane-drag-handle
+                  className="flex h-12 shrink-0 cursor-grab select-none items-center gap-2 border-b border-border px-3 active:cursor-grabbing"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {sessionLabel(conversations, id)}
+                  </span>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Open ${sessionLabel(conversations, id)} in a new window`}
+                    onClick={() => onPopout(id)}
+                  >
+                    <ExternalLinkIcon />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Close ${sessionLabel(conversations, id)} pane`}
+                    onClick={() => onClose(id)}
+                  >
+                    <XIcon />
+                  </Button>
+                </header>
+                <div className="min-h-0 flex-1">
+                  <SideChatPane childId={id} showFullHistory />
+                </div>
+              </>
+            )}
+          </ChatPane>
+        );
+      })}
     </div>
   );
 }

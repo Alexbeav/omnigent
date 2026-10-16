@@ -12,7 +12,7 @@ the header menu), and each place is a separate entry point.
 - `child-discovery`: the selected root session expands a list of child chats
   with their status and direct links in the sidebar.
 
-- `multi-pane`: desktop can show three sessions side by side with separate transcripts and composers; mobile keeps one pane.
+- `multi-pane`: desktop can show three sessions side by side with separate transcripts and composers; each divider resizes its two neighbors in every chat order; mobile keeps one pane.
 
 - `pin`: pinned sessions move to their own section and back.
 - `pin-undo`: unpinning shows an Undo toast that re-pins the session into its
@@ -220,6 +220,7 @@ to switch, or press Escape to cancel.
 `Add pane…` in its header. Drag a sidebar session over a pane's left or right half to preview and place it on that side. An open session moves without duplication. Use
 the external-link button to open a session in a separate browser window.
 The hovered half shows a blurred, blue-outlined split preview. There is no separate window drop indicator. A chat header or sidebar row released outside the viewport can request a new window.
+Drag either divider, or focus it and use Left/Right arrows, to resize its two adjacent chats. Both dividers work with the primary chat on the left, in the middle or on the right.
 Click or focus a chat to make it active. A plain sidebar session click replaces only that pane, preserving the other chats and divider positions. Choosing an already-open chat focuses it. Mobile keeps ordinary single-chat navigation, and modified clicks still open tabs. Escape cancels a drag. `panes` and `paneOrder` preserve the layout without changing the primary route during reordering. A pane's model, reasoning, permission and host controls belong to that pane.
 
 **Child chats:** expand the child-chat list beneath the selected session in
@@ -246,8 +247,10 @@ plain `uv run pytest`, which starts a private server for the test.
   shows the sidebar list in an isolated browser.
 
 - **`multi-pane`:** `web/src/shell/ConversationPanes.test.tsx` covers the pane
-  limit, duplicate removal, and accessible add control. Manually open three
-  chats, keep a different draft and scroll position in each, resize each pane,
+  limit, duplicate removal and both dividers in all three primary positions.
+  `tests/browser_ui/chat/test_conversation_panes.py::test_three_chat_columns_resize_independently`
+  drives both dividers by pointer and keyboard with the primary on the left, in the middle and on the right.
+  Manually open three chats, keep a different draft and scroll position in each, resize both adjacent pairs,
   use the half-pane split preview, replace the active chat through the sidebar, and use popout. At a viewport below 768 pixels, only
   the primary chat must remain visible.
 
