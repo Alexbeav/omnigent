@@ -206,9 +206,42 @@ The header popout button or an outside-page release requests a separate window. 
 
 The [suggested next reply implementation](reply-suggestions.md) connects the
 shared composer to an optional bounded background request for native Codex and
-native Claude, in full chat and ordinary panes. It defaults off and is not deployed.
+native Claude, in full chat and ordinary panes. It defaults off and uses additional model usage.
+The complete server and web source `dc94d2137` is deployed at
+[the live UI](https://omnigent.ulduar.crosstalkis.com).
 The installed Codex prediction method remains unimplemented; native desktop beta
 entitlement does not cover this extra request. Integration must retain the pending
 async-question gate and the current-session provider/account resolution.
 This chat still uses native Codex directly. The [isolated OMP pilot](primary-platform-omp.md)
 is installed on Eagle WSL and awaits its separate OpenAI sign-in before worker qualification.
+
+The [chat-link menu](primary-platform-panes.md) is available after reloading the UI.
+Right-click a website or file link for **Open in Omnigent**, **Open in browser tab**,
+and **Copy link**. Web clients use the current browser; the desktop shell can open
+the default OS browser. Files preserve their source chat and cited position.
+
+The new native question forwarder and prediction runner need the staged Eagle WSL
+runtime. Its silent-start launcher now selects
+`/home/alexbeav/Projects/omnigent-host-enhancements-dc94d2137/.venv-host`.
+The running host was preserved during this coordinator turn.
+Stopping it disconnects its managed chats, including this coordinator.
+After all Eagle WSL chats are idle, run these commands in Windows PowerShell:
+
+```powershell
+wsl -d Ubuntu -u alexbeav -- /home/alexbeav/Projects/omnigent-host-enhancements-dc94d2137/.venv-host/bin/omnigent host stop --server http://172.16.1.8:8090
+Start-ScheduledTask -TaskName OmnigentHostWSLV018
+```
+
+Then reopen or resume a native chat and request a fresh async question to test its
+choices, custom answer and draft recovery. Previously stored plain questions do not
+gain controls. Enable **Settings → General → Composer → Suggest my next reply**
+to test an editable suggestion with Tab; acceptance never sends it.
+Read the [usage limits](reply-suggestions.md) before enabling recurring generation.
+
+The deployed image passed restored-database restart and rollback checks, 94 frozen
+dependency checks and all 454 served asset hashes. The combined UI passed 1,822
+web tests and 15 browser journeys. Isolated real-provider checks establish native
+question/answer delivery, duplicate suppression and working prediction requests on
+both providers. NAS Compose commit `840a0b2733180f651dc87b9e988b90009caedb8c` is pushed;
+the unrelated monitoring edit is preserved. Current operational state and backup
+metadata remain in the homelab state note and host-upgrade runbook.
