@@ -289,3 +289,13 @@ The NAS server was not changed in this follow-up: Pegasus has no working SSH
 route to it, and the remote deployment helper could not be tasked through this
 session's child-only messaging scope. The generic heading awaits a later web
 deployment; the existing server already supports the functional host changes.
+
+### Pegasus activation confirmed, 2026-10-17
+
+Alex restarted the Pegasus WSL host. Its active systemd service now runs PID
+`187169` from the pinned question-controls environment at source `225e7f7af`.
+This chat resumed, issued two native asynchronous questions, and received Alex's
+selected answers, **Blue (Recommended)** and **Brief (Recommended)**, in one
+structured reply. This confirms the live Codex question/answer round trip after
+activation. Custom answers, pane routing, Claude and Cline retain the automated
+coverage above; this check did not establish fresh human round trips for them.

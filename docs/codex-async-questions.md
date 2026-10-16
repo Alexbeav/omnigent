@@ -90,3 +90,8 @@ sent a synthetic Markdown answer, and received the expected Codex acknowledgemen
 Retrying that answer left one correlated user message. This establishes the native
 round trip; it does not establish a human browser click through a live provider.
 No existing pending user question is answered by these tests.
+
+On 2026-10-17, Alex also completed a human two-question round trip in this Codex
+chat after restarting Pegasus WSL onto source `225e7f7af`. Both selected answers
+arrived together as a structured reply. This verifies live choice submission;
+custom text and pane routing remain covered by the isolated browser journeys.
