@@ -3,33 +3,37 @@
 Status: v0.18.0 server deployed on 2026-10-16 after Alex approved the stable target.
 The isolated branch is `upgrade/v0.18-primary` in `~/Projects/omnigent-upgrade`.
 Qualification and deployment results are recorded below.
-The deployed application is `38f30aa96`, preserving [the primary platform work](primary-platform-plan.md).
+The deployed server keeps the qualified `38f30aa96` backend with UI source `23fa26945`, preserving [the primary platform work](primary-platform-plan.md).
 
 ## Contribution status checked on 2026-10-16
 
-No new upstream PR for the primary-platform enhancements is submitted yet.
-The integrated fork and the focused image branch are pushed to Alex's repository.
-The live upstream main snapshot is `ac8eb013758bd05112eecbd65129aa11475a555a`.
-The older base references below remain the upgrade research and qualification pins.
-Refresh each contribution against current main before submitting it.
+Child-chat sidebar visibility is submitted as [draft PR #10431](https://github.com/omnigent-ai/omnigent/pull/10431), closing [feature issue #10430](https://github.com/omnigent-ai/omnigent/issues/10430).
+Its isolated branch `contrib/sidebar-child-chats` starts at upstream snapshot `b6119bb8470624d22cc142691871dba155e75063`.
+The focused head is `0400f473279b0e43676aa573d1a8de6a9904789b`, with no deployment records or unrelated fork enhancements in the diff.
+The branch passes 177 component checks, its isolated browser journey, 264 feature-map checks, lint, type checking, build and pre-commit.
+The draft still needs its sanitized visual demo attached. Browser attachment upload did not complete, and no demo media was committed.
 
-The existing [Windows workspace PR #7370](https://github.com/omnigent-ai/omnigent/pull/7370) is open.
-Its DCO check requires action because commit `d088602b2615260a9837693c3528515fe841a233` lacks a sign-off.
-The existing [ACP permission PR #7375](https://github.com/omnigent-ai/omnigent/pull/7375) is also open.
-Its reported Maintainer Approval check fails, while DCO and the reported test checks pass.
-These are current check results, not a new maintainer review or proof of current-main compatibility.
+The pane proposal is [#10429](https://github.com/omnigent-ai/omnigent/issues/10429).
+A [coordination comment on #6758](https://github.com/omnigent-ai/omnigent/pull/6758#issuecomment-6211218243) explains the narrower three-column workflow and planned contribution sequence.
+The existing split-workspace implementation is broader, so the large layout PR waits for that design coordination.
+The tested fork remains available and deployed while that discussion proceeds.
+
+The [Windows workspace PR #7370](https://github.com/omnigent-ai/omnigent/pull/7370) is closed as superseded by merged [#7837](https://github.com/omnigent-ai/omnigent/pull/7837).
+Current main uses `isHostAbsolutePath` for the submit gate and deliberately rejects backslash UNC paths, matching server validation.
+The original ACP model fixes are also upstream. The old branch and its unsigned historical commit remain intact.
+The broader Windows issue #2422 remains open.
+
+The [ACP permission PR #7375](https://github.com/omnigent-ai/omnigent/pull/7375) remains open.
+All 61 reported check runs were inspected: Maintainer Approval fails, while DCO and the reported tests pass.
+Those are existing results, not a new maintainer review or fresh current-main compatibility proof.
 
 Upstream merged the [Claude transcript fix #10293](https://github.com/omnigent-ai/omnigent/pull/10293) and [ACP readiness map #7544](https://github.com/omnigent-ai/omnigent/pull/7544).
 Compare any additional create-time readiness guard separately before proposing it.
 The image fallback branch passes its recorded focused checks, but [#8391](https://github.com/omnigent-ai/omnigent/pull/8391) still has direct overlap.
-The related peer messaging, pane layout, side-chat and background-host PRs in the disposition table remain open.
-
-First address the existing PR blockers and compare current upstream behavior.
-Then prepare child-chat sidebar visibility, pane layout/docking, and dependent pane controls and queue/steer as separate changes.
-Capture fresh browser evidence for each UI contribution.
-Coordinate the peer-message API and image overlap before publishing competing changes.
-The Firefox bridge is a documented local MCP integration and adds no application patch to submit.
-Private API snapshots are under `.omnigent/verify/upstream-pr-status-20261016/`.
+Coordinate the peer-message API and attachment overlap before publishing competing implementations.
+The Firefox bridge is a local MCP integration and adds no application patch to submit.
+Private refreshed API snapshots are under `.omnigent/verify/upstream-ready-20261016/`.
+The child contribution evidence is under `~/Projects/omnigent-contrib-children/.omnigent/verify/upstream-child-sidebar-20261016/`.
 
 ## Recommended targets
 
@@ -113,7 +117,7 @@ No upstream issue, comment or PR was published during this investigation.
 | Desktop panes and docking | Port ordered three-pane layout, draft/stream isolation, resizing, both docking directions, header actions and safe popouts. | Separate feature proposal and base layout PR. Review Canvas split-panel [#7431](https://github.com/omnigent-ai/omnigent/pull/7431) for shared layout ideas. |
 | Pane configuration | Port the shared picker and explicit conversation targets after the layout. | Separate dependent PR, based on main's newer SDK reasoning-effort support. |
 | Pane queue and steer | Port scoped queue operations and live-status protection after the layout. | Separate dependent PR; preserve main's mid-turn input-consumption behavior. |
-| Child sidebar visibility | Port discovery/navigation into upstream's current sidebar sorting and grouping. | Independent small UI PR. Check cross-device side-chat [#10307](https://github.com/omnigent-ai/omnigent/pull/10307); ordinary child discovery is not automatically the same feature. |
+| Child sidebar visibility | Port discovery/navigation into upstream's current sidebar sorting and grouping. | Draft [#10431](https://github.com/omnigent-ai/omnigent/pull/10431), closing [#10430](https://github.com/omnigent-ai/omnigent/issues/10430), passes focused current-main checks. Sanitized demo attachment is pending. Cross-device side-chat [#10307](https://github.com/omnigent-ai/omnigent/pull/10307) remains a separate feature. |
 | Claude request snapshots | Use upstream's broader typed-record exclusion. Stable needs that backport; main already contains it. | Do not resubmit the parser fix: [#10293](https://github.com/omnigent-ai/omnigent/pull/10293) merged on 2026-10-15. Keep additional regression coverage only if it proves a distinct boundary. |
 | Old reminder text in stored bubbles | Retain the display-only workaround initially if required for this fork's old history. Never treat it as history repair. | Defer a renderer cleanup PR until a current-main reproduction exists and tests protect intentional user text containing reminder tags. The parser fix does not strip old stored bubbles. |
 | Background host instructions | Keep detached launch instructions and the documented WSL lifetime distinction. | Compare existing host work [#6756](https://github.com/omnigent-ai/omnigent/pull/6756), [#8429](https://github.com/omnigent-ai/omnigent/pull/8429) and [#10292](https://github.com/omnigent-ai/omnigent/pull/10292). Avoid presenting the WSL setting as application process detachment. |
@@ -138,9 +142,9 @@ An absent symbol or a different patch ID alone does not establish a missing beha
 | `3c4b9c031`, `fb9a4172d`, `495202339` | Same-owner peer delivery, bounded attribution, title safety and exchange proof. | Retained; authorization, provenance, loop/rate contracts and a separate process message-and-reply journey pass. Coordinate the upstream API separately. |
 | `12b5f67d2` | Old release-version edits. | Superseded by the target version. Do not port these edits. |
 
-Alex also has open [#7370](https://github.com/omnigent-ai/omnigent/pull/7370) for absolute Windows workspaces.
-Its current PR description says the earlier ACP changes already exist upstream.
-Recheck the Windows-path fix independently before deciding whether the deployment fork needs it.
+Earlier Windows workspace PR [#7370](https://github.com/omnigent-ai/omnigent/pull/7370) is now closed as superseded by #7837.
+The ACP model-selection paths also already exist upstream.
+Current main deliberately rejects UNC workspace paths, matching server validation.
 
 ## Proposed implementation order
 
