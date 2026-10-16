@@ -456,3 +456,19 @@ A background failure regression also confirms that the restored composer does no
 The inactive shell-close regression confirms that closing its shell does not change the selected chat view.
 
 All six isolated Chromium journeys pass against the final rebuilt UI in 38.89 seconds. Final recordings and captures are under `.omnigent/verify/active-pane-controls-20261016/browser-qualified/`.
+
+Deployed UI source `23fa269450e7833d0cb345045e1cbfff4296f2bf` from `upgrade/v0.18-primary`, pushed to Alex's fork.
+The immutable image is `registry.crosstalkis.com/omnigent-server:sha-23fa26945@sha256:88a170a1d2d05ef02bf5f1fa58914625f7474daaf3a7c7286ac691abbeb3f473`.
+The runtime remains v0.18.0, with all 919 Python source files and 98 installed packages identical to qualified `38f30aa96`.
+All 525 packaged assets match the tested build. All 454 served JS/CSS hashes match, with entry `assets/index-D8GFdTyl.js`.
+Canonical HTTPS health, anonymous HTTP 401 and existing-account session/history reads pass without OAuth refresh.
+Cutover retains all 122 conversations and 68,077 original item IDs, with zero missing and schema `mm1a2b3c4d5e` unchanged.
+Only `omnigent` changed. All 30 other container records remain unchanged.
+The container is healthy with zero restarts. Transit remains initialized and unsealed.
+Fresh backup: `/volume1/docker/stacks/omnigent/backups/active-pane-controls-20261016-23fa26945/cutover.dump` (69,976,334 bytes, SHA-256 `43365ec03095f7bae64c365d87b76570af001779ee1d8244fae33edd3dbe7433`).
+The previous image, Compose file and rollout script remain available for rollback.
+The NAS Compose pin is local commit `de7d20d63df0999bbaa76643eb9dab949245b4df` and is not pushed. The monitoring edit and provider hosts remain untouched.
+Infrastructure state was updated first, followed by the server plan and monthly change log.
+Private qualification, deployment and live-verification records remain in `.omnigent/verify/active-pane-controls-20261016/`.
+To test, refresh with Ctrl+Shift+R, select each pane and open Share or Workspace, then start a project chat in the middle slot.
+The toolbar must follow the selection, and the other two chats and their drafts must remain.
