@@ -176,7 +176,12 @@ async def test_unsupported_harness_never_discovers_models_or_generates() -> None
 
 
 @pytest.mark.asyncio
-async def test_codex_resolves_exact_session_account_and_disables_tools(monkeypatch):
+@pytest.mark.parametrize("provider", ["openai", "gateway"])
+async def test_codex_resolves_exact_session_account_and_disables_tools(monkeypatch, provider):
+    from pathlib import Path
+
+    import tomllib
+
     from omnigent.harnesses.codex_native import app_server
     from omnigent.inner import codex_executor
 
@@ -189,7 +194,13 @@ async def test_codex_resolves_exact_session_account_and_disables_tools(monkeypat
 
     def build(**kwargs):
         assert kwargs["profile"] == "session-profile"
-        return SimpleNamespace(codex_path="test-codex", env={}, config_overrides=[])
+        overrides = [f'model_provider="{provider}"']
+        if provider == "gateway":
+            overrides.append(
+                'model_providers.gateway={name="Session gateway",'
+                'base_url="https://session-provider.test",wire_api="responses"}'
+            )
+        return SimpleNamespace(codex_path="test-codex", env={}, config_overrides=overrides)
 
     class Process:
         returncode = 0
@@ -199,13 +210,14 @@ async def test_codex_resolves_exact_session_account_and_disables_tools(monkeypat
 
     async def spawn(*args, **kwargs):
         captured.update(args=args, **kwargs)
+        config_path = Path(kwargs["env"]["CODEX_HOME"]) / "config.toml"
+        captured["config"] = tomllib.loads(config_path.read_text()) if config_path.exists() else {}
         return Process()
 
     monkeypatch.setattr(app_server, "resolve_native_codex_launch", resolve)
     monkeypatch.setattr(app_server, "build_codex_native_server", build)
     monkeypatch.setattr(codex_executor, "_populate_codex_home_config", lambda *_a, **_kw: None)
     monkeypatch.setattr(codex_executor, "_codex_home_config_source_from_env", lambda: None)
-    monkeypatch.setattr(codex_executor, "materialize_codex_provider_config", lambda *_: [])
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     context = BackgroundTitleContext(
         prompt="[]",
@@ -219,7 +231,14 @@ async def test_codex_resolves_exact_session_account_and_disables_tools(monkeypat
     assert "--ephemeral" in args and "--ignore-rules" in args
     assert "mcp_servers={}" in args and "tools.view_image=false" in args
     assert "features.shell_tool=false" in args and "features.unified_exec=false" in args
-    assert "model_providers.openai.request_max_retries=0" in args
+    assert f'model_provider="{provider}"' in args
+    assert not any(arg.startswith("model_providers.") for arg in args)
+    providers = captured["config"].get("model_providers", {})
+    assert "openai" not in providers
+    if provider == "gateway":
+        assert providers["gateway"]["base_url"] == "https://session-provider.test"
+        assert providers["gateway"]["request_max_retries"] == 0
+        assert providers["gateway"]["stream_max_retries"] == 0
     assert result.usage["output_tokens"] == 2 and result.max_output_tokens is None
 
 

@@ -49,7 +49,10 @@ ordinary child-agent sessions. Unresolved session/child specs fail closed.
 - **Codex:** select an advertised model from the economy-model registry in
   `omnigent/models/model_fallbacks.py`. Launch an ephemeral read-only `codex exec`
   with replacement instructions, MCP/apps/plugins/tools disabled, no rules or
-  workspace discovery, and zero provider retries. The installed CLI does **not**
+  workspace discovery. Custom providers receive zero request/stream retries through
+  the existing provider helper. Reserved built-in providers keep their own retry
+  behavior because Codex rejects retry overrides under those IDs. The selected
+  provider/account is unchanged. The installed CLI does **not**
   expose a verified hard output-token ceiling for this path. The 40-word prompt
   instruction and 300-character display filter are not token limits.
 - **Claude:** select an advertised Haiku model from that session's launch catalog.
@@ -61,7 +64,9 @@ ordinary child-agent sessions. Unresolved session/child specs fail closed.
 
 Process execution has a 12-second timeout, with a 17-second overall runner deadline
 and a 20-second browser/server deadline. Explicit cancellation kills the process
-group. Nothing retries automatically. The output filter accepts at most 300
+group. Omnigent starts one generation process and never retries it or switches
+models/providers. Codex built-in internal retries can occur within the process
+until the deadline or cancellation. The output filter accepts at most 300
 characters and treats `NONE` as no suggestion. These controls bound context, time,
 and display length; Codex token cost remains uncapped by a native token parameter.
 

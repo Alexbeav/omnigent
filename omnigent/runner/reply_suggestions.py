@@ -93,6 +93,7 @@ async def generate_reply_suggestion(
         _populate_codex_home_config,
         materialize_codex_provider_config,
     )
+    from omnigent.spec.types import RetryPolicy
     from omnigent.util.reasoning_effort import CODEX_NATIVE_EFFORTS
 
     launch = resolve_native_codex_launch(model=model, spec=context.session_spec)
@@ -117,17 +118,16 @@ async def generate_reply_suggestion(
             bridge_dir=root / "bridge",
             extra_config_overrides=launch.config_overrides,
         )
-        overrides = materialize_codex_provider_config(home, server.config_overrides)
+        # Built-in provider IDs are reserved. Only custom providers accept retry settings.
+        overrides = materialize_codex_provider_config(
+            home,
+            server.config_overrides,
+            retry_policy=RetryPolicy(max_retries=0, timeout_per_request_s=None),
+        )
         instructions_file = root / "instructions.md"
         instructions_file.write_text(SUGGESTION_INSTRUCTIONS, encoding="utf-8")
-        provider = "openai"
-        for override in overrides:
-            if override.startswith("model_provider="):
-                provider = json.loads(override.split("=", 1)[1])
         overrides += [
             f"model_instructions_file={json.dumps(str(instructions_file))}",
-            f"model_providers.{provider}.request_max_retries=0",
-            f"model_providers.{provider}.stream_max_retries=0",
             'approval_policy="never"',
             'model_reasoning_effort="low"',
             'web_search="disabled"',
