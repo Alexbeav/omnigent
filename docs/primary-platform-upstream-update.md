@@ -323,6 +323,8 @@ Eagle WSL Codex, Claude Code and Cline user MCP configurations point to the pinn
 Private backups preserve the original configurations, and unrelated settings remain intact.
 Alex installed the signed Firefox add-on, and direct page reading passes after domain consent.
 A fresh native Codex chat calls FoxPilot and receives the active Firefox result.
-Automation Mode is still off at this checkpoint, so interaction tools remain blocked by the add-on.
+Alex enabled Automation Mode and its one-time all-websites grant.
+The existing native Codex chat passes a new-domain page read, snapshot, typing, click and screenshot without another domain-permission error.
+The owned test tab was closed, and no external form was submitted.
 Claude/Cline browser turns and persistence across a Firefox restart remain unproven.
 This configuration change requires no server image or web bundle rebuild.

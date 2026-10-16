@@ -66,8 +66,12 @@ The native Codex source reader discovers the new configuration, and Claude resol
 Reading the Example Domain page passes after domain consent.
 A fresh native Codex chat calls `mcp__foxpilot__list_browsers` and receives an active Firefox result.
 Its native transcript confirms the actual tool call.
-Automation Mode is off at this checkpoint, so snapshots and clicks remain blocked by the add-on.
-Claude/Cline browser turns, page actions and profile persistence across a browser restart remain unproven.
+Alex enabled Automation Mode and accepted the one-time all-websites permission.
+This existing native Codex chat then opened `https://example.org/` without another domain-permission error.
+Snapshots, filling a temporary field, clicking its local button and reading the confirmation all pass.
+The same check returned a PNG screenshot and closed its owned test tab.
+No external form was submitted.
+Claude/Cline browser turns and profile persistence across a browser restart remain unproven.
 Private checks and source pins are under `.omnigent/verify/browser-integration-20261016/`.
 The homelab Infrastructure-State note owns current installation and validation status.
 
