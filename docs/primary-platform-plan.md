@@ -201,3 +201,10 @@ Reload [the live UI](http://172.16.1.8:8090) with **Ctrl+Shift+R**.
 Drag sidebar chats over the left/right halves, change a secondary pane's model and reasoning,
 and queue a follow-up while that pane works. Its send-now arrow or the default Ctrl/Command+Enter shortcut steers only that pane.
 The header popout button or an outside-page release requests a separate window. Browser policy controls OS desktop drops.
+
+## Suggested replies, 2026-10-16
+
+The next request adds editable suggested replies to the chat composer.
+A [shared composer prototype](primary-platform-prompt-suggestions.md) passes 43 component checks but is not connected or deployed.
+The native-only versus generated-fallback choice is pending.
+This chat still uses native Codex directly, and OMP coordination remains deferred.
