@@ -413,3 +413,19 @@ The browser regression exercises both handles with the primary on the left, in t
 The component cases cover the same three orders, along with the minimum-width boundary.
 All 195 focused component tests and three browser journeys pass, along with 231 feature-map contract tests.
 Final logs and recordings are under `.omnigent/verify/pane-resize-20261016/`.
+
+Deployed from `dcf3a29e93671be9f4f995d43b86759b0bd3aa73` on `upgrade/v0.18-primary`.
+The immutable image is `registry.crosstalkis.com/omnigent-server:sha-dcf3a29e9@sha256:9790c8ea83c41b6ac04a37ce52e4a27a5dea18c74a848b1608b17d6b0ce4497f`.
+The runtime remains v0.18.0 with the same 919 Python source files and 98 installed packages as qualified `38f30aa96`.
+All 525 packaged assets match the tested build. All 454 served JS/CSS files match by SHA-256, with entry `assets/index-CDOfLwSK.js`.
+Canonical HTTPS health, anonymous HTTP 401 and existing-account session/history reads pass without OAuth refresh.
+Cutover retains all 117 conversations and 65,946 original item IDs, with zero missing and schema `mm1a2b3c4d5e` unchanged.
+Two new items arrived after restart, so the immediate after count was 65,948.
+Only `omnigent` changed. All 30 other container records remain unchanged, the server is healthy with zero restarts, and Transit remains unsealed.
+
+Fresh backup: `/volume1/docker/stacks/omnigent/backups/pane-resize-20261016-dcf3a29e9/cutover.dump` (66,506,972 bytes, SHA-256 `31157925785a6cddcd83b5864aa50452bc5d4047d100aa6e5ca3830bde511607`).
+The previous image, Compose file and rollback-aware script remain available.
+The Compose pin is local NAS commit `ffb1a78962a9ea72960f5526cbfd797e8934ece8` and is not pushed.
+The monitoring edit and provider hosts remain untouched.
+Private evidence: `.omnigent/verify/pane-resize-20261016/verification.md`, `deployment.json` and `live-verification.json`.
+To test, refresh the browser, drag each divider in both directions, then move the primary chat and repeat.
