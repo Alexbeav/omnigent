@@ -1,8 +1,10 @@
 # Omnigent Server API
 
-Four namespaces: agent management (`/api/agents`), conversations
+Namespaces include agent management (`/api/agents`), conversations
 (`/v1/conversations`), sessions (`/v1/sessions`), and session
-resources (`/v1/sessions/{session_id}/resources`).
+resources (`/v1/sessions/{session_id}/resources`), and owner-scoped metadata
+observations (`/v1/observations`, `/v1/resources`). The top-level resource endpoint
+contains host CPU/RAM/GPU telemetry, not session files.
 
 ## Compatibility Reference
 
@@ -12,6 +14,8 @@ resources (`/v1/sessions/{session_id}/resources`).
 | Conversations (`/v1/conversations`) | Omnigent (ours) | No external reference. |
 | Sessions (`/v1/sessions`) | Omnigent (ours) | No external reference. Session-first API for long-running agent interactions. See "Sessions API" section below. |
 | Session file resources (`/v1/sessions/{session_id}/resources/files`) | Omnigent (ours) | No external reference. Files are scoped to their owning session. |
+| Session observations (`/v1/observations`) | Omnigent (ours) | Read-only managed/native identity, evidence and coverage. [Contract](../../docs/native-session-observations.md). |
+| Host observations (`/v1/resources`) | Omnigent (ours) | Read-only latest owned-host resource samples. [Contract](../../docs/host-resource-observations.md). |
 
 ---
 

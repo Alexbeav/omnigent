@@ -1267,6 +1267,36 @@ class SqlPolicy(OmnigentBase):
     )
 
 
+class SqlNativeObservationSource(OmnigentBase):
+    """Latest bounded passive metadata for one owned host and native harness."""
+
+    __tablename__ = "native_observation_sources"
+
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, default=current_workspace_id, server_default="0"
+    )
+    host_id: Mapped[str] = mapped_column(Uuid16(), primary_key=True)
+    harness: Mapped[str] = mapped_column(String(16), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    account_generation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    payload: Mapped[str] = mapped_column(CompressedText, nullable=False)
+    received_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class SqlHostResourceSource(OmnigentBase):
+    """Latest authenticated resource sample for an owned host."""
+
+    __tablename__ = "host_resource_sources"
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, default=current_workspace_id, server_default="0"
+    )
+    host_id: Mapped[str] = mapped_column(Uuid16(), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    account_generation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    payload: Mapped[str] = mapped_column(CompressedText, nullable=False)
+    received_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class SqlHost(OmnigentBase):
     """
     SQLAlchemy model for the ``hosts`` table.

@@ -3943,6 +3943,7 @@ def create_app(
         from omnigent.server.routes.hosts import create_hosts_router
         from omnigent.server.routes.mcp_servers import create_mcp_servers_router
         from omnigent.server.routes.mcp_tools import create_mcp_tools_router
+        from omnigent.server.routes.native_observations import create_native_observations_router
         from omnigent.server.routes.plugins import create_plugins_router
         from omnigent.server.routes.skill_content import create_skill_content_router
         from omnigent.server.routes.skills import create_skills_router
@@ -3950,6 +3951,17 @@ def create_app(
         async def _on_hosts_changed(_host_id: str, owner: str | None) -> None:
             announce_hosts_changed(owner)
 
+        app.include_router(
+            create_native_observations_router(
+                host_store,
+                auth_provider=auth_provider,
+                conversation_store=conversation_store,
+                agent_store=agent_store,
+                agent_cache=agent_cache,
+            ),
+            prefix="/v1",
+            tags=["observations"],
+        )
         app.include_router(
             create_host_tunnel_router(
                 host_registry,

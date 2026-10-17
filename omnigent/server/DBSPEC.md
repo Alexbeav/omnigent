@@ -1,14 +1,23 @@
 # Database Schema Design
 
 This doc covers four core tables: agents, files, conversations,
-conversation_items. They are part of a larger schema — 17 tables in all, also
+conversation_items. They are part of a larger schema, also
 including conversation labels, comments, policies, session permissions,
 conversation metadata, projects, hosts, users, and scheduled tasks. No model
 sets an explicit schema, so every table lives in the default one.
 
-Schema is managed by Alembic migrations in `alembic/`. SQLAlchemy models live
+Schema is managed by Alembic migrations in `omnigent/db/migrations/`. SQLAlchemy models live
 in `omnigent/db/db_models.py`, which is the source of truth for the full table
 list.
+
+The additive `native_observation_sources` and `host_resource_sources` tables
+hold latest bounded metadata separately from conversations and their items.
+Both carry workspace, authenticated host, owner and account-generation fences,
+compressed payload and original receipt time. Native sources also key by harness.
+Their retention/replay and freshness contracts are in
+[native observations](../../docs/native-session-observations.md) and
+[host resources](../../docs/host-resource-observations.md). These tables are not
+transcript storage or a historical hardware time-series database.
 
 A `tasks` table existed in an earlier design — DBOS-backed workflow execution,
 with a `try_deliver`/`close_inbox` steering handshake requiring transactional

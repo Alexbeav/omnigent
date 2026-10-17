@@ -199,6 +199,7 @@ from omnigent.util.tunnel_limits import (
 from omnigent.version import VERSION
 
 if TYPE_CHECKING:
+    from omnigent.host.native_observations import NativeObservationReader
     from omnigent.workspace_fs import WorkspaceReader
 
 # Workspaces whose fs reader (and change registry) stay warm between requests.
@@ -1165,6 +1166,7 @@ class HostProcess:
             By default the host discovers its installed shells once at startup.
         """
         self._identity = identity
+        self._native_observation_reader: NativeObservationReader | None = None
         self._server_url = server_url.rstrip("/")
         # One reader per workspace, so its registry keeps state between
         # requests (the changed-files snapshot search reuses for untracked
@@ -4608,6 +4610,8 @@ class HostProcess:
         self._ensure_model_options_prewarm()
         self._ws = ws
         readiness_task = asyncio.create_task(self._harness_readiness_loop(ws))
+        native_observations_task = asyncio.create_task(self._native_observations_loop(ws))
+        resources_task = asyncio.create_task(self._resource_observations_loop(ws))
         try:
             # Reports raised while disconnected must wait until registration;
             # the server cannot route them before this connection owns the host.
@@ -4648,8 +4652,52 @@ class HostProcess:
                     self._start_frame_task(ws, raw)
         finally:
             readiness_task.cancel()
+            native_observations_task.cancel()
+            resources_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await readiness_task
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await native_observations_task
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await resources_task
+
+    async def _resource_observations_loop(
+        self, ws: websockets.asyncio.client.ClientConnection
+    ) -> None:
+        """Opt-in metadata sampling is independent of session/runner lifecycle."""
+        if os.environ.get("OMNIGENT_RESOURCE_OBSERVATIONS") != "1":
+            return
+        from omnigent.host.resource_publisher import HostResourcePublisher
+
+        publisher = getattr(self, "_resource_publisher", None)
+        if publisher is None:
+            publisher = self._resource_publisher = HostResourcePublisher()
+        await publisher.run(ws)
+
+    async def _native_observations_loop(
+        self,
+        ws: websockets.asyncio.client.ClientConnection,
+    ) -> None:
+        """Opt-in passive work never changes runner or terminal lifecycle."""
+        if os.environ.get("OMNIGENT_NATIVE_OBSERVATIONS") != "1":
+            return
+        from hashlib import sha256
+
+        from omnigent.host.identity import host_config_path
+        from omnigent.host.native_observations import (
+            NativeObservationReader,
+            publish_native_observations,
+        )
+
+        try:
+            if self._native_observation_reader is None:
+                key = sha256((self._server_url + self._identity.host_id).encode()).hexdigest()
+                path = host_config_path().parent / "native-observations" / (key + ".json")
+                self._native_observation_reader = NativeObservationReader(path)
+            await publish_native_observations(self._native_observation_reader, ws)
+        except Exception:  # noqa: BLE001 - isolate passive failures without echoing native records
+            # Never echo native records or let observation failure stop live sessions.
+            _logger.warning("Passive native observations stopped; source coverage will expire")
 
     async def _harness_readiness_loop(
         self,

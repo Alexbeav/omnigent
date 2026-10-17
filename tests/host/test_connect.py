@@ -8755,3 +8755,39 @@ def test_run_host_process_classifies_how_the_host_ended(
         )
 
     assert _host_exit_reasons(caplog) == [expected]
+
+
+async def test_passive_native_readers_are_disabled_by_default(monkeypatch):
+    from omnigent.host import native_observations
+
+    monkeypatch.delenv("OMNIGENT_NATIVE_OBSERVATIONS", raising=False)
+
+    def refuse(*args, **kwargs):
+        pytest.fail("A disabled passive reader must not scan or write cursor state")
+
+    monkeypatch.setattr(native_observations, "NativeObservationReader", refuse)
+    host = _make_host_process()
+    try:
+        await host._native_observations_loop(None)
+        assert host._native_observation_reader is None and not host._runners
+    finally:
+        _cleanup_host(host)
+
+
+async def test_passive_reader_failure_does_not_echo_records_or_stop_host(monkeypatch, caplog):
+    from omnigent.host import native_observations
+
+    monkeypatch.setenv("OMNIGENT_NATIVE_OBSERVATIONS", "1")
+
+    def fail(*args, **kwargs):
+        raise ValueError("private-native-payload-canary")
+
+    monkeypatch.setattr(native_observations, "NativeObservationReader", fail)
+    host = _make_host_process()
+    try:
+        await host._native_observations_loop(None)
+        assert not host._runners and host._native_observation_reader is None
+        assert "private-native-payload-canary" not in caplog.text
+        assert "coverage will expire" in caplog.text
+    finally:
+        _cleanup_host(host)

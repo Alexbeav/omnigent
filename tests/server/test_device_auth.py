@@ -984,3 +984,65 @@ def test_app_skips_device_grant_for_github_oidc_without_crashing(
     # why the skip matters — then confirm the gate keeps it unreached.
     with pytest.raises(RuntimeError, match="GitHub OAuth"):
         create_device_auth_router(provider, None)  # type: ignore[arg-type]
+
+
+def test_observation_device_grant_stays_read_only_after_refresh_and_revocation(app: TestClient):
+    from omnigent.server.auth import OBSERVATIONS_READ_SCOPE, delegated_request_allowed
+    from omnigent.server.routes.device_auth import OBSERVATIONS_CLIENT_ID
+
+    data = app.post("/oauth/device/authorize", json={"client_id": OBSERVATIONS_CLIENT_ID}).json()
+    _login_admin(app)
+    consent = app.get("/oauth/device", params={"user_code": data["user_code"]})
+    assert (
+        "Read managed/native session metadata and host CPU, memory and GPU measurements only"
+        in consent.text
+    )
+    approved = app.post(
+        "/oauth/device/approve",
+        data={"user_code": data["user_code"]},
+        headers={"Origin": "http://localhost:8000"},
+    )
+    assert approved.status_code == 200
+    exchange = app.post(
+        "/oauth/token",
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "device_code": data["device_code"],
+        },
+    )
+    assert exchange.status_code == 200
+    tokens = exchange.json()
+    claims = jwt.decode(tokens["access_token"], options={"verify_signature": False})
+    assert claims["scope"] == OBSERVATIONS_READ_SCOPE
+    app.cookies.clear()
+    headers = {"Authorization": "Bearer " + tokens["access_token"]}
+    assert app.get("/v1/observations", headers=headers).status_code == 200
+    assert app.get("/v1/resources", headers=headers).status_code == 200
+    assert app.get("/v1/hosts", headers=headers).status_code == 401
+    assert app.get("/auth/users", headers=headers).status_code in {401, 403}
+    for method in ["POST", "PUT", "PATCH", "DELETE", "WEBSOCKET"]:
+        assert not delegated_request_allowed(OBSERVATIONS_READ_SCOPE, method, "/v1/observations")
+
+    refreshed = app.post(
+        "/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": tokens["refresh_token"],
+            "scope": "sessions",
+        },
+    )
+    assert refreshed.status_code == 200
+    renewed = refreshed.json()
+    assert jwt.decode(renewed["access_token"], options={"verify_signature": False})["scope"] == (
+        OBSERVATIONS_READ_SCOPE
+    )
+    headers = {"Authorization": "Bearer " + renewed["access_token"]}
+    assert app.get("/v1/observations", headers=headers).status_code == 200
+    assert app.get("/v1/resources", headers=headers).status_code == 200
+    assert app.get("/v1/hosts", headers=headers).status_code == 401
+    reused = app.post(
+        "/oauth/token",
+        data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]},
+    )
+    assert reused.status_code == 400
+    assert app.get("/v1/observations", headers=headers).status_code == 401

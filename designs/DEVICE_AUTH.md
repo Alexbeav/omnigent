@@ -1,5 +1,13 @@
 # Delegated Auth — Device Authorization Grant (RFC 8628)
 
+The `omnigent-observations-read-only` public client selects the narrower
+`observations:read` scope. It still requires the same owner consent and grant
+revocation checks. GET/HEAD is limited to `/health`, `/v1/observations` and
+`/v1/resources`; session control, conversation content and admin paths are denied.
+Refresh preserves this scope. The consent page names session metadata and host
+CPU/RAM/GPU measurements. This client ID selects a restriction, not an identity
+or permission to bypass consent. See the [observation contract](../docs/native-session-observations.md).
+
 > **IMPLEMENTED.**
 >
 > A generic, client-agnostic delegated-login mechanism. Slack is the first
