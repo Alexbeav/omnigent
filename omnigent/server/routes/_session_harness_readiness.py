@@ -6,7 +6,10 @@ import asyncio
 
 from omnigent.entities import Conversation
 from omnigent.errors import ErrorCode, OmnigentError
-from omnigent.harness_availability import harness_launch_availability
+from omnigent.harness_availability import (
+    HARNESS_UNSUPPORTED_PLATFORM,
+    harness_launch_availability,
+)
 from omnigent.stores import ConversationStore
 from omnigent.stores.host_store import HostStore
 
@@ -60,6 +63,13 @@ async def validate_create_harness_readiness(
     available, reason = harness_launch_availability(harness, host.configured_harnesses)
     if available is not False:
         return
+    if reason == HARNESS_UNSUPPORTED_PLATFORM:
+        raise OmnigentError(
+            f"Harness {harness!r} is not supported on the target host's platform. "
+            "Choose a Linux, macOS or WSL host for native terminal integrations, "
+            "or choose an available integration on this host.",
+            code=ErrorCode.HARNESS_NOT_CONFIGURED,
+        )
     raise OmnigentError(
         f"Harness {harness!r} is not configured on the target host ({reason}). "
         "Install or configure the harness on that host, or choose an available harness.",

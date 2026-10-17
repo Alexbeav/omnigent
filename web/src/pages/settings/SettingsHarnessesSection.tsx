@@ -22,6 +22,7 @@ import {
   harnessReadinessOnHost,
   harnessUnavailableReasonOnHost,
   harnessWarningBadgeText,
+  UNSUPPORTED_PLATFORM_GUIDANCE,
 } from "@/lib/harnessSetup";
 import { NATIVE_CODING_AGENTS } from "@/lib/nativeCodingAgents";
 import { BackButton, HarnessCatalog } from "./HarnessCatalog";
@@ -292,7 +293,7 @@ function HarnessStatusText({ status }: { status: ReturnType<typeof harnessStatus
   if (status.ready) {
     return <span className="text-xs text-green-600 dark:text-green-400">Configured</span>;
   }
-  if (status.needsSetup) {
+  if (status.needsSetup || status.reason === "unsupported-platform") {
     // Sentence case to match "Configured"; the picker keeps the shared lowercase badge.
     const text = harnessWarningBadgeText(status.reason);
     return (
@@ -448,6 +449,8 @@ function HarnessDetail({
       <div className="mt-6 flex flex-col gap-6">
         {!host ? (
           <NoHostNotice />
+        ) : status.reason === "unsupported-platform" ? (
+          <p className="text-ui text-muted-foreground">{UNSUPPORTED_PLATFORM_GUIDANCE}</p>
         ) : status.ready ? (
           <>
             <p className="text-ui text-muted-foreground">

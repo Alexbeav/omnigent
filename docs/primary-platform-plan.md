@@ -7,6 +7,11 @@ The live editable checkout remains `~/Projects/omnigent`.
 
 The current v0.18.0 deployment and contribution work are covered by the [upstream update record](primary-platform-upstream-update.md).
 
+Windows native terminal work is tracked by [PLAT-89](https://youtrack.crosstalkis.com/issue/PLAT-89).
+The [implementation plan and ConPTY audit](windows-native-support.md) distinguish
+the first platform-availability correction from the later native Windows pilot.
+This development branch has not changed the deployed fleet.
+
 ## Result by request
 
 | Request | Implemented or established | Limit |

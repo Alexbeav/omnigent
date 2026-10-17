@@ -1036,6 +1036,12 @@ def _host(
         (_host({"claude-native": True, "codex-native": "binary-missing"}), ["claude-native"]),
         (_host({"claude-native": "needs-auth", "codex-native": True}), ["codex-native"]),
         (_host({"claude-native": "version-too-low", "codex-native": False}), []),
+        (
+            _host(
+                {"claude-native": "unsupported-platform", "codex-native": "unsupported-platform"}
+            ),
+            [],
+        ),
         # An unreported harness can't be assumed installed.
         (_host({"claude-native": True}), ["claude-native"]),
         # Fails open: a host with no readiness map doesn't disable routing.

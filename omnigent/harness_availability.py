@@ -8,14 +8,18 @@ from typing import Final, Literal, TypeGuard
 HARNESS_BINARY_MISSING: Final[Literal["binary-missing"]] = "binary-missing"
 HARNESS_NEEDS_AUTH: Final[Literal["needs-auth"]] = "needs-auth"
 HARNESS_VERSION_TOO_LOW: Final[Literal["version-too-low"]] = "version-too-low"
+HARNESS_UNSUPPORTED_PLATFORM: Final[Literal["unsupported-platform"]] = "unsupported-platform"
 
-HarnessUnavailableReason = Literal["binary-missing", "needs-auth", "version-too-low"]
+HarnessUnavailableReason = Literal[
+    "binary-missing", "needs-auth", "version-too-low", "unsupported-platform"
+]
 HarnessAvailability = Literal[
     True,
     False,
     "binary-missing",
     "needs-auth",
     "version-too-low",
+    "unsupported-platform",
 ]
 
 # Readiness and model-family checks must agree on every Codex spelling.
@@ -30,6 +34,7 @@ def is_harness_availability(value: object) -> TypeGuard[HarnessAvailability]:
         HARNESS_BINARY_MISSING,
         HARNESS_NEEDS_AUTH,
         HARNESS_VERSION_TOO_LOW,
+        HARNESS_UNSUPPORTED_PLATFORM,
     )
 
 

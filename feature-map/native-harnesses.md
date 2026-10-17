@@ -381,6 +381,14 @@ Cross-harness journeys:
 
 ## Gotchas
 
+- Windows hosts can report `unsupported-platform` for native terminal
+  integrations. The picker and Harness settings explain the Windows limitation
+  and the Linux/macOS/WSL alternative; install and credential repair do not make
+  this condition ready. Older hosts reporting only `false` retain generic setup
+  guidance until updated. SDK and ACP choices are independent, and selecting an
+  alternative must remain explicit. ConPTY support is a separate development
+  effort; this readiness state does not enable Windows native terminals.
+
 - A change to shared native-harness behavior (cleanup, idle handling,
   approvals, sign-in state, resume) must be checked on every harness it claims
   to cover. List the harnesses you actually drove; "all harnesses" means all

@@ -8,6 +8,7 @@ import {
   harnessReadinessOnHost,
   harnessUnavailableReasonOnHost,
   harnessUnconfiguredOnHost,
+  harnessWarningBadgeText,
   resolveSetupSteps,
   skillInvocationPrefix,
 } from "./harnessSetup";
@@ -156,6 +157,30 @@ describe("harnessUnconfiguredOnHost", () => {
 });
 
 describe("harnessReadinessOnHost", () => {
+  it.each(["codex-native", "native-codex", "claude-native", "native-claude"])(
+    "explains unsupported %s without offering installation or credentials",
+    (harness) => {
+      const windows = hostWith({ [harness]: "unsupported-platform", codex: true });
+      expect(harnessReadinessOnHost(harness, windows)).toMatchObject({
+        state: "unavailable",
+        reason: "unsupported-platform",
+        selectable: false,
+        explanation: {
+          label: "Unsupported on Windows",
+          description: expect.stringContaining("WSL"),
+        },
+      });
+      expect(harnessUnavailableReasonOnHost(harness, windows)).toBe("unsupported-platform");
+      expect(harnessWarningBadgeText("unsupported-platform", true)).toBe("unsupported on Windows");
+      expect(
+        harnessInstallableOnHost(info({ installable_harnesses: [harness] }), harness, windows),
+      ).toBe(false);
+      expect(harnessAuthableOnHost(info(), harness, windows)).toBe(false);
+      expect(resolveSetupSteps(CODEX_STEPS, harness, windows)).toEqual([]);
+      expect(harnessReadinessOnHost("codex", windows).selectable).toBe(true);
+    },
+  );
+
   it("keeps ready and legacy-unknown harnesses selectable", () => {
     expect(harnessReadinessOnHost("codex-native", hostWith({ "codex-native": true }))).toEqual({
       state: "available",

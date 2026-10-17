@@ -62,7 +62,8 @@ def test_native_terminal_harness_unavailable_on_windows(
 
     result = readiness.configured_harness_map()
 
-    assert result.get(harness) is not True
+    assert result.get(harness) == "unsupported-platform"
+    assert readiness.harness_is_configured(harness) is False
 
 
 def test_sdk_harnesses_remain_available_on_windows(

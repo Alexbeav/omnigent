@@ -6105,6 +6105,38 @@ describe("NewChatLandingScreen", () => {
     expect(screen.getByTestId("new-chat-landing-branch-chip")).toBeVisible();
   });
 
+  it.each([false, true])(
+    "explains unsupported Windows with setup feature %s",
+    (harness_install_enabled) => {
+      renderLanding({ harness_install_enabled, installable_harnesses: ["codex-native"] });
+      breakSelectedHarness("a2", "codex-native", "unsupported-platform");
+      expect(screen.getByTestId("new-chat-landing-harness-warning")).toHaveTextContent("WSL");
+      expect(screen.queryByTestId("new-chat-landing-harness-setup")).toBeNull();
+      expect(screen.queryByTestId("harness-setup-install")).toBeNull();
+    },
+  );
+
+  it("removes repair controls when an open setup dialog learns the platform is unsupported", () => {
+    renderLanding({ harness_install_enabled: true, installable_harnesses: ["codex-native"] });
+    breakSelectedHarness("a2", "codex-native", false);
+    fireEvent.click(screen.getByTestId("new-chat-landing-harness-setup"));
+    expect(screen.getByTestId("harness-setup-install")).toBeVisible();
+    mockHosts([
+      {
+        ...host("online"),
+        configured_harnesses: { "codex-native": "unsupported-platform" },
+      } as Host,
+    ]);
+    fireEvent.change(screen.getByTestId("new-chat-landing-input"), {
+      target: { value: "Changed" },
+    });
+    const dialog = screen.getByTestId("harness-setup-dialog");
+    expect(dialog).toHaveTextContent("Codex is unsupported");
+    expect(dialog).toHaveTextContent("WSL");
+    expect(within(dialog).queryByText(/omni setup/)).toBeNull();
+    expect(screen.queryByTestId("harness-setup-install")).toBeNull();
+  });
+
   it("opens the setup dialog and installs an installable harness from it", () => {
     // host_1 reports codex-native (agent a2) as not set up; the server accepts
     // that harness, so the composer notice offers a "Set up Codex" action that

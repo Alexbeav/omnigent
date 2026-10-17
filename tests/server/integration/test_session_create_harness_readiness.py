@@ -12,7 +12,9 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.parametrize("bundle", [False, True])
-@pytest.mark.parametrize("readiness", [False, "binary-missing", "version-too-low", "absent"])
+@pytest.mark.parametrize(
+    "readiness", [False, "binary-missing", "version-too-low", "unsupported-platform", "absent"]
+)
 async def test_child_create_rejects_unavailable_harness(
     client: httpx.AsyncClient,
     app: FastAPI,
@@ -66,6 +68,10 @@ async def test_child_create_rejects_unavailable_harness(
     assert response.status_code == 412, response.text
     assert response.json()["error"]["code"] == "harness_not_configured"
     assert "jcode" in response.json()["error"]["message"]
+    if readiness == "unsupported-platform":
+        message = response.json()["error"]["message"]
+        assert "not supported" in message and "WSL" in message
+        assert "Install or configure" not in message
     assert len(store.list_conversations(limit=100).data) == len(before)
 
 

@@ -113,6 +113,7 @@ import {
   harnessUnavailableReasonOnHost,
   harnessUnconfiguredOnHost,
   harnessWarningBadgeText,
+  UNSUPPORTED_PLATFORM_GUIDANCE,
   isCodexHarness,
   isNativeCursorHarness,
   skillInvocationPrefix,
@@ -798,6 +799,13 @@ function harnessWarningMessage(
   harness: string | null | undefined,
 ): ReactNode {
   const isCodex = !!harness && isCodexHarness(harness);
+  if (reason === "unsupported-platform") {
+    return (
+      <>
+        {agentName} is unsupported on {hostName}. {UNSUPPORTED_PLATFORM_GUIDANCE}
+      </>
+    );
+  }
   if (reason === "needs-auth" && isCodex) {
     return (
       <>
@@ -864,7 +872,7 @@ function HarnessSetupNotice({
       data-testid="new-chat-landing-harness-warning"
     >
       <TriangleAlertIcon className="size-3.5 shrink-0" />
-      {featureEnabled ? (
+      {featureEnabled && reason !== "unsupported-platform" ? (
         <>
           <span>
             {agentName} isn&apos;t ready on {hostName}.

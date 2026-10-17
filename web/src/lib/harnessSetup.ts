@@ -47,7 +47,12 @@ export type HarnessReadinessReason =
   | "needs-auth"
   | "unconfigured"
   | "version-too-low"
+  | "unsupported-platform"
   | "readiness-error";
+
+export const UNSUPPORTED_PLATFORM_GUIDANCE =
+  "Native terminal integrations are not supported on Windows yet. " +
+  "Choose a Linux, macOS or WSL host, or an available integration on this host.";
 
 export interface HarnessReadinessExplanation {
   label: string;
@@ -104,6 +109,12 @@ export function harnessReadinessOnHost(
   const availability = configured[harness];
   if (availability === true) {
     return harnessReadinessResult("available", "ready", false, null);
+  }
+  if (availability === "unsupported-platform") {
+    return harnessReadinessResult("unavailable", "unsupported-platform", true, {
+      label: "Unsupported on Windows",
+      description: UNSUPPORTED_PLATFORM_GUIDANCE,
+    });
   }
   if (availability === "version-too-low") {
     return harnessReadinessResult("broken", "version-too-low", true, {
@@ -209,6 +220,7 @@ export function harnessUnavailableReasonOnHost(
   if (
     availability === "binary-missing" ||
     availability === "needs-auth" ||
+    availability === "unsupported-platform" ||
     availability === "version-too-low"
   ) {
     return availability;
@@ -258,6 +270,7 @@ export function harnessUnconfiguredOnHost(
  * flag-off path renders byte-for-byte the original text.
  */
 export function harnessWarningBadgeText(reason: string | null, collapsed = false): string {
+  if (reason === "unsupported-platform") return "unsupported on Windows";
   if (collapsed) return "needs setup";
   if (reason === "binary-missing") return "binary missing";
   if (reason === "needs-auth") return "needs auth";
@@ -283,6 +296,7 @@ export function harnessInstallableOnHost(
     isFeatureEnabled(info, "harness_install") &&
     !!harness &&
     info.installable_harnesses.includes(harness) &&
+    host?.configured_harnesses?.[harness] !== "unsupported-platform" &&
     host?.status === "online"
   );
 }
@@ -340,6 +354,7 @@ export function harnessAuthableOnHost(
     info !== "loading" &&
     isFeatureEnabled(info, "harness_install") &&
     harnessCredentialFamily(harness) !== null &&
+    (!harness || host?.configured_harnesses?.[harness] !== "unsupported-platform") &&
     host?.status === "online"
   );
 }
@@ -384,6 +399,7 @@ export function resolveSetupSteps(
 ): ResolvedSetupStep[] {
   if (!serverSteps || !harness) return [];
   const availability = host?.configured_harnesses?.[harness];
+  if (availability === "unsupported-platform") return [];
   const resolved = serverSteps.map((step) => ({
     kind: step.kind,
     title: step.title,

@@ -870,13 +870,21 @@ def test_hello_frame_configured_harnesses_round_trip() -> None:
         version="0.1.0",
         frame_protocol_version=1,
         name="corey-laptop",
-        configured_harnesses={"claude-sdk": True, "codex": "needs-auth"},
+        configured_harnesses={
+            "claude-sdk": True,
+            "codex": "needs-auth",
+            "codex-native": "unsupported-platform",
+        },
     )
     decoded = decode_host_frame(encode_host_frame(original))
     assert isinstance(decoded, HostHelloFrame)
     # Exact map equality: both the True and the False must survive —
     # False is the actionable "warn the user" value.
-    assert decoded.configured_harnesses == {"claude-sdk": True, "codex": "needs-auth"}
+    assert decoded.configured_harnesses == {
+        "claude-sdk": True,
+        "codex": "needs-auth",
+        "codex-native": "unsupported-platform",
+    }
 
 
 def test_connection_error_frame_round_trip() -> None:
@@ -893,11 +901,11 @@ def test_connection_error_frame_round_trip() -> None:
 def test_harness_readiness_frame_round_trip() -> None:
     """Verify a live readiness refresh survives encode and decode."""
     original = HostHarnessReadinessFrame(
-        configured_harnesses={"pi": True, "codex": "needs-auth"},
+        configured_harnesses={"pi": True, "codex-native": "unsupported-platform"},
     )
     decoded = decode_host_frame(encode_host_frame(original))
     assert isinstance(decoded, HostHarnessReadinessFrame)
-    assert decoded.configured_harnesses == {"pi": True, "codex": "needs-auth"}
+    assert decoded.configured_harnesses == {"pi": True, "codex-native": "unsupported-platform"}
 
 
 def test_hello_frame_gateway_inference_round_trip() -> None:

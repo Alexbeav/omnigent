@@ -36,6 +36,8 @@ import {
   harnessAuthableOnHost,
   harnessInstallableOnHost,
   resolveSetupSteps,
+  harnessUnavailableReasonOnHost,
+  UNSUPPORTED_PLATFORM_GUIDANCE,
   type ResolvedSetupStep,
 } from "@/lib/harnessSetup";
 import { HarnessCredentialForm } from "@/shell/HarnessCredentialForm";
@@ -75,6 +77,7 @@ export function HarnessSetupDialog({
   const installable = harnessInstallableOnHost(info, harness, host);
   const authable = harnessAuthableOnHost(info, harness, host);
   const name = agentName ?? harness ?? "this agent";
+  const unsupported = harnessUnavailableReasonOnHost(harness, host) === "unsupported-platform";
 
   // Auth is a SECOND step: gate the credential form until the binary is
   // present, so the checklist runs Install → Set up auth in order. Without this,
@@ -136,20 +139,24 @@ export function HarnessSetupDialog({
       <DialogContent className="sm:max-w-lg" data-testid="harness-setup-dialog">
         <DialogHeader>
           <DialogTitle>
-            Set up {name} on {host?.name}
+            {unsupported
+              ? `${name} is unsupported on ${host?.name}`
+              : `Set up ${name} on ${host?.name}`}
           </DialogTitle>
           {/* Only show a description when it adds something the title doesn't:
               the done / needs-more-setup states. The generic "complete these
               steps…" just echoes the title, so it's omitted for the common
               checklist case. */}
-          {allDone ? (
+          {unsupported ? (
+            <DialogDescription>{UNSUPPORTED_PLATFORM_GUIDANCE}</DialogDescription>
+          ) : allDone ? (
             <DialogDescription>{`${name} is ready on ${host?.name}.`}</DialogDescription>
           ) : collapsed ? (
             <DialogDescription>{`${name} needs a bit more setup on ${host?.name}.`}</DialogDescription>
           ) : null}
         </DialogHeader>
 
-        {collapsed && !allDone ? (
+        {unsupported ? null : collapsed && !allDone ? (
           // No step the UI can perform (curl-install / own-login harness, or no
           // published steps) and not yet done. One clear signpost — never a
           // dead-end. When everything IS done we fall through to the checklist

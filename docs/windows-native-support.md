@@ -1,0 +1,113 @@
+# Native Windows terminal support
+
+Tracking: [PLAT-89](https://youtrack.crosstalkis.com/issue/PLAT-89), a focused
+follow-up to the broader Windows harness work in PLAT-52. Implementation starts
+from fork source `cc854a1b6` on `feature/windows-native-support`.
+
+## First increment: explain platform availability
+
+The Windows host reports `unsupported-platform` for native terminal harnesses.
+The server preserves that reason, blocks unsupported session creation before
+persistence, and excludes these harnesses from native Smart Routing. The web
+picker, composer warning, setup dialog and Harness settings explain the Windows
+limitation and the Linux/macOS/WSL alternative. Installation and credential
+repair are not offered for this condition. Existing SDK and ACP choices remain
+independent; there is no automatic host, harness, account or billing switch.
+
+Older hosts reporting `false` retain their existing behavior: the client cannot
+infer a platform from that value. A Windows host update is required for the new
+explanation. Deploy a server that understands the new readiness value before
+updating hosts; older live-frame decoders reject unfamiliar readiness strings.
+Linux/macOS readiness and the current Windows launch restriction remain intact.
+
+This increment does not provide native Windows terminals. It has not been
+deployed. Component, host-frame and session-create checks are distinct from
+browser proof and real Windows qualification.
+
+Development checkpoint, 2026-10-17: 575 Python checks passed, covering the
+Windows gate, host frames, session creation, Smart Routing and feature maps.
+The three frontend suites passed 691 tests; a subsequent focused run passed
+14 cases including two additional settings/dialog cases. Two Python and four
+frontend regressions fail against the original code. Ruff, Pyrefly, frontend
+lint, formatting, project checks and OpenAPI freshness pass. The full
+`tsc -b` check passed separately in a bounded existing-toolchain Steam Deck
+lane with a 2 GiB Node heap, after the local 768 MiB limit proved insufficient.
+The local hook run omits only that separately completed TypeScript check.
+The exact Deck process group drained and its claim was released. Browser
+proof, production rollout and native Windows execution remain pending.
+
+## ConPTY port inputs and gaps
+
+Audit the existing
+[Windows fork at `0325b9aa3`](https://github.com/ubuntuyou/omnigent-win/tree/0325b9aa31528599cea58119379ee8555e7f4b44)
+as reference material. Its LICENSE is Apache-2.0. Retain applicable attribution
+and notices when adapting code; no third-party implementation has been copied
+into this increment.
+
+The fork provides one ConPTY reader with output fan-out, a serialized writer,
+browser subscriptions, resizing and replay. Its README documents missing Files
+and terminal-resource support, raw output instead of a rendered screen, no
+keep-alive after CLI exit, and no local PowerShell terminal attach. Treat its
+reported Claude/Codex success as the author's evidence, not qualification of
+this fork or the installed CLI versions.
+
+The current interface audit found five public terminal methods absent from the
+fork's `WindowsTerminalInstance`: `client_interaction_within`, `last_exit_signal`,
+`last_exit_status`, `last_exit_text`, and `pane_pid_sync`. Current runner startup
+diagnostics and terminal registry code consume those methods. Its cleanup calls
+`_proc.kill_tree(pid)` with an integer, whereas our current helper requires a
+process object with an owned identity. Adapting those calls is required before
+reusing the implementation.
+
+The terminal WebSocket control bridge and other consumers still invoke tmux
+directly. Introduce a narrow backend interface for launch, input, resize,
+screen/replay, subscribe/detach, liveness, exit diagnostics and close. Keep the
+tmux implementation for POSIX. A ConPTY backend must implement that contract
+rather than fabricate a socket path that tmux consumers will try to open.
+
+[Microsoft's ConPTY guidance](https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session)
+calls out independent input/output servicing and deadlock risks during close.
+Test blocked reads, startup failure and cancellation as well as successful
+interactive input. The terminal owner should outlive browser connections;
+closing a browser is not closing the session. A host crash needs an explicit
+recovery policy; ConPTY does not supply tmux's independent persistent server.
+Keep bounded replay and backpressure so a slow viewer cannot grow memory
+without limit. Retain process identity checks and evaluate Job Object ownership
+without claiming filesystem or network isolation.
+
+## Delivery and qualification
+
+1. Validate and publish the platform-readiness increment separately.
+2. Extract the terminal backend boundary with unchanged POSIX behavior.
+3. Adapt ConPTY behind an experimental capability gate; keep unsupported
+   harnesses unavailable until their Windows checks pass.
+4. Qualify Claude and Codex individually on one admitted Windows host, then
+   consider rollout to the remaining fleet and focused upstream PRs.
+
+The Windows pilot must cover hidden startup, fresh and resumed two-turn chats,
+Unicode/Greek paths and multiline paste, cwd/file access, model and reasoning
+controls, approvals and permission modes, structured questions, MCP, images,
+queue/steer/cancel, browser reload/reconnect, terminal resizing, process exit,
+host recovery and owned-process cleanup. Use existing local sign-ins. Preserve
+vendor trust checks and account routing; do not copy credentials between hosts
+or weaken checks to make a pilot pass. Local console attach remains a separate
+entry point and must be implemented or explicitly excluded from the first pilot.
+
+For the first increment, run the owning tests:
+
+```sh
+python -m pytest tests/onboarding/test_native_harnesses_windows_unavailable.py \
+  tests/host/test_frames.py tests/server/integration/test_session_create_harness_readiness.py \
+  tests/server/routes/test_native_smart_routing_create.py -q --reruns 0 -n 0
+cd web
+node node_modules/vitest/vitest.mjs run src/lib/harnessSetup.test.ts \
+  src/pages/settings/SettingsHarnessesSection.test.tsx \
+  src/shell/NewChatDialog.test.tsx --maxWorkers=1 --fileParallelism=false
+```
+
+Before deploying, build the candidate and exercise the new-session picker on
+desktop and mobile, the selected-harness warning, direct setup dialog, Harness
+settings grid and detail page. Test both setup-feature states, native aliases,
+older boolean readiness, an available SDK/ACP choice and a working Linux/WSL
+native choice. Confirm an unsupported session is not created. The installed
+production bundle cannot prove this undeployed candidate.

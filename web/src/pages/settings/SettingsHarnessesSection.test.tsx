@@ -212,6 +212,30 @@ afterEach(() => {
 });
 
 describe("Harnesses grid", () => {
+  it("explains the platform limitation on the harness details page", () => {
+    hosts = [{ ...ONLINE, configured_harnesses: { "codex-native": "unsupported-platform" } }];
+    renderHarnesses("codex-native");
+    expect(screen.getByText(/Choose a Linux, macOS or WSL host/)).toBeTruthy();
+    expect(screen.queryByTestId("harness-action-codex-native")).toBeNull();
+  });
+
+  it("labels unsupported Windows harnesses without a setup action", () => {
+    hosts = [
+      {
+        ...ONLINE,
+        configured_harnesses: {
+          "claude-native": "unsupported-platform",
+          "codex-native": "unsupported-platform",
+        },
+      },
+    ];
+    renderHarnesses();
+    for (const harness of ["claude-native", "codex-native"]) {
+      expect(within(card(harness)).getByText("Unsupported on Windows")).toBeTruthy();
+      expect(screen.queryByTestId(`harness-action-${harness}`)).toBeNull();
+    }
+  });
+
   it("shows Installed (no Set-up) for a ready harness and a badge + Set-up for a not-ready one", () => {
     hosts = [ONLINE];
     renderHarnesses();

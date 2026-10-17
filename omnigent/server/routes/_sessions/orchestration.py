@@ -54,6 +54,7 @@ from omnigent.errors import ElicitationDeclinedError, ErrorCode, OmnigentError
 from omnigent.harness_availability import (
     HARNESS_BINARY_MISSING,
     HARNESS_NEEDS_AUTH,
+    HARNESS_UNSUPPORTED_PLATFORM,
     HARNESS_VERSION_TOO_LOW,
 )
 from omnigent.host.frames import (
@@ -9812,7 +9813,13 @@ def _native_subagent_wrapper_labels(
 # session landing on a missing or unauthenticated binary would fail to open its
 # terminal, so those harnesses are never offered to Smart Routing.
 _NATIVE_UNAVAILABLE_READINESS: frozenset[object] = frozenset(
-    {False, HARNESS_BINARY_MISSING, HARNESS_NEEDS_AUTH, HARNESS_VERSION_TOO_LOW}
+    {
+        False,
+        HARNESS_BINARY_MISSING,
+        HARNESS_NEEDS_AUTH,
+        HARNESS_VERSION_TOO_LOW,
+        HARNESS_UNSUPPORTED_PLATFORM,
+    }
 )
 
 
