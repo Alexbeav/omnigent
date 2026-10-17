@@ -443,3 +443,28 @@ To verify: refresh Omnigent, open the Athena Cline conversation, expand
 The web change requires no host update. This follow-up is separate from the
 permission-picker upstream PR.
 
+### ClinePass routing, 2026-10-17
+
+All seven online hosts now pin `CLINE_PROVIDER=cline-pass` and
+`CLINE_MODEL=cline-pass/deepseek-v4.1-flash` in their existing process launcher,
+with matching flags and Omnigent model defaults. Cline 3.0.72 ACP ignores the
+CLI provider/model arguments while constructing its agent; a real protocol
+probe reproduced the credit-provider selection with flags alone and passed
+after the persistent environment correction. The final check used the saved
+Athena launcher without probe-only overrides and sent zero model prompts.
+All probe processes drained. Provider credentials and private per-chat MCP
+settings were preserved. Both resident Cline chats were stopped/reconnected
+as Alex requested; their runners are online and idle. No NAS rebuild or host
+service restart was needed. Offline athena-rocky remains pending.
+
+The operational authority and old flag-only guidance were corrected in the
+private homelab state, plan and gotchas notes. Sanitized receipts and local
+rollback copies are under `~/.local/state/omnigent-investigations/cline-subscription-20261017/`
+and each host's `.omnigent/backups/cline-subscription-20261017/`, respectively.
+Do not infer subscription routing solely from `lastUsedProvider` or dollar
+estimates. To verify, resume a Cline chat and inspect ClinePass usage in the
+[Cline dashboard](https://app.cline.bot/); its
+[documentation](https://github.com/cline/cline/blob/main/docs/getting-started/clinepass.mdx)
+explains the reference pricing used for quota measurement. Historical account
+charges were not audited. This is fleet configuration, not a default imposed
+on upstream users.
