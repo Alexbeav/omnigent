@@ -45,7 +45,10 @@ class PTYDriver(Protocol):
     def pid(self) -> int: ...
 
     def read(self) -> str: ...
-    def write(self, text: str) -> int: ...
+    def write(self, text: str) -> int | None:
+        """Return completed bytes, or None for accepted buffered input."""
+        ...
+
     def resize(self, rows: int, cols: int) -> None: ...
     def is_alive(self) -> bool: ...
     def exit_status(self) -> int | None: ...
@@ -186,7 +189,7 @@ class ConPTYSession:
         return future
 
     def write(self, text: str) -> Future[None]:
-        """Enqueue one indivisible payload, including any paste delimiters/Enter."""
+        """Enqueue one payload; completion means accepted, not child consumption."""
         size = len(text.encode("utf-8"))
         return self._enqueue(_Operation(text, None, Future(), size))
 
@@ -263,7 +266,7 @@ class ConPTYSession:
                     raise ConPTYError("Terminal is closed.")
                 if operation.text is not None:
                     written = self._driver.write(operation.text)
-                    if written != operation.byte_count:
+                    if written is not None and written != operation.byte_count:
                         raise ConPTYError("Terminal input write was incomplete.")
                 elif operation.size is not None:
                     self._driver.resize(*operation.size)
@@ -382,8 +385,10 @@ class _WindowsDriver:
     def read(self) -> str:
         return self._native().read(blocking=False)
 
-    def write(self, text: str) -> int:
-        return self._native().write(text)
+    def write(self, text: str) -> None:
+        # ConPTY's overlapped counter can describe a previous write, even zero.
+        # A successful call accepts this input; completion is not exposed.
+        self._native().write(text)
 
     def resize(self, rows: int, cols: int) -> None:
         self._native().set_size(cols, rows)

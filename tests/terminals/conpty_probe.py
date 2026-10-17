@@ -88,8 +88,10 @@ def run_probe(root_dir: Path) -> dict[str, object]:
             if index:
                 session.unsubscribe(viewer)
                 viewer = session.subscribe(replay=False)
-            text = f"Καλημέρα {index}\nsecond line & literal |"
-            session.write(json.dumps({"op": op, "text": text}) + "\r").result(timeout=5)
+            text = f"Καλημέρα 😀 {index}\nsecond line & literal |"
+            session.write(json.dumps({"op": op, "text": text}, ensure_ascii=False) + "\r").result(
+                timeout=5
+            )
             expected = "FIXTURE_REPLY:" + json.dumps(
                 {"text": text, "cwd": str(cwd), "file": "owned fixture"}, ensure_ascii=False
             )

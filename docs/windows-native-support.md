@@ -87,10 +87,19 @@ one serialized input worker. It bounds replay, viewer queues and pending input;
 a stalled viewer gets a reconnect error instead of silently losing VT bytes.
 Browser detach and adapter cancellation release only the viewer. Writable
 viewers use the smallest requested dimensions; read-only viewers cannot send
-input or resize. Partial writes stop input without retrying the payload.
+input or resize. Reported partial writes stop input without retrying the payload.
 Runner authentication variables are scrubbed case-insensitively, and argv is
 passed literally to an executable. Batch launchers are explicitly rejected
 until their native executable adapters exist.
+
+Input futures mean the backend accepted a payload, not that the child consumed
+it. The pywinpty 3.0.5 ConPTY binding buffers overlapped writes; its returned
+counter can describe a previous operation, including zero for the first call.
+The Windows adapter uses successful submission rather than interpreting that
+counter as current-payload completion. Exceptions stop input without replay.
+The binding does not expose the final buffered write's completion separately;
+do not claim full-write acknowledgement from a successful future. See the
+[pinned binding implementation](https://github.com/andfoy/winpty-rs/blob/v1.0.6/src/pty/base.rs).
 
 The Windows driver requires an owned kill-on-close Job Object and retains a
 process object with its birth identity for failed-setup cleanup. Assignment
@@ -113,6 +122,23 @@ and cleanup retry. A Windows-only process-boundary test exercises two fixture
 turns, Unicode cwd and file access, reconnect, resize, exit diagnostics and
 descendant cleanup. It needs a separately admitted native Windows test lane;
 passing portable tests does not qualify the Windows binding or either provider.
+
+Windows transport checkpoint, 2026-10-17: an isolated Eagle candidate passed
+the real process probe with pywinpty 3.0.5. Two raw Greek/emoji input turns,
+multiline content, a Greek cwd with spaces, file access, reconnect preserving
+the process, resize, final output, exit status 7, descendant cleanup and both
+I/O workers stopping all passed. The bounded phase peaked at approximately
+103 MiB across the controller and observed descendants. All owned process
+identities drained and the exact shared resource claim was released.
+
+The first probe failed at input because the transport treated the binding's
+buffered counter as current-payload completion. That failure is retained; a
+portable regression fails before the fix and passes after it. The retry used
+an explicitly hashed overlay in the private candidate. Production installation,
+native readiness and existing sessions were unchanged. No Claude/Codex process
+or provider inference was used, so this is transport qualification only.
+The updated portable/readiness checks pass 48 tests, with the Windows process
+test skipped on Linux and separately executed by the standalone native probe.
 
 Run the portable checks without a provider or server:
 

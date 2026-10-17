@@ -328,6 +328,44 @@ def test_factory_hides_private_startup_errors(
         conpty.spawn_conpty(["python"], cwd=tmp_path, env={})
 
 
+def test_windows_buffered_write_counts_do_not_replay_or_reject_accepted_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psutil
+
+    from omnigent.inner import _proc
+    from omnigent.inner.windows_jobobject_sandbox import WindowsJobObjectSandboxBackend
+
+    process = Mock()
+    process.create_time.return_value = 100.5
+    monkeypatch.setattr(psutil, "Process", lambda pid: process)
+    monkeypatch.setattr(_proc, "refresh_process_tree", Mock())
+    native = Mock(pid=12345)
+    native.read.return_value = ""
+    native.isalive.return_value = True
+    native.get_exitstatus.side_effect = lambda: None if native.isalive() else 137
+    # The native counter can be zero or describe a previous overlapped write.
+    native.write.side_effect = [0, 1000, RuntimeError("private native error")]
+    job = Mock()
+    job.close.side_effect = lambda: setattr(native.isalive, "return_value", False)
+    monkeypatch.setattr(WindowsJobObjectSandboxBackend, "post_spawn", lambda *args: job)
+    session = conpty.ConPTYSession(conpty._WindowsDriver(native))
+    try:
+        session.write("Καλημέρα 😀\r").result(timeout=1)
+        session.write("second\r").result(timeout=1)
+        with pytest.raises(conpty.ConPTYError, match=r"^Terminal input operation failed\.$"):
+            session.write("third\r").result(timeout=1)
+        assert [call.args[0] for call in native.write.call_args_list] == [
+            "Καλημέρα 😀\r",
+            "second\r",
+            "third\r",
+        ]
+    finally:
+        session.close()
+    assert not session.workers_alive
+    job.close.assert_called()
+
+
 @pytest.mark.windows_only
 def test_windows_conpty_two_turns_reconnect_resize_and_owned_child_cleanup(tmp_path: Path) -> None:
     from tests.terminals.conpty_probe import run_probe
