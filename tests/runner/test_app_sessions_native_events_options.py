@@ -405,7 +405,13 @@ async def test_acp_permission_switch_reaches_own_authenticated_harness(
         AgentSpec(
             spec_version=1,
             name="t",
-            executor=ExecutorSpec(type="omnigent", config={"harness": "acp:cline"}),
+            executor=ExecutorSpec(
+                type="omnigent",
+                config={
+                    "harness": "acp:cline",
+                    "acp_agent": {"name": "Cline fixture", "command": "must-not-run"},
+                },
+            ),
         )
     )
     async with httpx.AsyncClient(
