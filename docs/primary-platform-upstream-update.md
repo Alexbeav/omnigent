@@ -614,3 +614,30 @@ and was left intact. Private execution/rollback evidence remains under
 `~/.local/state/omnigent-investigations/rollout-20261017/`; benchmark fixtures,
 raw transcripts, credentials and demo media remain outside the application Git
 history.
+
+### Cline composer permissions follow-up, 2026-10-17
+
+Fork source `db7c03010` adds a per-chat permission selector for existing ACP
+chats, including Cline. It exposes **Ask every time** and **Full access** in
+main, split and mobile composers, confirms the runner's exact acknowledgement
+before persistence and restores the choice before a cold runner's next turn.
+Explicit policies retain precedence. This UI follow-up has not yet been ported
+to the existing upstream ACP permission contribution.
+
+The NAS now runs
+`registry.crosstalkis.com/omnigent-server:sha-db7c03010-r2@sha256:98d75f43e43474762a56c45d7427309408e098e6bf361bf598541dac89f26684`.
+Two isolated candidate startups and an old-image rollback preserved original
+rows and all 98 dependency distributions. The live cutover retained all 227
+conversations and 102,519 existing items; no other container changed. All 525
+packaged assets and 524 static responses plus the server-rewritten LAN/public
+index match the tested build. NAS deployment commit `02de0e709` is pushed.
+
+The verified private dump is
+`/volume1/docker/stacks/omnigent/backups/acp-permissions-20261017-db7c03010-r3/cutover.dump`,
+129,396,836 bytes, SHA-256
+`7458bb78e57e155f672eb6cf6677a034f5c06340b6cd47ac4e1bc4e64edafc23`.
+Athena has an isolated qualified runtime and next-start hidden task binding;
+activation awaits Alex's choice about interrupting its existing Cline turn.
+Its original installation remains intact. Other hosts were not restarted.
+Deployment evidence is under
+`~/.local/state/omnigent-investigations/acp-permissions-20261017/`.

@@ -360,3 +360,35 @@ remaining work is separate from that completed fix:
 Suggested next replies are already implemented and deployed separately; they
 remain opt-in and consume extra model usage. They are not an unfinished part
 of the accepted structured-question work.
+
+### Cline permission control, 2026-10-17
+
+Source `db7c03010` adds **Ask every time** and **Full access** to existing
+Cline/ACP composers in main, split and mobile panes. Refresh the UI and open
+**Permissions** in the target chat. Selection is chat-scoped and saved only
+after the runner confirms it. Full access automatically answers subsequent ACP
+permission requests; explicit policy DENY/ASK still applies. Existing pending
+cards need an answer. Cold runners restore the saved choice before their next
+turn. No provider call or ACP process restart is needed for a live switch.
+
+The NAS is deployed at this source, with all 525 image assets and 524 static
+responses plus rewritten LAN/public index responses verified. Deployment commit
+`02de0e709` is pushed to the NAS repository. Restored-database startup/restart
+and rollback qualification passed; the cutover retained all 227 conversations,
+102,519 existing items, the schema and all 30 other containers.
+
+Athena's isolated candidate runtime preserves all 91 dependency versions, and
+its hidden startup task selects it for the next start. Its running host and
+current Cline turn remain on the old runtime. Activation awaits Alex's choice
+because the turn was paused on an existing read approval. Older runners reject
+the new mode control rather than falsely saving it. Other hosts were not
+restarted. Fleet troubleshooting and benchmarks remain paused.
+
+Validation includes 241 ACP/runner tests, 43 server integration tests, 669
+frontend tests, three main/split/mobile browser journeys, two real
+server/runner/fixture-ACP round trips, two cold-restoration checks and 246
+feature-map checks. The browser test fails against the previous deployed
+bundle at the missing selector. The fixture checks are not a fresh live-provider
+or human acceptance claim. The production UI build and browser journeys ran in
+the bounded claimed Deck lane; its 14 owned process groups are drained and the
+claim is released.
