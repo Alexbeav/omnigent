@@ -377,11 +377,13 @@ responses plus rewritten LAN/public index responses verified. Deployment commit
 and rollback qualification passed; the cutover retained all 227 conversations,
 102,519 existing items, the schema and all 30 other containers.
 
-Athena's isolated candidate runtime preserves all 91 dependency versions, and
-its hidden startup task selects it for the next start. Its running host and
-current Cline turn remain on the old runtime. Activation awaits Alex's choice
-because the turn was paused on an existing read approval. Older runners reject
-the new mode control rather than falsely saving it. Other hosts were not
+Athena's isolated runtime preserves all 91 dependency versions. After Alex
+reported the old runner's rejected mode change, a fresh preflight confirmed the
+host idle and its only connected chat free of pending approvals. The existing
+hidden startup task activated the new host, preserving its identity. The normal
+chat reconnect preserved all 138 items, and its new ACP runner confirmed the
+requested **Full access** mode without sending a new provider turn. Older
+runners reject the control rather than falsely saving it. Other hosts were not
 restarted. Fleet troubleshooting and benchmarks remain paused.
 
 Validation includes 241 ACP/runner tests, 43 server integration tests, 669

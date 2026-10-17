@@ -636,8 +636,10 @@ The verified private dump is
 `/volume1/docker/stacks/omnigent/backups/acp-permissions-20261017-db7c03010-r3/cutover.dump`,
 129,396,836 bytes, SHA-256
 `7458bb78e57e155f672eb6cf6677a034f5c06340b6cd47ac4e1bc4e64edafc23`.
-Athena has an isolated qualified runtime and next-start hidden task binding;
-activation awaits Alex's choice about interrupting its existing Cline turn.
-Its original installation remains intact. Other hosts were not restarted.
+Athena is active on its isolated qualified runtime after a fresh idle-host
+preflight. Its hidden task and host identity are preserved. The manager chat's
+new ACP runner confirmed the requested **Full access** mode, preserving all
+138 stored items without a new provider turn. Its original installation remains
+intact for rollback. Other hosts were not restarted.
 Deployment evidence is under
 `~/.local/state/omnigent-investigations/acp-permissions-20261017/`.
