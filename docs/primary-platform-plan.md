@@ -394,3 +394,15 @@ bundle at the missing selector. The fixture checks are not a fresh live-provider
 or human acceptance claim. The production UI build and browser journeys ran in
 the bounded claimed Deck lane; its 14 owned process groups are drained and the
 claim is released.
+
+The focused upstream port is now ready for review as
+[PR #10696](https://github.com/omnigent-ai/omnigent/pull/10696), closing
+[issue #10695](https://github.com/omnigent-ai/omnigent/issues/10695). Its branch
+`contrib/acp-session-permission-ui` at `bc5c834fe` contains the upstream desktop
+and mobile controls without fork-only panes. The port passed 216 Python, 672
+frontend, two browser, two fixture server/runner and 281 feature-map checks,
+plus the production build and applicable hooks. Reviewed GitHub screenshot
+attachments are verified by anonymous byte-for-byte download. The separate
+five-minute Deck phase is drained and released. Upstream maintainer approval
+remains; the earlier five open PRs have no review comments awaiting a response,
+and the question-controls/MCP-launch PRs remain drafts.

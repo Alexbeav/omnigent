@@ -621,8 +621,27 @@ Fork source `db7c03010` adds a per-chat permission selector for existing ACP
 chats, including Cline. It exposes **Ask every time** and **Full access** in
 main, split and mobile composers, confirms the runner's exact acknowledgement
 before persistence and restores the choice before a cold runner's next turn.
-Explicit policies retain precedence. This UI follow-up has not yet been ported
-to the existing upstream ACP permission contribution.
+Explicit policies retain precedence. The focused upstream port is ready for
+review as [PR #10696](https://github.com/omnigent-ai/omnigent/pull/10696), closing
+[issue #10695](https://github.com/omnigent-ai/omnigent/issues/10695). Source
+`bc5c834fe` is pushed to `contrib/acp-session-permission-ui`, based on upstream
+`90a9bed9a`. It does not include the fork's ordinary split-pane code and is
+independent of the existing per-agent configuration PR #7375.
+
+The upstream port passed 216 focused Python checks, 672 frontend checks, two
+desktop/mobile browser journeys, two real server/runner/fixture-ACP journeys,
+281 feature-map checks, a production Vite build and all applicable pre-commit
+hooks. The two reviewed screenshots are GitHub attachments; anonymous downloads
+match their captured bytes. No media is committed. The bounded Deck validation
+phase finished within five minutes, all four receipt-matched process groups
+were drained, and its unique claim was released.
+
+All five earlier open PRs were checked for comments, reviews and unresolved
+threads: none has maintainer feedback awaiting a response. #10431 contains only
+the author's earlier demo comment. #10561 and #10575 remain drafts. The older
+Windows PR #7370 stays closed because its remaining fix is already upstream.
+The new PR's DCO check passes; GitHub's separate maintainer-approval gate awaits
+an upstream maintainer. Local validation does not claim all remote CI passed.
 
 The NAS now runs
 `registry.crosstalkis.com/omnigent-server:sha-db7c03010-r2@sha256:98d75f43e43474762a56c45d7427309408e098e6bf361bf598541dac89f26684`.
