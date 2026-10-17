@@ -367,10 +367,13 @@ def test_windows_buffered_write_counts_do_not_replay_or_reject_accepted_input(
 
 
 @pytest.mark.windows_only
-def test_windows_conpty_two_turns_reconnect_resize_and_owned_child_cleanup(tmp_path: Path) -> None:
+@pytest.mark.parametrize("capture_screen", [False, True])
+def test_windows_conpty_two_turns_reconnect_resize_and_owned_child_cleanup(
+    tmp_path: Path, capture_screen: bool
+) -> None:
     from tests.terminals.conpty_probe import run_probe
 
-    result = run_probe(tmp_path)
+    result = run_probe(tmp_path, capture_screen=capture_screen)
     assert result["status"] == "passed"
     assert result["owned_processes_remaining"] == 0
     assert result["io_workers_remaining"] == 0

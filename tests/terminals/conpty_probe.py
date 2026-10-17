@@ -18,7 +18,7 @@ import psutil
 from omnigent.terminals import conpty
 
 
-def run_probe(root_dir: Path) -> dict[str, object]:
+def run_probe(root_dir: Path, *, capture_screen: bool = False) -> dict[str, object]:
     """Exercise the real binding and fail if owned processes do not drain."""
     if not conpty.IS_WINDOWS or not __debug__:
         raise RuntimeError("The probe requires native Windows with assertions enabled.")
@@ -75,7 +75,11 @@ def run_probe(root_dir: Path) -> dict[str, object]:
     }
     environment.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     session = conpty.spawn_conpty(
-        [sys.executable, "-u", str(fixture)], cwd=cwd, env=environment, cols=500
+        [sys.executable, "-u", str(fixture)],
+        cwd=cwd,
+        env=environment,
+        cols=500,
+        capture_screen=capture_screen,
     )
     process = psutil.Process(session.pid)
     process_birth = process.create_time()
@@ -105,6 +109,10 @@ def run_probe(root_dir: Path) -> dict[str, object]:
         while viewer.read(timeout=5) is not None:
             assert time.monotonic() < deadline, "ConPTY EOF deadline expired."
         assert session.exit_status == 7
+        if capture_screen:
+            captured = session.capture(100)
+            assert "FIXTURE_FINAL" in captured.text
+            assert "FIXTURE_REPLY:" in captured.text and "Καλημέρα" in captured.text
     finally:
         session.close()
     assert not session.workers_alive
@@ -126,11 +134,13 @@ def run_probe(root_dir: Path) -> dict[str, object]:
         "descendant_birth": descendant_birth,
         "owned_processes_remaining": 0,
         "io_workers_remaining": 0,
+        "rendered_capture": capture_screen,
     }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--capture-screen", action="store_true")
     arguments = parser.parse_args()
-    print(json.dumps(run_probe(arguments.root), indent=2))
+    print(json.dumps(run_probe(arguments.root, capture_screen=arguments.capture_screen), indent=2))

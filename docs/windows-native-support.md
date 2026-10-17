@@ -129,6 +129,16 @@ rendered screen or a complete reconnect snapshot. Screen/mode reconstruction,
 native harness adapters, local console attach and crash recovery still need
 implementation and qualification.
 
+Optional `capture_screen=True` maintains a bounded pyte text model alongside
+the raw stream. It preserves separate normal/alternate buffers, normal history,
+cursor position/visibility and bracketed-paste state, with output and capture
+serialized by the same session lock. Capture is disabled by default and does
+not change the browser's raw-tail replay. It is not a VT replay serializer.
+Unsupported column-mode changes or oversized control strings/glyphs make capture
+explicitly unavailable; raw input/output and the owned terminal stay running.
+Grid/history budgets reject oversized resizes before enqueueing any OS operation.
+The Windows extra now includes pyte for an explicit capture-enabled pilot.
+
 Portable driver and browser-adapter tests cover blocked input with independent
 output, atomic Unicode paste, byte bounds, partial writes, viewer overflow,
 resize ownership, read-only viewing, cancellation, final output, exit status
@@ -159,6 +169,7 @@ Run the portable checks without a provider or server:
 ```sh
 python -m pytest tests/terminals/test_conpty.py \
   tests/terminals/test_conpty_bridge.py \
+  tests/terminals/test_conpty_screen.py \
   tests/runner/test_terminal_resource_attach_ws.py \
   tests/server/routes/test_terminal_attach.py -q --reruns 0 -n 0
 ```
@@ -176,6 +187,10 @@ owned directory each time:
 ```powershell
 python -m tests.terminals.conpty_probe --root D:\work\PLAT-89-conpty-check-01
 ```
+
+Add `--capture-screen` with a different owned probe directory to qualify the
+text model against the real Windows binding. This is separate from raw transport
+qualification and does not qualify either native provider or browser replay.
 
 ## Delivery and qualification
 

@@ -19,11 +19,14 @@ from concurrent.futures import Future
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from omnigent._platform import IS_WINDOWS
 from omnigent.runner.identity import RUNNER_AUTH_SECRET_ENV_VARS
 from omnigent.terminals.attach_target import ConPTYAttachTarget
+
+if TYPE_CHECKING:
+    from omnigent.terminals.conpty_screen import ConPTYScreen, ScreenSnapshot
 
 _OUTPUT_CHUNK_CHARS = 16_384
 _REPLAY_CHARS = 131_072
@@ -108,8 +111,9 @@ class ConPTYSession:
     are synthesized here.
     """
 
-    def __init__(self, driver: PTYDriver) -> None:
+    def __init__(self, driver: PTYDriver, *, screen: ConPTYScreen | None = None) -> None:
         self._driver = driver
+        self._screen = screen
         self._lock = threading.Lock()
         self._close_lock = threading.Lock()
         self._closing = threading.Event()
@@ -174,6 +178,8 @@ class ConPTYSession:
         """Writable viewers constrain the shared terminal to the smallest size."""
         if not (1 <= rows <= 32767 and 1 <= cols <= 32767):
             raise ValueError("Terminal dimensions must be between 1 and 32767.")
+        if self._screen is not None:
+            self._screen.validate_size(rows, cols)
         with self._lock:
             if viewer not in self._subscribers:
                 return None
@@ -201,7 +207,16 @@ class ConPTYSession:
     def resize(self, rows: int, cols: int) -> Future[None]:
         if not (1 <= rows <= 32767 and 1 <= cols <= 32767):
             raise ValueError("Terminal dimensions must be between 1 and 32767.")
+        if self._screen is not None:
+            self._screen.validate_size(rows, cols)
         return self._enqueue(_Operation(None, (rows, cols), Future()))
+
+    def capture(self, scrollback: int = 0) -> ScreenSnapshot:
+        """Capture rendered text under the same lock as output publication."""
+        if self._screen is None:
+            raise ConPTYError("Terminal screen capture is not enabled.")
+        with self._lock:
+            return self._screen.capture(scrollback)
 
     def _enqueue(self, operation: _Operation) -> Future[None]:
         with self._lock:
@@ -221,6 +236,8 @@ class ConPTYSession:
 
     def _publish(self, text: str) -> None:
         with self._lock:
+            if self._screen is not None:
+                self._screen.feed(text)
             self._replay = (self._replay + text)[-_REPLAY_CHARS:]
             for viewer in tuple(self._subscribers):
                 try:
@@ -275,6 +292,9 @@ class ConPTYSession:
                         raise ConPTYError("Terminal input write was incomplete.")
                 elif operation.size is not None:
                     self._driver.resize(*operation.size)
+                    if self._screen is not None:
+                        with self._lock:
+                            self._screen.resize(*operation.size)
                 operation.future.set_result(None)
             except Exception:
                 # Never retry a possibly partial write or expose the payload in errors.
@@ -415,7 +435,14 @@ class _WindowsDriver:
 
 
 def spawn_conpty(
-    argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], rows: int = 24, cols: int = 80
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    rows: int = 24,
+    cols: int = 80,
+    capture_screen: bool = False,
+    scrollback: int = 10000,
 ) -> ConPTYSession:
     """Start an explicit Windows pilot; production readiness remains gated.
 
@@ -428,6 +455,13 @@ def spawn_conpty(
         raise ValueError("Terminal argv must contain an executable and no NUL characters.")
     if not (1 <= rows <= 32767 and 1 <= cols <= 32767):
         raise ValueError("Terminal dimensions must be between 1 and 32767.")
+    screen = None
+    if capture_screen:
+        try:
+            from omnigent.terminals.conpty_screen import ConPTYScreen
+        except ImportError:
+            raise ConPTYError("Install the windows-native extra for terminal capture.") from None
+        screen = ConPTYScreen(rows=rows, cols=cols, scrollback=scrollback)
     clean_env = {
         key: value for key, value in env.items() if key.upper() not in RUNNER_AUTH_SECRET_ENV_VARS
     }
@@ -466,4 +500,4 @@ def spawn_conpty(
         raise
     except Exception:
         raise ConPTYError("ConPTY startup failed.") from None
-    return ConPTYSession(driver)
+    return ConPTYSession(driver, screen=screen)

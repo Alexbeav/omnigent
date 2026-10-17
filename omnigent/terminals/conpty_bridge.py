@@ -106,7 +106,7 @@ async def bridge_conpty_to_websocket(
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             task.result()
-    except (ConPTYError, UnicodeError):
+    except (ConPTYError, UnicodeError, ValueError):
         close_code = WS_CLOSE_INTERNAL_ERROR
         close_reason = "terminal transport failed"
     except TimeoutError:
