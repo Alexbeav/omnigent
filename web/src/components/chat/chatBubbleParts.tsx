@@ -972,6 +972,10 @@ function AssistantBubble({
   const activeConversationId = useChatStore((s) => s.conversationId);
   const conversationId = scopedConversationId ?? activeConversationId;
   const rootSessionStatus = useChatStore((s) => s.sessionStatus);
+  const rootSessionHarness = useChatStore((s) => s.sessionHarness);
+  const sessionHarness = scopedConversationId ? scopedState.sessionHarness : rootSessionHarness;
+  const collapseWorkingNotes =
+    sessionHarness === "acp" || sessionHarness?.startsWith("acp:") === true;
   const rootHasPendingElicitation = useChatStore((s) =>
     s.blocks.some((b) => b.type === "elicitation" && b.status === "pending"),
   );
@@ -1096,6 +1100,7 @@ function AssistantBubble({
             lastActivityAtS={bubble.lastActivityAtS}
             showsWorking={showsWorking}
             defaultExpanded={bubble.defaultExpanded}
+            collapseWorkingNotes={collapseWorkingNotes}
             onRetryError={recoveryDisabled ? undefined : handleRetryError}
           />
         </MessageContent>

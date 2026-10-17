@@ -561,6 +561,119 @@ describe("BlockRenderer dispatch", () => {
       duration: undefined,
     });
 
+    it("collapses ACP narration while working and reveals only the completed reply", () => {
+      const notes: RenderItem = {
+        kind: "text",
+        itemId: "notes",
+        text: "Checking the local settings.",
+        final: true,
+      };
+      const answer: RenderItem = {
+        kind: "text",
+        itemId: "answer",
+        text: "The setting is enabled.",
+        final: false,
+      };
+      const items = [notes, tool(1), answer];
+      const view = (status: "running" | "idle") => (
+        <FileViewerContext.Provider value={FILE_VIEWER_NOOP}>
+          <BlockRenderer
+            items={items}
+            sessionStatus={status}
+            turnLifecycle={status === "running" ? "streaming" : "completed"}
+            collapseWorkingNotes
+          />
+        </FileViewerContext.Provider>
+      );
+      const { rerender } = render(view("running"));
+      expect(screen.getAllByRole("button", { name: "Working notes" })).toHaveLength(2);
+      expect(screen.queryByText(notes.text)).toBeNull();
+      expect(screen.queryByText(answer.text)).toBeNull();
+      expect(screen.getByText("Called 1 tool")).toBeVisible();
+      fireEvent.click(screen.getAllByRole("button", { name: "Working notes" })[0]!);
+      expect(screen.getByText(notes.text)).toBeVisible();
+      fireEvent.click(screen.getAllByRole("button", { name: "Working notes" })[0]!);
+      rerender(view("idle"));
+      expect(screen.getByText(answer.text)).toBeVisible();
+      expect(screen.queryByText(notes.text)).toBeNull();
+      expect(screen.getAllByRole("button", { name: "Working notes" })).toHaveLength(1);
+      expect(items).toEqual([notes, tool(1), answer]);
+    });
+
+    it("keeps ACP structured questions visible while narration is collapsed", () => {
+      render(
+        <BlockRenderer
+          items={[
+            {
+              kind: "text",
+              itemId: "question",
+              text: "Choose a colour.",
+              final: true,
+              asyncUserInput: {
+                call_id: "notes-question",
+                reply_id: "a".repeat(32),
+                questions: [{ title: "Which colour?", options: ["Blue", "Green"] }],
+              },
+            },
+          ]}
+          sessionStatus="running"
+          collapseWorkingNotes
+        />,
+      );
+      expect(screen.getByLabelText("Blue")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Submit" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Working notes" })).toBeNull();
+    });
+
+    it("keeps ACP approvals and failures outside notes, including interrupted turns", () => {
+      const items: RenderItem[] = [
+        { kind: "text", itemId: "n", text: "Checking the command.", final: true },
+        tool(1),
+        elicitation("pending", null),
+        { kind: "text", itemId: "a", text: "The command needs your approval.", final: true },
+        {
+          kind: "error",
+          itemId: "e",
+          message: "Connection interrupted",
+          source: "execution",
+          code: "runner_error",
+        },
+      ];
+      render(
+        <FileViewerContext.Provider value={FILE_VIEWER_NOOP}>
+          <BlockRenderer
+            items={items}
+            sessionStatus="failed"
+            turnLifecycle="cancelled"
+            collapseWorkingNotes
+          />
+        </FileViewerContext.Provider>,
+      );
+      expect(screen.getByTestId("approval-card")).toBeVisible();
+      expect(screen.getByTestId("error-pill")).toBeVisible();
+      expect(screen.getByText("The command needs your approval.")).toBeVisible();
+      expect(screen.queryByText("Checking the command.")).toBeNull();
+    });
+
+    it("keeps a continued ACP turn as notes until its later reply", () => {
+      render(
+        <FileViewerContext.Provider value={FILE_VIEWER_NOOP}>
+          <BlockRenderer
+            items={[
+              { kind: "text", itemId: "n", text: "Handing off the check.", final: true },
+              tool(1),
+            ]}
+            sessionStatus="idle"
+            continued
+            collapseWorkingNotes
+          />
+        </FileViewerContext.Provider>,
+      );
+      expect(screen.queryByText("Handing off the check.")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Working notes" }));
+      expect(screen.getByText("Handing off the check.")).toBeVisible();
+    });
+
     it("keeps an assistant message visible before a folded tool run", () => {
       const items: RenderItem[] = [
         { kind: "text", itemId: "m0", text: "Planning the run.", final: true },

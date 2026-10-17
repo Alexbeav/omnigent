@@ -107,6 +107,8 @@ interface BlockRendererProps {
   showsWorking?: boolean;
   /** Start a fold containing a mid-turn user interjection open. */
   defaultExpanded?: boolean;
+  /** ACP narration is expandable working notes until the turn's final reply. */
+  collapseWorkingNotes?: boolean;
 }
 
 /** The subset of {@link BlockRendererProps} the fold decision reads. */
@@ -207,6 +209,7 @@ export function BlockRenderer({
   lastActivityAtS,
   showsWorking = false,
   defaultExpanded = false,
+  collapseWorkingNotes = false,
   onRetryError,
 }: BlockRendererProps) {
   const { isOwnTurnLive, possiblyLive, isTurnLive } = turnLiveness({
@@ -283,6 +286,18 @@ export function BlockRenderer({
     else if (showFold) foldLatchedRef.current = true;
   });
 
+  if (collapseWorkingNotes) {
+    return renderWorkingNotesTurn(
+      items,
+      {
+        liveEdge: isTurnLive,
+        suppressReasoningDuration: showsWorking,
+        onRetryError,
+      },
+      !isTurnLive && !continued,
+    );
+  }
+
   if (showFold) {
     const rendered: ReactNode[] = [];
     for (const segment of partition.segments) {
@@ -326,6 +341,43 @@ export function BlockRenderer({
     suppressReasoningDuration: showsWorking,
     onRetryError,
   });
+}
+
+/** Keep the final text run visible; earlier ACP narration remains inspectable. */
+function renderWorkingNotesTurn(
+  items: RenderItem[],
+  options: TurnSequenceOptions,
+  showFinalReply: boolean,
+): ReactNode[] {
+  const isNarration = (item: RenderItem) => item.kind === "text" && !item.asyncUserInput;
+  const lastTextIndex = showFinalReply ? items.findLastIndex(isNarration) : -1;
+  const rendered: ReactNode[] = [];
+  for (let i = 0; i < items.length;) {
+    const start = i;
+    const narration = isNarration(items[i]!);
+    while (i < items.length && isNarration(items[i]!) === narration) i += 1;
+    const sequence = renderSequence(items.slice(start, i), {
+      ...options,
+      liveEdge: options.liveEdge && i === items.length,
+      indexBase: start,
+    });
+    if (!narration || (lastTextIndex >= start && lastTextIndex < i)) {
+      rendered.push(...sequence);
+    } else {
+      rendered.push(
+        <TurnWorkedFold
+          key={`notes:${start}`}
+          label="Working notes"
+          testId="working-notes-fold"
+          animateCollapse={false}
+          defaultOpen={false}
+        >
+          {sequence}
+        </TurnWorkedFold>,
+      );
+    }
+  }
+  return rendered;
 }
 
 /**
@@ -504,16 +556,22 @@ function isProvisionalTrace(items: RenderItem[]): boolean {
  */
 function TurnWorkedFold({
   workedForS,
+  label: customLabel,
+  testId = "turn-worked-fold",
   animateCollapse,
   defaultOpen,
   children,
 }: {
   workedForS?: number;
+  label?: string;
+  testId?: string;
   animateCollapse: boolean;
   defaultOpen: boolean;
   children: ReactNode;
 }) {
-  const label = workedForS !== undefined ? `Worked for ${formatWorkedFor(workedForS)}` : "Worked";
+  const label =
+    customLabel ??
+    (workedForS !== undefined ? `Worked for ${formatWorkedFor(workedForS)}` : "Worked");
   const [open, setOpen] = useState(animateCollapse || defaultOpen);
   const userChangedOpenRef = useRef(false);
   useLayoutEffect(() => {
@@ -585,7 +643,7 @@ function TurnWorkedFold({
       open={open}
       onOpenChange={handleOpenChange}
       className="group/turn-fold not-prose w-full"
-      data-testid="turn-worked-fold"
+      data-testid={testId}
     >
       <div ref={rowRef} className={cn("turn-fold-row", animateCollapse && "turn-fold-row-enter")}>
         <CollapsibleTrigger className="flex cursor-pointer items-center gap-2 rounded-sm py-1 text-left text-muted-foreground text-chat outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">

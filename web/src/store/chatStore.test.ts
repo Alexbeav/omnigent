@@ -9957,6 +9957,7 @@ describe("chatStore — session configuration scope", () => {
   ];
 
   interface SnapshotOverrides {
+    harness?: string;
     labels?: Record<string, string>;
     reasoning_effort?: string | null;
     model_override?: string | null;
@@ -9978,6 +9979,7 @@ describe("chatStore — session configuration scope", () => {
           created_at: 0,
           items: [],
           labels: overrides.labels ?? {},
+          harness: overrides.harness,
           reasoning_effort: overrides.reasoning_effort ?? null,
           model_override: overrides.model_override ?? null,
           cost_control_mode_override: overrides.cost_control_mode_override ?? null,

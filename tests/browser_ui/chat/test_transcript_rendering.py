@@ -39,6 +39,74 @@ _INVALID_MERMAID = (
 )
 
 
+@pytest.mark.parametrize("surface", ["main", "split", "mobile"])
+def test_acp_working_notes_keep_the_final_reply_visible(
+    page: Page, chat_session_contract: ChatSessionContract, tmp_path: Path, surface: str
+) -> None:
+    chat = chat_session_contract
+    target = chat
+    if surface == "split":
+        target = ChatSessionContract(
+            page, chat.contract, _ChatSseStream(), session_id="cline-notes-pane"
+        )
+        install_chat_session_routes(target)
+    target.update_session(harness="acp:cline", title="Cline working notes")
+    response_id = "notes-turn"
+    items = [
+        message_item("question", "user", "Check the sample setting.", response_id="user"),
+        message_item(
+            "notes", "assistant", "Checking the sample configuration.", response_id=response_id
+        ),
+        {
+            "id": "check",
+            "response_id": response_id,
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "check-call",
+            "name": "read_file",
+            "arguments": '{"path":"sample.json"}',
+        },
+        {
+            "id": "result",
+            "response_id": response_id,
+            "type": "function_call_output",
+            "status": "completed",
+            "call_id": "check-call",
+            "output": "enabled=true",
+        },
+        message_item(
+            "answer", "assistant", "The sample setting is enabled.", response_id=response_id
+        ),
+    ]
+    target.set_items(list(reversed(items)))
+    if surface == "split":
+        chat.contract.json("/v1/sessions", list_payload([chat._session(), target._session()]))
+    page.set_viewport_size({"width": 390 if surface == "mobile" else 1600, "height": 900})
+    page.goto(chat.url + (f"?panes={target.session_id}" if surface == "split" else ""))
+    pane = (
+        page.locator(f'section[data-pane-id="{target.session_id}"]')
+        if surface == "split"
+        else page
+    )
+    notes = pane.get_by_role("button", name="Working notes", exact=True)
+    expect(notes).to_have_attribute("aria-expanded", "false")
+    expect(pane.get_by_text("Checking the sample configuration.", exact=True)).not_to_be_visible()
+    expect(pane.get_by_text("The sample setting is enabled.", exact=True)).to_be_visible()
+    page.screenshot(path=str(tmp_path / f"working-notes-{surface}.png"), full_page=True)
+    notes.click()
+    expect(pane.get_by_text("Checking the sample configuration.", exact=True)).to_be_visible()
+    expect(pane.get_by_text("The sample setting is enabled.", exact=True)).to_be_visible()
+    persisted = page.evaluate(
+        "async url => (await (await fetch(url)).json()).data",
+        f"/v1/sessions/{target.session_id}/items",
+    )
+    assert persisted == list(reversed(items))
+    page.reload()
+    expect(notes).to_have_attribute("aria-expanded", "false")
+    expect(pane.get_by_text("The sample setting is enabled.", exact=True)).to_be_visible()
+    assert not chat.contract.violations, chat.contract.violations
+
+
 def _seed_assistant_message(chat: ChatSessionContract, text: str) -> None:
     chat.set_items(
         [
