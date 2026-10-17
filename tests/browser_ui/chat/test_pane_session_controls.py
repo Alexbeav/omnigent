@@ -154,6 +154,69 @@ def test_each_pane_changes_its_own_model_effort_and_permissions(
     assert not chat.contract.violations, chat.contract.violations
 
 
+@pytest.mark.parametrize("surface", ["main", "split", "mobile"])
+def test_cline_permission_selection_is_scoped_persistent_and_reversible(
+    page: Page, chat_session_contract, tmp_path, surface: str
+) -> None:
+    chat = chat_session_contract
+    sid = "cline-permission-pane" if surface == "split" else chat.session_id
+    row = {
+        **chat._session(),
+        "id": sid,
+        "title": "Cline approval controls",
+        "harness": "acp",
+        "labels": {"omnigent.acp.permission_mode": "auto"},
+    }
+    changes = []
+    reject = False
+    if surface == "split":
+        install_chat_session_routes(
+            ChatSessionContract(page, chat.contract, chat.stream, session_id=sid)
+        )
+        chat.contract.json("/v1/sessions", list_payload([chat._session(), row]))
+
+    def session_route(route: Route) -> None:
+        if route.request.method == "PATCH":
+            body = route.request.post_data_json
+            changes.append(body)
+            if reject:
+                route.fulfill(status=503, json={"detail": "Runner unavailable"})
+                return
+            row["labels"]["omnigent.acp.permission_mode"] = body["permission_mode"]
+        route.fulfill(json=row)
+
+    chat.contract.route(
+        re.compile(rf"{re.escape(chat.base_url)}/v1/sessions/{sid}(?:\?.*)?$"), session_route
+    )
+    page.set_viewport_size({"width": 390 if surface == "mobile" else 1600, "height": 900})
+    page.goto(chat.url + (f"?panes={sid}" if surface == "split" else ""))
+    pane = page.locator(f'section[data-pane-id="{sid}"]') if surface == "split" else page
+    chip = pane.get_by_test_id("composer-permission-chip")
+    expect(chip).to_have_accessible_name("Permission mode: Ask every time")
+    chip.click()
+    page.get_by_test_id("composer-permission-option-bypassPermissions").click()
+    expect(chip).to_have_accessible_name("Permission mode: Full access")
+    assert changes == [{"permission_mode": "bypassPermissions"}]
+    if surface == "split":
+        assert not chat.session_patches
+    page.reload()
+    expect(chip).to_have_accessible_name("Permission mode: Full access")
+    page.screenshot(path=str(tmp_path / f"cline-full-access-{surface}.png"), full_page=True)
+    reject = True
+    chip.click()
+    page.get_by_test_id("composer-permission-option-auto").click()
+    expect(page.get_by_text("Runner unavailable", exact=False).first).to_be_visible()
+    expect(chip).to_have_accessible_name("Permission mode: Full access")
+    reject = False
+    chip.click()
+    page.get_by_test_id("composer-permission-option-auto").click()
+    expect(chip).to_have_accessible_name("Permission mode: Ask every time")
+    if surface != "split":
+        expect(page.get_by_text("Runner unavailable", exact=False)).not_to_be_visible()
+    page.screenshot(path=str(tmp_path / f"cline-permissions-{surface}.png"), full_page=True)
+    assert not chat.contract.violations, chat.contract.violations
+
+
 def test_secondary_pane_queue_and_steer_stay_on_that_session(
     page: Page, chat_session_contract, tmp_path
 ) -> None:

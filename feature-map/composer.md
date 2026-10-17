@@ -32,7 +32,9 @@ and steers messages while the agent is busy.
 - `effort-terminal-mirror`: an effort change typed in the Codex terminal shows
   in the composer, and a composer pick is not reverted by later terminal turns.
 - `permission-mode`: the harness's native approval modes; the current mode is
-  marked and the choice persists.
+  marked and the choice persists. ACP chats, including Cline, offer Ask every
+  time and Full access for subsequent requests. An unconfirmed change leaves
+  the previous selection; explicit policies and existing pending cards remain.
 - `pane-configuration`: ordinary desktop panes use the same model, effort,
   permission and host controls as the primary chat. Each pane owns its changes.
 - `slash-menu`: typing `/` opens commands and skills with keyboard navigation.
@@ -161,6 +163,12 @@ Tests under `tests/browser_ui/` stub every backend call and need no instance:
   `tests/e2e_ui/chat/test_codex_effort_terminal_composer_mirror.py::test_composer_effort_pick_survives_terminal_turns`
 - **`permission-mode`:**
   `tests/e2e_ui/chat/test_claude_model_picker.py::test_claude_native_permission_mode_switch_persists`
+  and `tests/browser_ui/chat/test_pane_session_controls.py::test_cline_permission_selection_is_scoped_persistent_and_reversible`
+  cover native and ACP controls. The ACP journey covers main chat, ordinary
+  split pane and mobile, reload, refused changes and switching back to Ask.
+  `tests/e2e/test_acp_session_selection.py::test_acp_live_permission_choice_survives_next_turn_and_restores_asking`
+  uses an isolated server/runner and fixture ACP agent to check real permission
+  requests without provider usage.
 - **`pane-configuration`:**
   `tests/browser_ui/chat/test_pane_session_controls.py::test_each_pane_changes_its_own_model_effort_and_permissions`
   drives Codex and Claude panes together. It checks six scoped PATCH requests,

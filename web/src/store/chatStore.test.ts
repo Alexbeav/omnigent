@@ -11028,6 +11028,36 @@ describe("chatStore — session configuration scope", () => {
     });
   });
 
+  it("keeps confirmed ACP permission changes on their own pane and retains them on failure", async () => {
+    const pane = "conv_acp_permissions";
+    const primary = "conv_primary_permissions";
+    seedSession(pane, []);
+    seedSession(primary, []);
+    withSnapshot(pane, { harness: "acp", labels: { "omnigent.acp.permission_mode": "auto" } });
+    await useChatStore.getState().switchTo(pane);
+    await useChatStore.getState().switchTo(primary);
+    const previousFetch = fetchMock.getMockImplementation()!;
+    let failed = false;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === `/v1/sessions/${pane}` && init?.method === "PATCH") {
+        return failed
+          ? mockResponse({ detail: "Runner unavailable" }, { ok: false, status: 503 })
+          : mockResponse({
+              id: pane,
+              harness: "acp",
+              labels: { "omnigent.acp.permission_mode": "bypassPermissions" },
+            });
+      }
+      return previousFetch(input, init);
+    });
+    await useChatStore.getState().setAcpPermissionMode("bypassPermissions", pane);
+    expect(conversationRegistry.peek(pane)?.getState().acpPermissionMode).toBe("bypassPermissions");
+    expect(useChatStore.getState().acpPermissionMode).toBe("");
+    failed = true;
+    await expect(useChatStore.getState().setAcpPermissionMode("auto", pane)).rejects.toThrow();
+    expect(conversationRegistry.peek(pane)?.getState().acpPermissionMode).toBe("bypassPermissions");
+  });
+
   it("keeps split-pane approval, plan and routing changes out of the primary chat", async () => {
     const pane = "conv_scoped_codex";
     const primary = "conv_scoped_primary";

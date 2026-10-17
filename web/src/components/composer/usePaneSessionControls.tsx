@@ -27,6 +27,7 @@ import {
 } from "@/lib/codexApprovalMode";
 import { DEVIN_NATIVE_PERMISSION_MODES } from "@/lib/nativeHarnessModes";
 import { nativeCodingAgentForHarness } from "@/lib/nativeCodingAgents";
+import { ACP_PERMISSION_MODES, isAcpSession } from "@/lib/acpPermissionMode";
 
 import { useChatStore } from "@/store/chatStore";
 import { ComposerPermissionPicker } from "./ComposerControls";
@@ -64,18 +65,27 @@ export function usePaneSessionControls(sessionId: string | null) {
   const unreachable = liveness.kind === "host_offline" || liveness.kind === "local_stranded";
   const showClaudePermissions = shouldShowPermissionModeControl(session);
   const showCodexPermissions = shouldShowCodexApprovalModeControl(session);
+  const showAcpPermissions = isAcpSession(session);
   const devin = kind === "devin";
-  const permission = showClaudePermissions ? state.claudePermissionMode : state.codexApprovalMode;
-  const permissionOptions = showClaudePermissions
-    ? devin
-      ? DEVIN_NATIVE_PERMISSION_MODES
-      : CLAUDE_NATIVE_SWITCHABLE_PERMISSION_MODES
-    : CODEX_NATIVE_RUNTIME_APPROVAL_PRESETS;
-  const permissionLabel = showClaudePermissions
-    ? devin
-      ? (permissionOptions.find((row) => row.value === permission)?.label ?? permission)
-      : claudePermissionModeLabel(permission)
-    : codexApprovalModeLabel(permission);
+  const permission = showAcpPermissions
+    ? state.acpPermissionMode
+    : showClaudePermissions
+      ? state.claudePermissionMode
+      : state.codexApprovalMode;
+  const permissionOptions = showAcpPermissions
+    ? ACP_PERMISSION_MODES
+    : showClaudePermissions
+      ? devin
+        ? DEVIN_NATIVE_PERMISSION_MODES
+        : CLAUDE_NATIVE_SWITCHABLE_PERMISSION_MODES
+      : CODEX_NATIVE_RUNTIME_APPROVAL_PRESETS;
+  const permissionLabel = showAcpPermissions
+    ? (ACP_PERMISSION_MODES.find((option) => option.value === permission)?.label ?? "Permissions")
+    : showClaudePermissions
+      ? devin
+        ? (permissionOptions.find((row) => row.value === permission)?.label ?? permission)
+        : claudePermissionModeLabel(permission)
+      : codexApprovalModeLabel(permission);
   const apply = async (change: (id: string) => Promise<void>) => {
     if (!sessionId || unreachable || busyRef.current) return;
     busyRef.current = true;
@@ -96,7 +106,7 @@ export function usePaneSessionControls(sessionId: string | null) {
       sessionId && session ? (
         <>
           <HostBadge sessionId={sessionId} appearance="composer" />
-          {(showClaudePermissions || showCodexPermissions) && (
+          {(showClaudePermissions || showCodexPermissions || showAcpPermissions) && (
             <ComposerPermissionPicker
               label="Permission mode"
               value={permissionLabel || "Permission mode"}
@@ -106,9 +116,11 @@ export function usePaneSessionControls(sessionId: string | null) {
               disabled={unreachable || busy}
               onSelect={(mode) =>
                 void apply((id) =>
-                  showClaudePermissions
-                    ? useChatStore.getState().setClaudePermissionMode(mode, id)
-                    : useChatStore.getState().setCodexApprovalMode(mode, id),
+                  showAcpPermissions
+                    ? useChatStore.getState().setAcpPermissionMode(mode, id)
+                    : showClaudePermissions
+                      ? useChatStore.getState().setClaudePermissionMode(mode, id)
+                      : useChatStore.getState().setCodexApprovalMode(mode, id),
                 )
               }
             />
