@@ -26,7 +26,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 from omnigent._platform import IS_WINDOWS
 from omnigent.cli_invocation import cli_invocation
@@ -62,6 +62,9 @@ from .terminal_lifecycle import (
     TERMINAL_LAUNCH_SESSION_ID_ENV,
     TerminalLifecycleTrace,
 )
+
+if TYPE_CHECKING:
+    from omnigent.terminals.attach_target import TerminalAttachTarget
 
 # Heterogeneous JSON-shaped result returned by :meth:`TerminalInstance.send`
 # and :meth:`TerminalInstance.read`. In practice the dicts carry a mix of
@@ -1156,6 +1159,13 @@ class TerminalInstance:
     def tmux_target(self) -> str:
         """The tmux target for send-keys/capture-pane (always 'main')."""
         return "main"
+
+    @property
+    def attach_target(self) -> TerminalAttachTarget:
+        """Describe browser attachment without exposing a transport assumption."""
+        from omnigent.terminals.attach_target import TmuxAttachTarget
+
+        return TmuxAttachTarget(self.socket_path, self.tmux_target)
 
     def note_client_interaction(self) -> None:
         """Record that a web client just interacted with this terminal.

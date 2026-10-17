@@ -2,9 +2,9 @@
 ``WS /v1/sessions/{id}/resources/terminals/{terminal_id}/attach`` endpoint.
 
 The endpoint resolves the opaque terminal resource id back to the
-runner-local registry entry and bridges tmux control-mode output to the
-browser-facing WebSocket. These tests pin the route boundary and registry
-lookup while stubbing the control bridge itself.
+runner-local registry entry and selects the declared browser transport.
+These tests pin route authorization, lookup and backend dispatch while
+stubbing the transport bridges themselves.
 """
 
 from __future__ import annotations
@@ -33,7 +33,9 @@ from omnigent.runner.resource_registry import (
     SessionResourceRegistry,
 )
 from omnigent.terminals import TerminalRegistry
+from omnigent.terminals.conpty import ConPTYSession
 from tests.runner.helpers import NullServerClient, make_test_terminal_instance
+from tests.terminals.test_conpty import _Driver
 
 
 def _make_running_instance(name: str, session_key: str, tmp_path: Path) -> TerminalInstance:
@@ -81,7 +83,7 @@ def _patch_control_attach(
         raise RuntimeError("bridge stopped")
 
     monkeypatch.setattr(
-        "omnigent.runner.resource_routes.bridge_tmux_control_to_websocket",
+        "omnigent.terminals.control_bridge.bridge_tmux_control_to_websocket",
         fake_control,
     )
 
@@ -131,6 +133,51 @@ def test_runner_resource_attach_passes_read_only_to_control_bridge(
             pass
 
     assert calls == [(str(tmp_path / "bash-s1.sock"), "main", True)]
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+def test_runner_resource_attach_conpty_has_no_tmux_socket_or_popup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    read_only: bool,
+) -> None:
+    registry = TerminalRegistry()
+    instance = _make_running_instance("codex", "main", tmp_path)
+    with contextlib.closing(ConPTYSession(_Driver())) as session:
+        monkeypatch.setattr(
+            type(instance), "attach_target", property(lambda _: session.attach_target)
+        )
+        monkeypatch.delattr(instance, "socket_path")
+        _seed_registry(registry, "conv_abc", instance)
+        app = create_runner_app(
+            terminal_registry=registry,
+            server_client=NullServerClient(),  # type: ignore[arg-type]
+        )
+        calls = []
+
+        async def fake_conpty(
+            websocket, *, session, read_only, on_client_interaction=None
+        ) -> None:
+            calls.append((session, read_only, on_client_interaction))
+            await websocket.close()
+
+        def no_tmux(*args, **kwargs):
+            pytest.fail("ConPTY attachment must not spawn a tmux client or popup")
+
+        monkeypatch.setattr(
+            "omnigent.terminals.conpty_bridge.bridge_conpty_to_websocket", fake_conpty
+        )
+        monkeypatch.setattr(
+            "omnigent.terminals.control_bridge.bridge_tmux_control_to_websocket", no_tmux
+        )
+        with TestClient(app).websocket_connect(
+            "/v1/sessions/conv_abc/resources/terminals/terminal_codex_main/attach"
+            f"?read_only={'true' if read_only else 'false'}"
+        ):
+            pass
+        assert calls == [(session, read_only, instance.note_client_interaction)]
+        assert not session._closed
+    assert not session.workers_alive
 
 
 def test_runner_resource_attach_unknown_terminal_closes_4404(tmp_path: Path) -> None:

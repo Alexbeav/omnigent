@@ -4,7 +4,7 @@ This module hosts the resource-addressed terminal-attach route:
 
 - ``WS /sessions/{session_id}/resources/terminals/{terminal_id}/attach``
   - open a bidirectional bridge between a browser xterm.js client
-  and the runner-side tmux session named by ``terminal_id``.
+  and the runner-side terminal named by ``terminal_id``.
 
 Runner-aware execution
 ----------------------
@@ -16,12 +16,12 @@ Terminal state lives in whichever process owns the
   :func:`omnigent.runtime.get_terminal_registry` into
   :func:`omnigent.runner.create_runner_app`, so the registry is
   shared. The server resolves the terminal id locally and bridges
-  tmux control mode in-process.
+  the instance's declared transport in-process.
 - **Out-of-process runner** over the WebSocket tunnel: the runner
-  owns the tmux socket. The server proxies WebSocket frames over
+  owns the terminal. The server proxies WebSocket frames over
   the tunnel via a multiplexed WS channel
   (``omnigent/server/_runner_ws_tunnel.py``), and the runner's
-  resource-addressed WS route bridges tmux control mode.
+  resource-addressed WS route selects the instance's declared transport.
 
 The proxy uses a factory configured via
 :func:`omnigent.runtime.set_runner_ws_factory` in the server
@@ -40,7 +40,7 @@ Wire protocol on the WebSocket
     - **Text frames** are JSON control messages such as
       ``{"type": "resize", "cols": N, "rows": M}``. Unknown shapes are
       ignored for forward compatibility.
-    - **Binary frames** are raw input bytes forwarded to tmux. xterm.js's
+    - **Binary frames** are raw input bytes forwarded to the terminal. xterm.js's
       ``onData`` callback emits these for keystrokes, pasted text, and mouse
       reports.
 
@@ -87,7 +87,7 @@ from omnigent.server.auth import LEVEL_OWNER, LEVEL_READ, AuthProvider
 from omnigent.server.routes._auth_helpers import require_access
 from omnigent.stores import ConversationStore
 from omnigent.stores.permission_store import PermissionStore
-from omnigent.terminals.control_bridge import bridge_tmux_control_to_websocket
+from omnigent.terminals.bridge import bridge_terminal_to_websocket
 from omnigent.terminals.ws_common import (
     WS_CLOSE_INTERNAL_ERROR,
     WS_CLOSE_TERMINAL_NOT_FOUND,
@@ -266,10 +266,9 @@ def create_terminal_attach_router(
                 "terminal.mode": "in-process",
             },
         ):
-            await bridge_tmux_control_to_websocket(
+            await bridge_terminal_to_websocket(
                 websocket,
-                socket_path=str(entry.instance.socket_path),
-                tmux_target=entry.instance.tmux_target,
+                target=entry.instance.attach_target,
                 read_only=read_only,
             )
 

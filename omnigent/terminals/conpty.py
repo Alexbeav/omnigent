@@ -23,6 +23,7 @@ from typing import Protocol, cast
 
 from omnigent._platform import IS_WINDOWS
 from omnigent.runner.identity import RUNNER_AUTH_SECRET_ENV_VARS
+from omnigent.terminals.attach_target import ConPTYAttachTarget
 
 _OUTPUT_CHUNK_CHARS = 16_384
 _REPLAY_CHARS = 131_072
@@ -131,6 +132,10 @@ class ConPTYSession:
     @property
     def pid(self) -> int:
         return self._driver.pid
+
+    @property
+    def attach_target(self) -> ConPTYAttachTarget:
+        return ConPTYAttachTarget(self)
 
     @property
     def exit_status(self) -> int | None:

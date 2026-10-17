@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from omnigent.terminals import bridge as terminal_bridge
 from omnigent.terminals import conpty_bridge
 from omnigent.terminals.conpty import ConPTYSession
 from omnigent.terminals.ws_common import (
@@ -31,6 +32,7 @@ class _DrainedInputWebSocket(_FakeWebSocket):
 async def test_browser_input_resize_output_and_terminal_exit(read_only: bool) -> None:
     driver = _Driver()
     session = ConPTYSession(driver)
+    interactions: list[bool] = []
     greek = "λ".encode()
     ws = _DrainedInputWebSocket(
         inbound=[
@@ -41,7 +43,12 @@ async def test_browser_input_resize_output_and_terminal_exit(read_only: bool) ->
         ]
     )
     bridge = asyncio.create_task(
-        conpty_bridge.bridge_conpty_to_websocket(ws, session=session, read_only=read_only)
+        terminal_bridge.bridge_terminal_to_websocket(
+            ws,
+            target=session.attach_target,
+            read_only=read_only,
+            on_client_interaction=lambda: interactions.append(True),
+        )
     )
     try:
         await asyncio.wait_for(ws.inputs_drained.wait(), timeout=1)
@@ -53,6 +60,7 @@ async def test_browser_input_resize_output_and_terminal_exit(read_only: bool) ->
         assert b"".join(ws.sent).decode() == "Καλημέρα\r\nfinal"
         assert ws.close_code == WS_CLOSE_TERMINAL_NOT_FOUND
         assert session.exit_status == 7
+        assert len(interactions) == 6  # Connect, four input frames, detach.
         if read_only:
             assert driver.operations == [(31, 101)]
         else:
@@ -69,12 +77,16 @@ async def test_detach_and_outer_cancellation_preserve_terminal() -> None:
     session = ConPTYSession(driver)
     try:
         ws = _FakeWebSocket(inbound=[{"type": "websocket.disconnect"}])
-        await conpty_bridge.bridge_conpty_to_websocket(ws, session=session, read_only=False)
+        await terminal_bridge.bridge_terminal_to_websocket(
+            ws, target=session.attach_target, read_only=False
+        )
         assert driver.alive and not driver.closed
         assert not session._subscribers
         ws = _FakeWebSocket(inbound=[])
         bridge = asyncio.create_task(
-            conpty_bridge.bridge_conpty_to_websocket(ws, session=session, read_only=False)
+            terminal_bridge.bridge_terminal_to_websocket(
+                ws, target=session.attach_target, read_only=False
+            )
         )
         await asyncio.sleep(0)
         bridge.cancel()
@@ -99,7 +111,9 @@ async def test_stalled_viewer_times_out_without_closing_terminal(
     try:
         driver.output.put("output")
         await asyncio.wait_for(
-            conpty_bridge.bridge_conpty_to_websocket(ws, session=session, read_only=False),
+            terminal_bridge.bridge_terminal_to_websocket(
+                ws, target=session.attach_target, read_only=False
+            ),
             timeout=1,
         )
         assert ws.close_code == WS_CLOSE_TERMINAL_DETACHED

@@ -67,7 +67,8 @@ from omnigent.runner.resource_registry import (
     SessionResourceRegistry,
 )
 from omnigent.spec.types import AgentSpec
-from omnigent.terminals.control_bridge import bridge_tmux_control_to_websocket
+from omnigent.terminals.attach_target import TmuxAttachTarget
+from omnigent.terminals.bridge import bridge_terminal_to_websocket
 from omnigent.terminals.ws_common import WS_CLOSE_TERMINAL_NOT_FOUND
 from omnigent.util.json_types import JsonObject as _JsonObject
 
@@ -958,19 +959,20 @@ def register_resource_routes(
                     reason="terminal resource not found or not running",
                 )
                 return
-        _repop_task = asyncio.create_task(
-            _repop_pending_cost_popup_on_attach(
-                session_id,
-                str(entry.instance.socket_path),
-                entry.instance.tmux_target,
+        target = entry.instance.attach_target
+        if isinstance(target, TmuxAttachTarget):
+            _repop_task = asyncio.create_task(
+                _repop_pending_cost_popup_on_attach(
+                    session_id,
+                    str(target.socket_path),
+                    target.tmux_target,
+                )
             )
-        )
-        _COST_POPUP_REPOP_TASKS.add(_repop_task)
-        _repop_task.add_done_callback(_COST_POPUP_REPOP_TASKS.discard)
-        await bridge_tmux_control_to_websocket(
+            _COST_POPUP_REPOP_TASKS.add(_repop_task)
+            _repop_task.add_done_callback(_COST_POPUP_REPOP_TASKS.discard)
+        await bridge_terminal_to_websocket(
             websocket,
-            socket_path=str(entry.instance.socket_path),
-            tmux_target=entry.instance.tmux_target,
+            target=target,
             read_only=read_only,
             on_client_interaction=entry.instance.note_client_interaction,
         )

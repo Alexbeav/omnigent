@@ -79,8 +79,22 @@ without claiming filesystem or network isolation.
 
 `omnigent.terminals.conpty` now provides a standalone transport and
 `conpty_bridge` implements the existing browser binary-input/output and JSON
-resize framing. Neither the terminal factory nor production attach routes call
-these modules yet. Native Windows harness readiness remains disabled.
+resize framing. Native Windows harness readiness remains disabled.
+
+Browser attachment now has an explicit tmux or ConPTY target. The runner and
+in-process server routes use one dispatcher after their existing authorization,
+registry lookup and liveness checks. Tmux targets retain the existing control
+bridge and popup behavior. ConPTY targets use the owned session directly and
+skip tmux-only popup work; they need no fabricated socket path. The runner's
+direct-attach listener shares this same handler. Both bridges retain read-only
+viewing and detach without closing the terminal, and report client interactions
+separately from terminal activity.
+
+The terminal factory still creates tmux instances, so this boundary does not
+enable Windows launches or create ConPTY registry entries in production. A
+managed ConPTY instance, screen reconstruction, factory routing and provider
+qualification remain subsequent work. No AgentOps collector, lifecycle frame,
+tunnel or observation schema changes are part of this boundary.
 
 The transport uses pywinpty's low-level ConPTY API, with one output reader and
 one serialized input worker. It bounds replay, viewer queues and pending input;
@@ -144,8 +158,15 @@ Run the portable checks without a provider or server:
 
 ```sh
 python -m pytest tests/terminals/test_conpty.py \
-  tests/terminals/test_conpty_bridge.py -q --reruns 0 -n 0
+  tests/terminals/test_conpty_bridge.py \
+  tests/runner/test_terminal_resource_attach_ws.py \
+  tests/server/routes/test_terminal_attach.py -q --reruns 0 -n 0
 ```
+
+The route regressions supply a ConPTY attachment target with no tmux socket
+field and exercise writable/read-only viewing. The adapter checks use an owned
+in-memory driver for input, output, cancellation and slow-viewer faults. They
+do not qualify the Windows binding, rendered reconnect state or either provider.
 
 On an isolated Windows candidate with the optional extra installed, run the
 same process probe directly. This avoids loading the repository's broader

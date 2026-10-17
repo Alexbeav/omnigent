@@ -44,8 +44,10 @@ from omnigent.server.auth import (
 )
 from omnigent.server.routes.terminal_attach import create_terminal_attach_router
 from omnigent.terminals import TerminalRegistry
+from omnigent.terminals.conpty import ConPTYSession
 from omnigent.terminals.ws_common import WS_CLOSE_WRONG_REPLICA
 from tests.runner.helpers import make_test_terminal_instance
+from tests.terminals.test_conpty import _Driver
 
 
 class _StubPermissionStore:
@@ -684,12 +686,13 @@ async def test_attach_terminal_local_fallback_uses_control_mode(
         socket_path: str,
         tmux_target: str,
         read_only: bool,
+        on_client_interaction: object = None,
     ) -> None:
-        del websocket
+        del websocket, on_client_interaction
         calls.append((socket_path, tmux_target, read_only))
 
     monkeypatch.setattr(
-        "omnigent.server.routes.terminal_attach.bridge_tmux_control_to_websocket",
+        "omnigent.terminals.control_bridge.bridge_tmux_control_to_websocket",
         fake_control,
     )
 
@@ -700,3 +703,45 @@ async def test_attach_terminal_local_fallback_uses_control_mode(
         pass
 
     assert calls == [(str(tmp_path / "bash-s1.sock"), "main", True)]
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+async def test_attach_terminal_local_conpty_has_no_tmux_socket(
+    app: FastAPI,
+    server_registry: TerminalRegistry,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    read_only: bool,
+) -> None:
+    instance = _make_running_instance("codex", "main", tmp_path)
+    with contextlib.closing(ConPTYSession(_Driver())) as session:
+        monkeypatch.setattr(
+            type(instance), "attach_target", property(lambda _: session.attach_target)
+        )
+        monkeypatch.delattr(instance, "socket_path")
+        _seed_registry(server_registry, "conv_local_attach", [instance])
+        calls = []
+
+        async def fake_conpty(
+            websocket, *, session, read_only, on_client_interaction=None
+        ) -> None:
+            calls.append((session, read_only))
+            await websocket.close()
+
+        def no_tmux(*args, **kwargs):
+            pytest.fail("ConPTY attachment must not use tmux")
+
+        monkeypatch.setattr(
+            "omnigent.terminals.conpty_bridge.bridge_conpty_to_websocket", fake_conpty
+        )
+        monkeypatch.setattr(
+            "omnigent.terminals.control_bridge.bridge_tmux_control_to_websocket", no_tmux
+        )
+        with TestClient(app).websocket_connect(
+            "/v1/sessions/conv_local_attach/resources/terminals/terminal_codex_main/attach"
+            f"?read_only={'true' if read_only else 'false'}"
+        ):
+            pass
+        assert calls == [(session, read_only)]
+        assert not session._closed
+    assert not session.workers_alive

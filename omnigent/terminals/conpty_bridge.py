@@ -2,7 +2,7 @@
 
 Route authorization and session ownership remain the caller's responsibility.
 Detaching/cancelling this adapter releases its subscription, never the terminal.
-Production terminal routes are not switched to this adapter yet.
+Native Windows launch remains gated independently of this adapter.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import asyncio
 import codecs
 import json
 import queue
+from collections.abc import Callable
 from contextlib import suppress
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -26,7 +27,11 @@ _SEND_TIMEOUT_SECONDS = 5.0
 
 
 async def bridge_conpty_to_websocket(
-    websocket: WebSocket, *, session: ConPTYSession, read_only: bool
+    websocket: WebSocket,
+    *,
+    session: ConPTYSession,
+    read_only: bool,
+    on_client_interaction: Callable[[], None] | None = None,
 ) -> None:
     """Stream an accepted, authorized WebSocket without owning the OS session."""
     viewer = session.subscribe()
@@ -60,6 +65,8 @@ async def bridge_conpty_to_websocket(
         decoder = codecs.getincrementaldecoder("utf-8")()
         while True:
             message = await websocket.receive()
+            if on_client_interaction is not None:
+                on_client_interaction()
             if message.get("type") == "websocket.disconnect":
                 return
             if read_only:
@@ -94,6 +101,8 @@ async def bridge_conpty_to_websocket(
     input_task = asyncio.create_task(receive_input(), name="conpty-browser-input")
     tasks = {output, input_task}
     try:
+        if on_client_interaction is not None:
+            on_client_interaction()
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             task.result()
@@ -112,5 +121,7 @@ async def bridge_conpty_to_websocket(
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         session.unsubscribe(viewer)
+        if on_client_interaction is not None:
+            on_client_interaction()
         with suppress(WebSocketDisconnect, OSError, RuntimeError):
             await websocket.close(code=close_code, reason=close_reason)
