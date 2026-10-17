@@ -662,3 +662,40 @@ new ACP runner confirmed the requested **Full access** mode, preserving all
 intact for rollback. Other hosts were not restarted.
 Deployment evidence is under
 `~/.local/state/omnigent-investigations/acp-permissions-20261017/`.
+
+### ACP working notes, 2026-10-17
+
+Alex selected collapsed narration with a visible final reply. Source
+`a9366665858fe3976cb0eb84ffbd475df25502b1` is pushed to all three fork branches and deployed as
+`registry.crosstalkis.com/omnigent-server:sha-a93666658@sha256:663ec1a2fa757a072ab81e34378b9713a87caed64012058b1ee56be7a3e5e91d`.
+The shared web renderer collapses ordinary ACP narration into expandable
+**Working notes**, revealing the final text run when the turn settles. Stored
+history, model input and native reasoning transport are unchanged. Questions,
+approvals, errors and tool controls remain available. Main, split and mobile
+browser checks pass; 781 component/store tests, 248 feature-map checks, the
+production build and pre-commit pass. Two regression cases fail with the
+original renderer. Browser proof uses a mocked backend, not a live-provider
+completion. A provider that mixes narration directly into its last text run
+retains that complete run as its visible reply. See the
+[working-notes recipe](../feature-map/working-notes.md).
+
+Two isolated candidate starts and an old-image rollback preserved original
+rows and all 98 dependency distributions. The live switch preserved all
+227 conversations and 104,110 existing items;
+all 30 other containers were unchanged. All 525 packaged
+assets and 524 static responses plus rewritten LAN/public indexes match the
+tested build. The backup is `/volume1/docker/stacks/omnigent/backups/cline-notes-20261017-a93666658/cutover.dump`,
+132,161,754 bytes, SHA-256 `3c83832a038e0184a791974394aa2c2846714b43b491ac62401a4cd600be67da`.
+NAS Compose commit `a7fcb14f3308e7ec0949a2720a06b5b985b6caef` is pushed. Athena needed no host or runner
+restart. Both bounded Deck phases are drained and exact claims released;
+the first phase's incorrect fixture order is retained as failed-test evidence.
+Fleet troubleshooting and benchmarks remain paused. Source and deployment
+receipts are in `~/.local/state/omnigent-investigations/cline-reasoning-20261017/`;
+browser captures and process receipts are in the adjacent
+`cline-notes-ui-phase2-20261017/` directory. Captures are outside Git.
+
+To verify: refresh Omnigent, open the Athena Cline conversation, expand
+**Working notes**, and confirm the completed final reply remains visible.
+The web change requires no host update. This follow-up is separate from the
+permission-picker upstream PR.
+
