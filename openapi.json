@@ -283,6 +283,102 @@
         "title": "AgentObject",
         "type": "object"
       },
+      "AsyncQuestionReply": {
+        "additionalProperties": false,
+        "description": "A user message correlated with a persisted async question message.",
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Answers",
+            "type": "object"
+          },
+          "cancelled": {
+            "default": false,
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "source_item_id": {
+            "minLength": 1,
+            "title": "Source Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_item_id"
+        ],
+        "title": "AsyncQuestionReply",
+        "type": "object"
+      },
+      "AsyncUserInput": {
+        "additionalProperties": false,
+        "description": "Persisted native question data; the tool already acknowledged completion.",
+        "properties": {
+          "call_id": {
+            "minLength": 1,
+            "title": "Call Id",
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/AsyncUserInputQuestion"
+            },
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          },
+          "reply_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Id"
+          }
+        },
+        "required": [
+          "call_id",
+          "questions"
+        ],
+        "title": "AsyncUserInput",
+        "type": "object"
+      },
+      "AsyncUserInputQuestion": {
+        "additionalProperties": false,
+        "description": "One asynchronous question, without a native question id.",
+        "properties": {
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "AsyncUserInputQuestion",
+        "type": "object"
+      },
       "AutomaticSessionRenameRequest": {
         "additionalProperties": false,
         "description": "Proposed title for a framework or agent-initiated rename.",
@@ -3692,6 +3788,26 @@
       "MessageData": {
         "description": "Data for a message item (user or assistant).\n\n**Parameters**\n\n- `agent` \u2014 Agent name (required for assistant messages, absent for user). Serialized as `\"model\"` in JSON.",
         "properties": {
+          "async_question_reply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AsyncQuestionReply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "async_user_input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AsyncUserInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "content": {
             "description": "Heterogeneous content blocks, e.g. `[{\"type\": \"input_text\", \"text\": \"Hello\"}]`.",
             "items": {
@@ -4767,6 +4883,108 @@
           "delta"
         ],
         "title": "ReasoningTextDeltaEvent",
+        "type": "object"
+      },
+      "ReplySuggestionRequest": {
+        "additionalProperties": false,
+        "description": "An explicit request for one completed turn. No automatic inference default.",
+        "properties": {
+          "enabled": {
+            "const": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w-]+$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "source_response_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Source Response Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_response_id",
+          "request_id",
+          "enabled"
+        ],
+        "title": "ReplySuggestionRequest",
+        "type": "object"
+      },
+      "ReplySuggestionResult": {
+        "properties": {
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "none",
+              "unsupported",
+              "unavailable",
+              "stale"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "usage": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                {
+                  "format": "double",
+                  "type": "number"
+                }
+              ]
+            },
+            "title": "Usage",
+            "type": "object"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ReplySuggestionResult",
         "type": "object"
       },
       "ResetSessionModelOverrideRequest": {
@@ -9220,7 +9438,7 @@
                 "type": "null"
               }
             ],
-            "description": "Claude-native permission mode to switch a running session to, e.g. `\"auto\"`. Only the modes Claude Code's shift+tab cycle can reach are accepted (`default`, `acceptEdits`, `plan`, `auto`) \u2014 `dontAsk` and `bypassPermissions` are launch-only. Only valid for sessions stamped with the claude-native wrapper label. Unlike the other fields here the switch is applied by the live TUI, so a failure to reach the mode is surfaced as an error rather than persisted. Omitted leaves unchanged.",
+            "description": "Session permission mode. ACP accepts `auto` (ask) or `bypassPermissions` (approve policy-silent requests), with an exact acknowledgement from the live runner before persistence. For Claude-native, the permission mode switches a running session to, e.g. `\"auto\"`. Only the modes Claude Code's shift+tab cycle can reach are accepted (`default`, `acceptEdits`, `plan`, `auto`) \u2014 `dontAsk` and `bypassPermissions` are launch-only. Only valid for sessions stamped with the claude-native wrapper label. Unlike the other fields here the switch is applied by the live TUI, so a failure to reach the mode is surfaced as an error rather than persisted. Omitted leaves unchanged.",
             "title": "Permission Mode"
           },
           "project_id": {
@@ -13873,6 +14091,157 @@
           }
         },
         "summary": "Reset Session Model Override",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/next-reply": {
+      "post": {
+        "operationId": "generate_v1_sessions__session_id__next_reply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplySuggestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplySuggestionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/next-reply/usage": {
+      "get": {
+        "operationId": "usage_v1_sessions__session_id__next_reply_usage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Usage V1 Sessions  Session Id  Next Reply Usage Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Usage",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/next-reply/{request_id}": {
+      "delete": {
+        "operationId": "cancel_v1_sessions__session_id__next_reply__request_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Cancel V1 Sessions  Session Id  Next Reply  Request Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel",
         "tags": [
           "sessions"
         ]
