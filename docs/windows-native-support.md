@@ -51,7 +51,7 @@ keep-alive after CLI exit, and no local PowerShell terminal attach. Treat its
 reported Claude/Codex success as the author's evidence, not qualification of
 this fork or the installed CLI versions.
 
-The current interface audit found five public terminal methods absent from the
+The interface audit found five public terminal methods absent from the
 fork's `WindowsTerminalInstance`: `client_interaction_within`, `last_exit_signal`,
 `last_exit_status`, `last_exit_text`, and `pane_pid_sync`. Current runner startup
 diagnostics and terminal registry code consume those methods. Its cleanup calls
@@ -74,6 +74,61 @@ recovery policy; ConPTY does not supply tmux's independent persistent server.
 Keep bounded replay and backpressure so a slow viewer cannot grow memory
 without limit. Retain process identity checks and evaluate Job Object ownership
 without claiming filesystem or network isolation.
+
+## Experimental transport increment
+
+`omnigent.terminals.conpty` now provides a standalone transport and
+`conpty_bridge` implements the existing browser binary-input/output and JSON
+resize framing. Neither the terminal factory nor production attach routes call
+these modules yet. Native Windows harness readiness remains disabled.
+
+The transport uses pywinpty's low-level ConPTY API, with one output reader and
+one serialized input worker. It bounds replay, viewer queues and pending input;
+a stalled viewer gets a reconnect error instead of silently losing VT bytes.
+Browser detach and adapter cancellation release only the viewer. Writable
+viewers use the smallest requested dimensions; read-only viewers cannot send
+input or resize. Partial writes stop input without retrying the payload.
+Runner authentication variables are scrubbed case-insensitively, and argv is
+passed literally to an executable. Batch launchers are explicitly rejected
+until their native executable adapters exist.
+
+The Windows driver requires an owned kill-on-close Job Object and retains a
+process object with its birth identity for failed-setup cleanup. Assignment
+happens after process creation: this does not yet prove containment of a child
+that escapes during that interval. The Job Object provides no filesystem or
+network isolation. A failed close reports failure and retains ownership for
+retry; it does not report successful cleanup.
+
+The optional `windows-native` extra locks pywinpty 3.0.5 under the existing
+dependency cutoff. This code was written against its documented low-level API,
+not copied from the reference fork. Raw VT-tail replay is bounded but is not a
+rendered screen or a complete reconnect snapshot. Screen/mode reconstruction,
+native harness adapters, local console attach and crash recovery still need
+implementation and qualification.
+
+Portable driver and browser-adapter tests cover blocked input with independent
+output, atomic Unicode paste, byte bounds, partial writes, viewer overflow,
+resize ownership, read-only viewing, cancellation, final output, exit status
+and cleanup retry. A Windows-only process-boundary test exercises two fixture
+turns, Unicode cwd and file access, reconnect, resize, exit diagnostics and
+descendant cleanup. It needs a separately admitted native Windows test lane;
+passing portable tests does not qualify the Windows binding or either provider.
+
+Run the portable checks without a provider or server:
+
+```sh
+python -m pytest tests/terminals/test_conpty.py \
+  tests/terminals/test_conpty_bridge.py -q --reruns 0 -n 0
+```
+
+On an isolated Windows candidate with the optional extra installed, run the
+same process probe directly. This avoids loading the repository's broader
+pytest setup, which still has POSIX development dependencies. Choose a new,
+owned directory each time:
+
+```powershell
+python -m tests.terminals.conpty_probe --root D:\work\PLAT-89-conpty-check-01
+```
 
 ## Delivery and qualification
 

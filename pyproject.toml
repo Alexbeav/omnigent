@@ -135,6 +135,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Experimental transport only; native Windows harness readiness stays disabled.
+windows-native = ["pywinpty>=3.0.5,<4; platform_system == 'Windows'"]
 # Retained as no-op aliases so existing `--extra` invocations keep
 # working; the underlying packages are now default deps above.
 claude-sdk = []
