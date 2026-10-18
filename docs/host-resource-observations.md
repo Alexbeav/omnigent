@@ -9,7 +9,9 @@ remains with PLAT-89.
 `omnigent.host.resource_observations.sample_host_resources()` measures a 250 ms CPU interval through the existing psutil dependency. It reads physical memory total and OS-available memory. Used percent is `100 * (total - available) / total`. This definition is explicit because native operating-system displays can classify cache or reclaimable memory differently.
 
 The CPU measurement blocks only its worker thread, not the event loop. The
-candidate publisher samples every 30 seconds and retains one pending worker
+candidate publisher schedules samples every 15 seconds on a monotonic clock,
+without adding sample/send duration to the interval. Missed ticks are coalesced
+to the next scheduled boundary rather than replayed in a burst. It retains one pending worker
 across tunnel reconnects. Cancellation does not start another concurrent sensor
 read. A three-second sampling deadline and five-second send deadline contain
 failures; a hung OS call retains that single worker until it returns. No worker
@@ -47,6 +49,12 @@ The existing daemon calls the publisher only when
 `OMNIGENT_RESOURCE_OBSERVATIONS=1`. Default is disabled. Server support must land
 first; joint review and owner-approved idle handoffs precede enabling this flag.
 No new fleet service, provider configuration or native hook is installed.
+
+The cadence correction is source-only preparation. Enabling it in an already
+running host still requires a jointly reviewed, owner-approved idle handoff;
+changing an external environment variable or reconnecting a tunnel is not a hot
+toggle. A daemon restart can terminate owned runners and is not established as
+session-preserving. No active host, server or publisher is restarted by this change.
 
 The AgentOps consumer requires explicit authenticated-host-to-physical-host
 bindings. A WSL sample cannot populate physical CPU/RAM, even if it belongs to

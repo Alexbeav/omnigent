@@ -148,3 +148,84 @@ async def test_cancelled_sampling_keeps_one_worker_and_leaves_event_loop_running
         assert measured.sample.cpu_percent == 25 and publisher.sequence == 1
     finally:
         release.set()
+
+
+@pytest.mark.parametrize(
+    ("sample_cost", "send_cost", "expected_starts"),
+    [
+        (0.25, 0.5, [0, 15, 30]),
+        (16, 0, [0, 30, 60]),
+        (2, 29, [0, 45, 90]),
+        (15, 0, [0, 15, 30]),
+    ],
+)
+async def test_resource_schedule_avoids_drift_and_coalesces_missed_ticks(
+    monkeypatch, sample_cost, send_cost, expected_starts
+):
+    from omnigent.host import resource_publisher
+
+    clock = 0.0
+    starts = []
+    sleeps = []
+
+    async def sleep(delay):
+        nonlocal clock
+        assert delay >= 0
+        sleeps.append(delay)
+        clock += delay
+
+    async def sample():
+        nonlocal clock
+        starts.append(clock)
+        clock += sample_cost
+        return resource_inventory()
+
+    class Tunnel:
+        async def send(self, frame):
+            nonlocal clock
+            assert decode_host_frame(frame).snapshot.sample.cpu_percent == 25
+            clock += send_cost
+            if len(starts) == 3:
+                raise asyncio.CancelledError
+
+    monkeypatch.setattr(resource_publisher, "monotonic", lambda: clock)
+    monkeypatch.setattr(resource_publisher, "sleep", sleep)
+    publisher = resource_publisher.HostResourcePublisher()
+    monkeypatch.setattr(publisher, "sample", sample)
+    with pytest.raises(asyncio.CancelledError):
+        await publisher.run(Tunnel())
+    assert starts == expected_starts
+    assert len(sleeps) == 3
+
+
+async def test_failed_sample_keeps_the_next_resource_deadline(monkeypatch, caplog):
+    from omnigent.host import resource_publisher
+
+    clock = 0.0
+    starts = []
+
+    async def sleep(delay):
+        nonlocal clock
+        clock += delay
+
+    async def sample():
+        nonlocal clock
+        starts.append(clock)
+        if len(starts) == 1:
+            clock += 3
+            raise TimeoutError("PRIVATE-CANARY")
+        return resource_inventory()
+
+    class Tunnel:
+        async def send(self, frame):
+            assert decode_host_frame(frame).snapshot.sample.cpu_percent == 25
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(resource_publisher, "monotonic", lambda: clock)
+    monkeypatch.setattr(resource_publisher, "sleep", sleep)
+    publisher = resource_publisher.HostResourcePublisher()
+    monkeypatch.setattr(publisher, "sample", sample)
+    with pytest.raises(asyncio.CancelledError):
+        await publisher.run(Tunnel())
+    assert starts == [0, 15]
+    assert "PRIVATE-CANARY" not in caplog.text

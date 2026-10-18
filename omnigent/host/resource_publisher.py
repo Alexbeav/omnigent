@@ -6,7 +6,10 @@ import asyncio
 import logging
 import platform
 import secrets
+from asyncio import sleep
 from datetime import datetime
+from math import ceil
+from time import monotonic
 from typing import Any
 
 from omnigent.host.frames import HostResourceObservationsFrame, encode_host_frame
@@ -14,6 +17,7 @@ from omnigent.host.resource_observations import sample_host_resources
 from omnigent.host_resource_observations import HostResourceSnapshot
 
 _logger = logging.getLogger(__name__)
+RESOURCE_SAMPLE_INTERVAL_S = 15
 
 
 class HostResourcePublisher:
@@ -44,7 +48,9 @@ class HostResourcePublisher:
         )
 
     async def run(self, ws: Any) -> None:
+        next_sample = monotonic()
         while True:
+            await sleep(max(0.0, next_sample - monotonic()))
             try:
                 snapshot = await self.sample()
                 frame = encode_host_frame(HostResourceObservationsFrame(snapshot))
@@ -52,4 +58,10 @@ class HostResourcePublisher:
                     await ws.send(frame)
             except Exception:  # noqa: BLE001 - optional telemetry must never stop a tunnel
                 _logger.warning("Host resource publication unavailable; measurements will expire")
-            await asyncio.sleep(30)
+            next_sample += RESOURCE_SAMPLE_INTERVAL_S
+            now = monotonic()
+            if next_sample < now:
+                next_sample += (
+                    ceil((now - next_sample) / RESOURCE_SAMPLE_INTERVAL_S)
+                    * RESOURCE_SAMPLE_INTERVAL_S
+                )
