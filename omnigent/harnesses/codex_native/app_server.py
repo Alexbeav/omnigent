@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import socket
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -26,6 +27,9 @@ from cachetools import TTLCache
 from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
 
+from omnigent._platform import IS_WINDOWS
+from omnigent.inner.sandbox import ContainmentHandle, SandboxPolicy
+from omnigent.inner.windows_jobobject_sandbox import WindowsJobObjectSandboxBackend
 from omnigent.models import model_catalog
 from omnigent.models.model_fallbacks import CODEX_DEFAULT_MODEL
 from omnigent.util.json_types import JsonObject as _JsonObject
@@ -113,6 +117,16 @@ from omnigent.util.reasoning_effort import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _native_codex_spawn_kwargs() -> _proc.SpawnKwargs:
+    """Keep the Windows app-server hidden while retaining process-group ownership."""
+    kwargs = _proc.spawn_kwargs()
+    hidden = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if IS_WINDOWS else 0
+    if hidden:
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | hidden
+    return kwargs
+
 
 CodexMessage: TypeAlias = _JsonObject
 CodexParams: TypeAlias = _JsonObject
@@ -2005,6 +2019,7 @@ class CodexNativeAppServer:
     config_profile: str | None = None
     session_id: str | None = None
     stderr_capture_error_type: str | None = field(default=None, init=False)
+    _windows_process_owner: ContainmentHandle | None = field(default=None, init=False, repr=False)
     # First TLS certificate failure the launcher printed; mirrored into the
     # bridge so the forwarder can fail a stuck turn with the cause.
     certificate_failure: CertificateFailure | None = field(default=None, init=False)
@@ -2205,9 +2220,22 @@ class CodexNativeAppServer:
                 env=proc_env,
                 cwd=str(self.cwd),
                 executable=self.codex_path,
-                **_proc.spawn_kwargs(),
+                **_native_codex_spawn_kwargs(),
             )
+            if IS_WINDOWS:
+                # The app-server is a separate process from its ConPTY TUI.
+                # Own both lifetimes; a browser detach owns neither cleanup.
+                _proc.refresh_process_tree(self.proc)
+                self._windows_process_owner = WindowsJobObjectSandboxBackend().post_spawn(
+                    SandboxPolicy("windows_jobobject", True, None, [], [], True), self.proc.pid
+                )
+                if self._windows_process_owner is None:
+                    raise RuntimeError(
+                        "Windows Codex app-server process ownership was not established"
+                    )
         except BaseException:
+            if self.proc is not None:
+                await self.close()
             if self.process_owner_lock is not None:
                 self.process_owner_lock.close()
                 self.process_owner_lock = None
@@ -2445,6 +2473,10 @@ class CodexNativeAppServer:
 
         :returns: None.
         """
+        if self._windows_process_owner is not None:
+            # A failed close retains the same owner and process for retry.
+            await asyncio.to_thread(self._windows_process_owner.close)
+            self._windows_process_owner = None
         if self.proc is not None and self.proc.returncode is None:
             _terminate_process_tree(self.proc)
             try:

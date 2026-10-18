@@ -239,6 +239,15 @@ fault checks and a repeated native managed probe passed; the native unit set
 passed 51 checks with one skip after including the metadata and handle checks.
 This is a source fix only; installed host daemons remain unchanged.
 
+A separate app-server ownership candidate gives Windows Codex's app-server
+its own mandatory Job Object, independent of the ConPTY TUI. Startup refuses
+unowned processes, close retains failed ownership for retry, and hidden spawn
+flags preserve the process-group flag. The real Windows Python-fixture probe
+checks an absent console window and cleanup through interpreter redirectors
+to the leaf process. Its readiness and hook RPCs are stubbed; it does not
+qualify Codex authentication, app-server RPCs or provider inference. Joint
+AgentOps lifecycle review is required before integrating this candidate.
+
 ## Delivery and qualification
 
 1. Validate and publish the platform-readiness increment separately.

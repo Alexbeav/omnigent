@@ -26,8 +26,23 @@ from tests.harnesses.codex_native.app_server._support import (
 )
 
 
+@pytest.mark.parametrize("windows", [False, True])
+def test_app_server_hidden_flags_preserve_process_group(
+    monkeypatch: pytest.MonkeyPatch, windows: bool
+) -> None:
+    from omnigent.harnesses.codex_native import app_server
+
+    monkeypatch.setattr(app_server, "IS_WINDOWS", windows)
+    monkeypatch.setattr(app_server.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(app_server._proc, "spawn_kwargs", lambda: {"creationflags": 0x200})
+    assert app_server._native_codex_spawn_kwargs() == {
+        "creationflags": 0x08000200 if windows else 0x200
+    }
+
+
+@pytest.mark.parametrize("process_owner", ["posix", "windows-owned", "windows-refused"])
 async def test_start_reuses_initialized_readiness_client_for_hook_trust(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, process_owner: str
 ) -> None:
     """Startup trusts hooks over the readiness connection, then closes it."""
     from omnigent.harnesses.codex_native import app_server as codex_native_app_server
@@ -43,6 +58,12 @@ async def test_start_reuses_initialized_readiness_client_for_hook_trust(
 
     startup_client = _FakeStartupClient()
     trusted_with: list[object] = []
+    job = Mock()
+    containment = Mock(return_value=job if process_owner == "windows-owned" else None)
+    monkeypatch.setattr(codex_native_app_server, "IS_WINDOWS", process_owner != "posix")
+    monkeypatch.setattr(
+        codex_native_app_server.WindowsJobObjectSandboxBackend, "post_spawn", containment
+    )
 
     async def _ready(_self: CodexNativeAppServer) -> _FakeStartupClient:
         return startup_client
@@ -62,12 +83,48 @@ async def test_start_reuses_initialized_readiness_client_for_hook_trust(
         workspace,
     )
 
+    if process_owner == "windows-refused":
+        with pytest.raises(RuntimeError, match="ownership was not established"):
+            await server.start()
+        assert server.proc is None
+        assert trusted_with == [] and startup_client.close_calls == 0
+        return
     await server.start()
     try:
         assert trusted_with == [startup_client]
         assert startup_client.close_calls == 1
+        if process_owner == "windows-owned":
+            assert server._windows_process_owner is job
+            containment.assert_called_once()
+        else:
+            containment.assert_not_called()
     finally:
         await server.close()
+    if process_owner == "windows-owned":
+        job.close.assert_called_once()
+
+
+async def test_failed_windows_owner_close_retains_app_server_for_retry(tmp_path: Path) -> None:
+    server = _test_app_server(tmp_path, tmp_path / "home", tmp_path / "bridge", tmp_path)
+    process, job = Mock(returncode=0), Mock()
+    job.close.side_effect = [OSError("owned close failed"), None]
+    server.proc = process
+    server._windows_process_owner = job
+    with pytest.raises(OSError, match="owned close failed"):
+        await server.close()
+    assert server.proc is process and server._windows_process_owner is job
+    await server.close()
+    assert server.proc is None and server._windows_process_owner is None
+    assert job.close.call_count == 2
+
+
+@pytest.mark.windows_only
+def test_windows_app_server_job_closes_owned_fixture_tree(tmp_path: Path) -> None:
+    from tests.harnesses.codex_native.app_server.windows_owner_probe import run_probe
+
+    result = run_probe(tmp_path / "owned-app-server")
+    assert result["status"] == "passed"
+    assert result["owned_processes_remaining"] == 0
 
 
 async def test_start_cancellation_closes_reused_client_and_app_server(

@@ -17,7 +17,7 @@ parameterization produces additional collected cases.
 | [test_policy_hooks.py](test_policy_hooks.py) | Policy hooks | 21 |
 | [test_router_hooks.py](test_router_hooks.py) | Router hooks | 10 |
 | [test_session_profiles.py](test_session_profiles.py) | Session profiles | 6 |
-| [test_startup.py](test_startup.py) | Startup | 8 |
+| [test_startup.py](test_startup.py) | Startup and Windows process ownership | 13 |
 
 Explicit fixtures stay in the test module that consumes them.
 Helpers shared by multiple modules live in `_support.py`; helpers used by one
@@ -26,4 +26,17 @@ module stay beside their tests. Search a retained test name to find an old failu
 ```sh
 rg 'def test_name' tests/harnesses/codex_native/app_server
 uv run --no-sync pytest tests/harnesses/codex_native/app_server --reruns 0 -n 4 --dist loadfile
+```
+
+`windows_owner_probe.py` is a distinct Windows process boundary. It starts a
+Python fixture through `CodexNativeAppServer`, using the real Windows process
+and Job Object APIs. Readiness and hook RPCs are explicit fixture stubs; it
+starts no Codex CLI or provider. The fixture checks an absent console window,
+tracks the interpreter redirectors and leaf by PID/birth, and verifies that
+close drains the complete known chain. The Windows-only startup scenario uses
+the same probe. Run it standalone in a new owned directory after native host
+admission:
+
+```powershell
+python -m tests.harnesses.codex_native.app_server.windows_owner_probe --root D:\work\PLAT-89-owner-check-01
 ```
