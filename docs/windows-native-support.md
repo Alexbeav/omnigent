@@ -248,6 +248,11 @@ to the leaf process. Its readiness and hook RPCs are stubbed; it does not
 qualify Codex authentication, app-server RPCs or provider inference. Joint
 AgentOps lifecycle review is required before integrating this candidate.
 
+If closing the app-server's Job handle fails, independent process termination,
+owner-lock release and stderr cleanup still run; the failed handle remains
+available for retry. Failed startup preserves its original readiness or
+cancellation error and logs cleanup failure instead of replacing that error.
+
 ## Delivery and qualification
 
 1. Validate and publish the platform-readiness increment separately.

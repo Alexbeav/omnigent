@@ -17,7 +17,7 @@ parameterization produces additional collected cases.
 | [test_policy_hooks.py](test_policy_hooks.py) | Policy hooks | 21 |
 | [test_router_hooks.py](test_router_hooks.py) | Router hooks | 10 |
 | [test_session_profiles.py](test_session_profiles.py) | Session profiles | 6 |
-| [test_startup.py](test_startup.py) | Startup and Windows process ownership | 13 |
+| [test_startup.py](test_startup.py) | Startup and Windows process ownership | 14 |
 
 Explicit fixtures stay in the test module that consumes them.
 Helpers shared by multiple modules live in `_support.py`; helpers used by one
@@ -27,6 +27,11 @@ module stay beside their tests. Search a retained test name to find an old failu
 rg 'def test_name' tests/harnesses/codex_native/app_server
 uv run --no-sync pytest tests/harnesses/codex_native/app_server --reruns 0 -n 4 --dist loadfile
 ```
+
+Startup failure regressions reuse the existing wrapper and a sleeping Python
+fixture. A simulated Job close failure must still drain that real process,
+release the owner lock, preserve readiness failure or cancellation, and retain
+only the failed Job handle for retry. Both cases fail before the cleanup fix.
 
 `windows_owner_probe.py` is a distinct Windows process boundary. It starts a
 Python fixture through `CodexNativeAppServer`, using the real Windows process

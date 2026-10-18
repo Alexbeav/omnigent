@@ -22,6 +22,7 @@ from omnigent.harnesses.codex_native.bridge import (
 from tests.harnesses.codex_native.app_server._support import (
     _disable_codex_startup_rpc,
     _FakeStartupClient,
+    _set_codex_version,
     _test_app_server,
 )
 
@@ -104,7 +105,7 @@ async def test_start_reuses_initialized_readiness_client_for_hook_trust(
         job.close.assert_called_once()
 
 
-async def test_failed_windows_owner_close_retains_app_server_for_retry(tmp_path: Path) -> None:
+async def test_failed_windows_owner_close_retains_handle_for_retry(tmp_path: Path) -> None:
     server = _test_app_server(tmp_path, tmp_path / "home", tmp_path / "bridge", tmp_path)
     process, job = Mock(returncode=0), Mock()
     job.close.side_effect = [OSError("owned close failed"), None]
@@ -112,9 +113,54 @@ async def test_failed_windows_owner_close_retains_app_server_for_retry(tmp_path:
     server._windows_process_owner = job
     with pytest.raises(OSError, match="owned close failed"):
         await server.close()
-    assert server.proc is process and server._windows_process_owner is job
+    assert server.proc is None and server._windows_process_owner is job
     await server.close()
     assert server.proc is None and server._windows_process_owner is None
+    assert job.close.call_count == 2
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_failed_start_drains_process_when_windows_owner_close_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool
+) -> None:
+    """A failed Job close cannot hide startup failure or strand the process."""
+    from omnigent.harnesses.codex_native import app_server
+
+    server = _test_app_server(tmp_path, tmp_path / "home", tmp_path / "bridge", tmp_path)
+    failure = asyncio.CancelledError() if cancelled else RuntimeError("readiness failed")
+    job, owner_lock = Mock(), Mock(path=tmp_path / "owner.lock")
+    job.close.side_effect = [OSError("owned close failed"), None]
+    process: asyncio.subprocess.Process | None = None
+
+    async def _fail_readiness(self: CodexNativeAppServer) -> _FakeStartupClient:
+        nonlocal process
+        process = self.proc
+        assert process is not None and process.returncode is None
+        raise failure
+
+    _set_codex_version(monkeypatch, (0, 147, 0))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "source-home"))
+    monkeypatch.setattr(app_server, "IS_WINDOWS", True)
+    monkeypatch.setattr(app_server, "acquire_codex_native_process_owner_lock", lambda: owner_lock)
+    monkeypatch.setattr(app_server.WindowsJobObjectSandboxBackend, "post_spawn", lambda *_: job)
+    monkeypatch.setattr(
+        app_server,
+        "_build_native_codex_app_server_argv",
+        lambda **_: [server.codex_path, "-c", "import time; time.sleep(60)"],
+    )
+    monkeypatch.setattr(CodexNativeAppServer, "_wait_until_ready", _fail_readiness)
+    try:
+        with pytest.raises(type(failure)) as caught:
+            await server.start()
+        assert caught.value is failure
+        assert process is not None and process.returncode is not None
+        assert server.proc is None and server.stderr_task is None
+        assert server.process_owner_lock is None
+        owner_lock.close.assert_called_once()
+        assert server._windows_process_owner is job
+    finally:
+        await server.close()
+    assert server._windows_process_owner is None
     assert job.close.call_count == 2
 
 

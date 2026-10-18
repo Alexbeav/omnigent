@@ -2234,11 +2234,7 @@ class CodexNativeAppServer:
                         "Windows Codex app-server process ownership was not established"
                     )
         except BaseException:
-            if self.proc is not None:
-                await self.close()
-            if self.process_owner_lock is not None:
-                self.process_owner_lock.close()
-                self.process_owner_lock = None
+            await self._close_after_failed_start()
             raise
         if self.process_owner_lock is not None:
             register_codex_native_process(
@@ -2322,8 +2318,15 @@ class CodexNativeAppServer:
                 except Exception:  # noqa: BLE001 - a dead control socket cannot undo trust
                     _logger.warning("Could not close Codex startup client", exc_info=True)
         except BaseException:
-            await self.close()
+            await self._close_after_failed_start()
             raise
+
+    async def _close_after_failed_start(self) -> None:
+        """Attempt cleanup without replacing the original startup exception."""
+        try:
+            await self.close()
+        except BaseException:  # noqa: BLE001 - preserve the original startup failure or cancellation
+            _logger.warning("Could not finish Codex app-server startup cleanup", exc_info=True)
 
     async def _trust_policy_hooks(self, *, client: CodexAppServerClient | None = None) -> None:
         """
@@ -2473,10 +2476,14 @@ class CodexNativeAppServer:
 
         :returns: None.
         """
+        owner_close_error: Exception | None = None
         if self._windows_process_owner is not None:
-            # A failed close retains the same owner and process for retry.
-            await asyncio.to_thread(self._windows_process_owner.close)
-            self._windows_process_owner = None
+            try:
+                await asyncio.to_thread(self._windows_process_owner.close)
+            except Exception as exc:  # noqa: BLE001 - still drain the process and release its lock
+                owner_close_error = exc
+            else:
+                self._windows_process_owner = None
         if self.proc is not None and self.proc.returncode is None:
             _terminate_process_tree(self.proc)
             try:
@@ -2509,6 +2516,9 @@ class CodexNativeAppServer:
                     diagnostics.finish()
                     with contextlib.suppress(Exception):
                         await asyncio.to_thread(diagnostics.close)
+        if owner_close_error is not None:
+            # Retain the failed handle for retry after independent process cleanup.
+            raise owner_close_error
 
     async def _wait_until_ready(self) -> CodexAppServerClient:
         """
