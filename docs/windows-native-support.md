@@ -90,11 +90,12 @@ direct-attach listener shares this same handler. Both bridges retain read-only
 viewing and detach without closing the terminal, and report client interactions
 separately from terminal activity.
 
-The terminal factory still creates tmux instances, so this boundary does not
-enable Windows launches or create ConPTY registry entries in production. A
-managed ConPTY instance, screen reconstruction, factory routing and provider
-qualification remain subsequent work. No AgentOps collector, lifecycle frame,
-tunnel or observation schema changes are part of this boundary.
+The default terminal factory remains unavailable on Windows. A process-local
+`OMNIGENT_WINDOWS_NATIVE_TERMINALS=1` switch enables an experimental managed
+ConPTY instance for isolated qualification. Native harness readiness remains
+disabled, so the switch does not enable Claude or Codex in the host picker.
+No AgentOps collector, lifecycle frame, tunnel or observation schema changes
+are part of this boundary.
 
 The transport uses pywinpty's low-level ConPTY API, with one output reader and
 one serialized input worker. It bounds replay, viewer queues and pending input;
@@ -191,6 +192,45 @@ python -m tests.terminals.conpty_probe --root D:\work\PLAT-89-conpty-check-01
 Add `--capture-screen` with a different owned probe directory to qualify the
 text model against the real Windows binding. This is separate from raw transport
 qualification and does not qualify either native provider or browser replay.
+
+## Experimental managed terminal
+
+The Windows factory can now create a `ConPTYTerminalInstance` in the normal
+conversation registry. It supplies serialized input, rendered text capture,
+threaded and asynchronous activity/idle watching, liveness, exit diagnostics
+and explicit close. Browser detach leaves the owned process running. ConPTY
+instances expose no tmux socket and are excluded from the tmux orphan reaper.
+Failed Windows cleanup retains the registry handle and private directory for
+retry, including conversation cleanup and shutdown.
+
+The experimental factory requires an explicit `none` sandbox policy. It refuses
+forked/scratch environments, copy-on-write paths, egress restrictions, inherited
+active sandboxes and tmux start-on-attach rather than silently dropping those
+policies. Its mandatory Job Object owns processes; it does not isolate files or
+network access. Joined wrapped-line capture, complete browser replay, provider
+launch adapters and crash recovery remain unfinished.
+
+Managed-terminal checkpoint, 2026-10-18: an isolated Pegasus Windows candidate
+passed 48 terminal checks (one separate process check skipped) and the standalone
+managed probe with the real pywinpty binding. The probe exercised two Unicode
+turns, a Greek working directory and file, rendered capture, detach/reconnect
+preserving process identity, resize, exit status 7 and descendant cleanup.
+The controller and observed descendants peaked at 138,027,008 bytes. All exact
+owned identities drained and the resource claim was released. An initial
+watcher test failed because it sent output before establishing the detector's
+baseline; that failure is retained and the corrected scenario waits for the
+initial idle event. No provider, existing session or host daemon changed.
+
+To repeat the managed process boundary on an admitted private Windows candidate:
+
+```powershell
+$env:OMNIGENT_WINDOWS_NATIVE_TERMINALS = '1'
+python -m tests.terminals.conpty_probe --managed --root D:\work\PLAT-89-managed-check-01
+```
+
+This proves the managed terminal boundary only. Keep the factory switch local
+to the test process and leave native provider readiness disabled until the
+provider-specific launch, resume, controls and recovery checks below pass.
 
 ## Delivery and qualification
 

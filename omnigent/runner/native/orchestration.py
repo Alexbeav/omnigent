@@ -160,7 +160,7 @@ def _publish_tmux_target_for_bridge(
     if terminal_registry is None:
         return
     instance = terminal_registry.get(session_id, terminal_name, session_key)
-    if instance is None or not instance.running:
+    if instance is None or not instance.running or instance.socket_path is None:
         return
     # Imported here to avoid pulling Claude-native specifics into the
     # generic runner module's import-time graph.
@@ -3089,7 +3089,7 @@ async def _auto_create_cursor_terminal(
     terminal_registry = resource_registry.terminal_registry
     if terminal_registry is not None:
         instance = terminal_registry.get(session_id, "cursor", "main")
-        if instance is not None and instance.running:
+        if instance is not None and instance.running and instance.socket_path is not None:
             from omnigent.harnesses.cursor_native.bridge import write_tmux_target
 
             write_tmux_target(
@@ -3292,7 +3292,7 @@ async def _auto_create_goose_terminal(
     terminal_registry = resource_registry.terminal_registry
     if terminal_registry is not None:
         instance = terminal_registry.get(session_id, "goose", "main")
-        if instance is not None and instance.running:
+        if instance is not None and instance.running and instance.socket_path is not None:
             write_tmux_target(
                 bridge_dir,
                 socket_path=instance.socket_path,
@@ -3527,7 +3527,7 @@ async def _auto_create_hermes_terminal(
     terminal_registry = resource_registry.terminal_registry
     if terminal_registry is not None:
         instance = terminal_registry.get(session_id, "hermes", "main")
-        if instance is not None and instance.running:
+        if instance is not None and instance.running and instance.socket_path is not None:
             write_tmux_target(
                 bridge_dir,
                 socket_path=instance.socket_path,
@@ -3681,7 +3681,7 @@ async def _auto_create_kiro_terminal(
     terminal_registry = resource_registry.terminal_registry
     if terminal_registry is not None:
         instance = terminal_registry.get(session_id, "kiro", "main")
-        if instance is not None and instance.running:
+        if instance is not None and instance.running and instance.socket_path is not None:
             from omnigent.harnesses.kiro_native.bridge import write_tmux_target
 
             write_tmux_target(
@@ -3900,7 +3900,7 @@ async def _auto_create_devin_terminal(
     terminal_registry = resource_registry.terminal_registry
     if terminal_registry is not None:
         instance = terminal_registry.get(session_id, "devin", "main")
-        if instance is not None and instance.running:
+        if instance is not None and instance.running and instance.socket_path is not None:
             write_tmux_target(
                 bridge_dir,
                 socket_path=instance.socket_path,
@@ -4250,7 +4250,7 @@ async def _auto_create_qwen_terminal(
     terminal_registry = resource_registry.terminal_registry
     if terminal_registry is not None:
         instance = terminal_registry.get(session_id, "qwen", "main")
-        if instance is not None and instance.running:
+        if instance is not None and instance.running and instance.socket_path is not None:
             write_tmux_target(
                 bridge_dir,
                 socket_path=instance.socket_path,
@@ -4469,7 +4469,7 @@ async def _auto_create_kimi_terminal(
     terminal_registry = resource_registry.terminal_registry
     if terminal_registry is not None:
         instance = terminal_registry.get(session_id, "kimi", "main")
-        if instance is not None and instance.running:
+        if instance is not None and instance.running and instance.socket_path is not None:
             write_tmux_target(
                 bridge_dir,
                 socket_path=instance.socket_path,

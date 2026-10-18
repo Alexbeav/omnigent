@@ -140,7 +140,7 @@ def _format_launch_envelope(
         {
             "terminal": validated.terminal_name,
             "session": validated.session_key,
-            "tmux_socket": str(instance.socket_path),
+            "tmux_socket": str(instance.socket_path) if instance.socket_path is not None else None,
             "has_os_env": instance.os_env is not None,
             "status": "already_running" if was_running else "launched",
         }
@@ -1118,5 +1118,5 @@ def _describe_entry(
         "command": instance.command,
         "running": instance.running,
         "has_os_env": instance.os_env is not None,
-        "tmux_socket": str(instance.socket_path),
+        "tmux_socket": str(instance.socket_path) if instance.socket_path is not None else None,
     }

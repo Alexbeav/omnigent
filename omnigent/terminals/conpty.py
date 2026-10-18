@@ -146,6 +146,11 @@ class ConPTYSession:
         return self._exit_status
 
     @property
+    def alive(self) -> bool:
+        """Reader-owned liveness, without racing the native binding's output reads."""
+        return not self._ended.is_set() and not self._closing.is_set()
+
+    @property
     def workers_alive(self) -> bool:
         return self._reader.is_alive() or self._writer.is_alive()
 

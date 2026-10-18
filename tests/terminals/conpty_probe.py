@@ -7,6 +7,7 @@ an isolated candidate with the windows-native extra. No provider is started.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -18,7 +19,9 @@ import psutil
 from omnigent.terminals import conpty
 
 
-def run_probe(root_dir: Path, *, capture_screen: bool = False) -> dict[str, object]:
+def run_probe(
+    root_dir: Path, *, capture_screen: bool = False, managed: bool = False
+) -> dict[str, object]:
     """Exercise the real binding and fail if owned processes do not drain."""
     if not conpty.IS_WINDOWS or not __debug__:
         raise RuntimeError("The probe requires native Windows with assertions enabled.")
@@ -74,13 +77,39 @@ def run_probe(root_dir: Path, *, capture_screen: bool = False) -> dict[str, obje
         }
     }
     environment.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-    session = conpty.spawn_conpty(
-        [sys.executable, "-u", str(fixture)],
-        cwd=cwd,
-        env=environment,
-        cols=500,
-        capture_screen=capture_screen,
-    )
+    registry = instance = None
+    if managed:
+        from omnigent.inner.datamodel import OSEnvSandboxSpec, OSEnvSpec, TerminalEnvSpec
+        from omnigent.terminals.attach_target import ConPTYAttachTarget
+        from omnigent.terminals.registry import TerminalRegistry
+
+        registry = TerminalRegistry()
+        instance = asyncio.run(
+            registry.launch(
+                "owned-probe",
+                "python",
+                "main",
+                TerminalEnvSpec(
+                    command=sys.executable,
+                    args=["-u", str(fixture)],
+                    env=environment,
+                    inherit_env=False,
+                    os_env=OSEnvSpec(cwd=str(cwd), sandbox=OSEnvSandboxSpec(type="none")),
+                ),
+            )
+        )
+        assert isinstance(instance.attach_target, ConPTYAttachTarget)
+        assert instance.socket_path is None
+        session = instance.attach_target.session
+        capture_screen = True
+    else:
+        session = conpty.spawn_conpty(
+            [sys.executable, "-u", str(fixture)],
+            cwd=cwd,
+            env=environment,
+            cols=500,
+            capture_screen=capture_screen,
+        )
     process = psutil.Process(session.pid)
     process_birth = process.create_time()
     descendant = None
@@ -93,17 +122,25 @@ def run_probe(root_dir: Path, *, capture_screen: bool = False) -> dict[str, obje
                 session.unsubscribe(viewer)
                 viewer = session.subscribe(replay=False)
             text = f"Καλημέρα 😀 {index}\nsecond line & literal |"
-            session.write(json.dumps({"op": op, "text": text}, ensure_ascii=False) + "\r").result(
-                timeout=5
-            )
+            message = json.dumps({"op": op, "text": text}, ensure_ascii=False)
+            if instance is not None:
+                assert asyncio.run(instance.send(message)) == {"status": "sent"}
+            else:
+                session.write(message + "\r").result(timeout=5)
             expected = "FIXTURE_REPLY:" + json.dumps(
                 {"text": text, "cwd": str(cwd), "file": "owned fixture"}, ensure_ascii=False
             )
             receive(viewer, expected)
             assert process.is_running() and process.create_time() == process_birth
+            if instance is not None:
+                captured = asyncio.run(instance.read(100))
+                assert "FIXTURE_REPLY:" in captured["screen"] and "Καλημέρα" in captured["screen"]
         descendant = psutil.Process(int((cwd / "child.pid").read_text()))
         descendant_birth = descendant.create_time()
-        session.write('{"op":"exit"}\r').result(timeout=5)
+        if instance is not None:
+            assert asyncio.run(instance.send('{"op":"exit"}')) == {"status": "sent"}
+        else:
+            session.write('{"op":"exit"}\r').result(timeout=5)
         receive(viewer, "FIXTURE_FINAL")
         deadline = time.monotonic() + 15
         while viewer.read(timeout=5) is not None:
@@ -113,8 +150,16 @@ def run_probe(root_dir: Path, *, capture_screen: bool = False) -> dict[str, obje
             captured = session.capture(100)
             assert "FIXTURE_FINAL" in captured.text
             assert "FIXTURE_REPLY:" in captured.text and "Καλημέρα" in captured.text
+        if instance is not None:
+            assert not asyncio.run(instance.is_alive())
+            assert instance.last_exit_status() == 7
+            assert "FIXTURE_FINAL" in instance.last_exit_text()
     finally:
-        session.close()
+        if registry is not None:
+            asyncio.run(registry.cleanup_conversation("owned-probe"))
+            assert registry.get("owned-probe", "python", "main") is None
+        else:
+            session.close()
     assert not session.workers_alive
     assert not process.is_running()
     assert descendant is not None
@@ -135,6 +180,7 @@ def run_probe(root_dir: Path, *, capture_screen: bool = False) -> dict[str, obje
         "owned_processes_remaining": 0,
         "io_workers_remaining": 0,
         "rendered_capture": capture_screen,
+        "managed_terminal": managed,
     }
 
 
@@ -142,5 +188,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--capture-screen", action="store_true")
+    parser.add_argument("--managed", action="store_true")
     arguments = parser.parse_args()
-    print(json.dumps(run_probe(arguments.root, capture_screen=arguments.capture_screen), indent=2))
+    print(
+        json.dumps(
+            run_probe(
+                arguments.root, capture_screen=arguments.capture_screen, managed=arguments.managed
+            ),
+            indent=2,
+        )
+    )

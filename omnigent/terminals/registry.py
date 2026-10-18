@@ -402,7 +402,11 @@ class TerminalRegistry:
         with self._lock:
             for conv_id, slot in self._by_conversation.items():
                 for (name, key), instance in slot.items():
-                    if key == "main" and name in NATIVE_PANE_TERMINAL_NAMES:
+                    if (
+                        key == "main"
+                        and name in NATIVE_PANE_TERMINAL_NAMES
+                        and instance.socket_path is not None
+                    ):
                         out.append((conv_id, name, instance.socket_path))
         return out
 
@@ -465,100 +469,50 @@ class TerminalRegistry:
         *,
         expected: TerminalInstance | None = None,
     ) -> bool:
-        """Close one terminal and remove it from the registry.
-
-        Idempotent: closing a non-existent or already-closed terminal
-        returns ``False`` without raising. This matches the
-        ``sys_terminal_close`` tool's contract — the LLM may close
-        the same terminal twice without seeing an error.
-
-        :param conversation_id: Owning conversation id.
-        :param terminal_name: Terminal spec name.
-        :param session_key: Session key.
-        :param expected: When given, close only if this exact instance
-            still occupies the key. A caller that wants to retract the
-            instance IT published must pass it: the key can have been
-            reassigned to a successor in the meantime, and closing by key
-            alone would terminate that successor instead. Compared under
-            the registry lock, so no other writer can swap the instance
-            between the check and the removal.
-        :returns: ``True`` if a live instance was closed, ``False``
-            if no live instance was found (already-closed or
-            never-launched), or if *expected* no longer occupies the key.
-        """
+        """Close one identity; Windows ownership remains registered until cleanup succeeds."""
         key = (terminal_name, session_key)
         with self._lock:
             slot = self._by_conversation.get(conversation_id)
             if slot is None:
                 return False
-            if expected is not None and slot.get(key) is not expected:
+            instance = slot.get(key)
+            if instance is None or (expected is not None and instance is not expected):
                 return False
-            instance = slot.pop(key, None)
-            if not slot:
-                # Drop the empty per-conversation dict so memory
-                # doesn't grow with stale conversation ids.
-                self._by_conversation.pop(conversation_id, None)
-            # Drop the per-instance lock too so subsequent
-            # ``get_instance_lock`` calls return ``None`` for this
-            # closed instance (callers surface a "not running"
-            # error to the LLM).
-            self._instance_locks.pop((conversation_id, terminal_name, session_key), None)
-        if instance is None:
-            return False
+            owned_windows = instance.socket_path is None
+            if not owned_windows:
+                del slot[key]
+                if not slot:
+                    del self._by_conversation[conversation_id]
+                self._instance_locks.pop((conversation_id, terminal_name, session_key), None)
         try:
             await asyncio.wait_for(instance.close(), timeout=_CLOSE_TIMEOUT_S)
         except asyncio.TimeoutError:
+            if owned_windows:
+                raise
             logger.warning(
                 "Terminal close timed out for %s:%s in conv %s",
                 terminal_name,
                 session_key,
                 conversation_id,
             )
+        if owned_windows:
+            with self._lock:
+                slot = self._by_conversation.get(conversation_id)
+                if slot is not None and slot.get(key) is instance:
+                    del slot[key]
+                    if not slot:
+                        del self._by_conversation[conversation_id]
+                    self._instance_locks.pop((conversation_id, terminal_name, session_key), None)
         return True
 
     async def cleanup_conversation(self, conversation_id: str) -> None:
-        """Close every terminal owned by *conversation_id*.
-
-        Called from the workflow's ``finally:`` block at workflow
-        exit (any of completed / failed / cancelled). Idempotent:
-        no-op when the conversation has no terminals.
-
-        Per ``designs/OMNIGENT_TERMINAL_BRIDGE.md`` §4.4, this is **not**
-        checkpointed: tmux kills are idempotent external side
-        effects, the workflow doesn't read from terminals after
-        exit, and step wrappers exist to checkpoint results the
-        workflow consumes — not for fire-and-forget cleanup.
-
-        Each ``instance.close()`` is bounded by ``_CLOSE_TIMEOUT_S``
-        via ``asyncio.wait_for`` so a wedged tmux session can't stall
-        cleanup. Timeouts and exceptions are logged and swallowed; the
-        rest of the cleanup proceeds.
-
-        :param conversation_id: The conversation being torn down.
-        """
+        """Close this conversation's terminals, retaining unconfirmed Windows owners."""
         with self._lock:
-            slot = self._by_conversation.pop(conversation_id, None)
-            # Drop every per-instance lock owned by this conversation.
-            # Iterate over `slot` (the just-popped per-conv map) for the
-            # canonical (name, key) pairs.
-            if slot:
-                for name, sess in slot:
-                    self._instance_locks.pop((conversation_id, name, sess), None)
-        if not slot:
-            return
+            slot = dict(self._by_conversation.get(conversation_id, {}))
         for (name, key), instance in slot.items():
             try:
-                await asyncio.wait_for(instance.close(), timeout=_CLOSE_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "cleanup_conversation: close timed out for %s:%s in conv %s",
-                    name,
-                    key,
-                    conversation_id,
-                )
+                await self.close(conversation_id, name, key, expected=instance)
             except Exception:
-                # We're in a workflow finally block; raising here would
-                # mask the original workflow result. Log and move on.
                 logger.exception(
                     "cleanup_conversation: close failed for %s:%s in conv %s",
                     name,
@@ -567,30 +521,13 @@ class TerminalRegistry:
                 )
 
     async def shutdown(self) -> None:
-        """Tear down every registered terminal across all conversations.
-
-        Called from the FastAPI server's lifespan shutdown handler.
-        Iterates every conversation slot and closes each instance,
-        bounded by ``_CLOSE_TIMEOUT_S`` per instance. Best-effort —
-        a stuck instance shouldn't block the rest of Omnigent shutdown.
-        """
+        """Close registered terminals without discarding failed owned cleanup."""
         with self._lock:
-            slots = list(self._by_conversation.items())
-            self._by_conversation.clear()
-            # AP-shutdown clears all instance locks too — every
-            # conversation's terminals are being torn down.
-            self._instance_locks.clear()
+            slots = [(conv_id, dict(slot)) for conv_id, slot in self._by_conversation.items()]
         for conversation_id, slot in slots:
             for (name, key), instance in slot.items():
                 try:
-                    await asyncio.wait_for(instance.close(), timeout=_CLOSE_TIMEOUT_S)
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "shutdown: close timed out for %s:%s in conv %s",
-                        name,
-                        key,
-                        conversation_id,
-                    )
+                    await self.close(conversation_id, name, key, expected=instance)
                 except Exception:
                     logger.exception(
                         "shutdown: close failed for %s:%s in conv %s",

@@ -1037,11 +1037,11 @@ def build_terminal_os_env_spec(
 @dataclass
 class TerminalInstance:
     """
-    One running tmux session for a terminal environment.
+    One managed terminal environment; the base implementation owns tmux.
 
     :param name: Terminal name from the agent spec, e.g. ``"bash"``.
     :param session_key: Per-launch session key, e.g. ``"s1"``.
-    :param socket_path: Private tmux socket path for this instance.
+    :param socket_path: Private tmux socket path, or None for a native backend.
     :param private_dir: Private directory holding the tmux socket and
         any forked workspace state.
     :param os_env: Optional OS environment backing this terminal.
@@ -1071,7 +1071,7 @@ class TerminalInstance:
 
     name: str
     session_key: str
-    socket_path: Path
+    socket_path: Path | None
     private_dir: Path
     os_env: OSEnvironment | None = None
     command: str = "bash"
@@ -1165,6 +1165,8 @@ class TerminalInstance:
         """Describe browser attachment without exposing a transport assumption."""
         from omnigent.terminals.attach_target import TmuxAttachTarget
 
+        if self.socket_path is None:
+            raise RuntimeError("This terminal does not have a tmux attachment target")
         return TmuxAttachTarget(self.socket_path, self.tmux_target)
 
     def note_client_interaction(self) -> None:
@@ -1368,6 +1370,9 @@ class TerminalInstance:
         """
         socket_attributes: dict[str, object] = {}
         for name, path in (("socket", self.socket_path), ("private_dir", self.private_dir)):
+            if path is None:
+                socket_attributes[f"{name}_state"] = "not_applicable"
+                continue
             try:
                 info = path.stat()
             except OSError as exc:
@@ -1551,6 +1556,8 @@ class TerminalInstance:
         :returns: Base argv for subprocess calls, e.g.
             ``["tmux", "-S", "/tmp/.../tmux.sock", "-f", "/dev/null"]``.
         """
+        if self.socket_path is None:
+            raise RuntimeError("This terminal does not use tmux")
         return ["tmux", "-S", str(self.socket_path), "-f", _TMUX_CONFIG_PATH]
 
     async def set_conversation_link(self, conversation_link: str | None) -> None:
@@ -1897,7 +1904,7 @@ class TerminalInstance:
         # observe a failure. A private socket can still belong to a live tmux
         # server (or a remain-on-exit pane), so cleanup must not trust that
         # advisory flag before issuing kill-server.
-        if self.running or self.socket_path.exists():
+        if self.running or (self.socket_path is not None and self.socket_path.exists()):
             with contextlib.suppress(RuntimeError):
                 await self._tmux("kill-server")
         self.running = False
@@ -2712,6 +2719,19 @@ def create_terminal_instance(
         and the resolved cwd to pass to ``launch()``.
     """
     if IS_WINDOWS:
+        if os.environ.get("OMNIGENT_WINDOWS_NATIVE_TERMINALS") == "1":
+            from omnigent.terminals.conpty_instance import create_conpty_instance
+
+            return create_conpty_instance(
+                name,
+                session_key,
+                spec,
+                parent_os_env_spec=parent_os_env_spec,
+                parent_environment=parent_environment,
+                cwd_override=cwd_override,
+                sandbox_override=sandbox_override,
+                conversation_link=conversation_link,
+            )
         raise RuntimeError(
             "Native terminal harnesses (tmux/PTY) are not supported on Windows. "
             f"Run an SDK-based harness via `{cli_invocation()} run <agent.yaml>` (e.g. the "
