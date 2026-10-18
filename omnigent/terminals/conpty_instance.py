@@ -123,10 +123,8 @@ class ConPTYTerminalInstance(TerminalInstance):
     async def read(self, scrollback: int = 0, *, join_wrapped: bool = False) -> TerminalResult:
         if self._session is None:
             return {"error": "Terminal has not been launched"}
-        if join_wrapped:
-            return {"error": "Joined wrapped-line capture is not yet supported on Windows"}
         try:
-            snapshot = self._session.capture(scrollback)
+            snapshot = self._session.capture(scrollback, join_wrapped=join_wrapped)
         except (RuntimeError, ValueError):
             return {"error": "Windows terminal screen capture is unavailable"}
         self._remember_pane_snapshot(snapshot.text)

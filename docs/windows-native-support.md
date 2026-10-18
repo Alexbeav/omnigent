@@ -310,3 +310,22 @@ settings grid and detail page. Test both setup-feature states, native aliases,
 older boolean readiness, an available SDK/ACP choice and a working Linux/WSL
 native choice. Confirm an unsupported session is not created. The installed
 production bundle cannot prove this undeployed candidate.
+
+## Joined text capture increment
+
+Managed ConPTY reads now accept `join_wrapped=True`. Joining follows observed
+automatic wraps across retained screen/history rows, preserving spaces inside a
+logical line. Full-width hard lines stay separate. Wrap metadata follows row
+movement, stays separate in the alternate buffer and cannot retain evicted rows.
+History counts still report physical rows. Raw capture and VT-tail replay remain
+the defaults; native readiness and factory gates are unchanged.
+
+Combining marks on single/double-cell bases and wide-glyph wrap padding are
+handled at the drawing boundary. Zero-width format sequences (including emoji
+joiners/variation selectors), glyphs wider than the grid and wide glyphs crossing
+a disabled wrap boundary fail capture explicitly. Height changes and width
+expansion preserve surviving wrap links. The text model clips rather than
+reflows on width shrink: joined capture refuses retained rows that lost text
+until they are fully erased, reset or evicted; ordinary grid capture continues.
+These portable regressions do not qualify native Windows resize behavior or
+either provider. Native binding/provider proof remains separate.

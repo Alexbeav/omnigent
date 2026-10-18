@@ -216,12 +216,12 @@ class ConPTYSession:
             self._screen.validate_size(rows, cols)
         return self._enqueue(_Operation(None, (rows, cols), Future()))
 
-    def capture(self, scrollback: int = 0) -> ScreenSnapshot:
+    def capture(self, scrollback: int = 0, *, join_wrapped: bool = False) -> ScreenSnapshot:
         """Capture rendered text under the same lock as output publication."""
         if self._screen is None:
             raise ConPTYError("Terminal screen capture is not enabled.")
         with self._lock:
-            return self._screen.capture(scrollback)
+            return self._screen.capture(scrollback, join_wrapped=join_wrapped)
 
     def _enqueue(self, operation: _Operation) -> Future[None]:
         with self._lock:

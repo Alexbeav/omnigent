@@ -65,12 +65,20 @@ def test_registered_windows_io_watchers_and_detach(
         )
         assert baseline.wait(1)
         viewer = session.subscribe(replay=False)
-        driver.output.put("HELLO Καλημέρα\r\n")
-        assert "HELLO" in viewer.read(timeout=1)
+        wrapped = "wrapped Καλημέρα 😀 " * 12
+        output = "HELLO Καλημέρα\r\n" + wrapped + "\r\nHARD"
+        driver.output.put(output)
+        assert viewer.read(timeout=1) == output
         assert activity.wait(1)
         captured = asyncio.run(instance.read())
         assert "HELLO Καλημέρα" in captured["screen"]
-        assert "error" in asyncio.run(instance.read(join_wrapped=True))
+        joined = asyncio.run(instance.read(join_wrapped=True))
+        assert wrapped.rstrip() + "\nHARD" in joined["screen"]
+        assert wrapped.rstrip() not in captured["screen"]
+        assert joined["scrollback_lines"] == captured["scrollback_lines"]
+        replay = session.subscribe()
+        assert replay.read(timeout=1) == output
+        session.unsubscribe(replay)
         payload = "Καλημέρα 😀\nsecond line"
         assert asyncio.run(instance.send(payload, keys="Tab Enter")) == {"status": "sent"}
         assert driver.operations[-1] == payload + "\t\r"
