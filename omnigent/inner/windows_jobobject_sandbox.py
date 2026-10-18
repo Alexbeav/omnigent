@@ -33,6 +33,7 @@ import ctypes
 import ctypes.wintypes as wintypes
 import functools
 import logging
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from types import TracebackType
@@ -142,18 +143,21 @@ class _JobHandle:
 
     Held by the parent for the helper's lifetime. Closing (explicitly or via
     ``with``) closes the kernel handle; with ``KILL_ON_JOB_CLOSE`` set, that
-    terminates every still-running process in the job.
+    terminates every still-running process in the job. A failed Windows close
+    raises and retains the same handle for retry; concurrent callers serialize.
     """
 
     def __init__(self, handle: int) -> None:
         self._handle: int | None = handle
+        self._lock = threading.Lock()
 
     def close(self) -> None:
-        if self._handle is None:
-            return
-        handle, self._handle = self._handle, None
-        if not _kernel32().CloseHandle(wintypes.HANDLE(handle)):
-            _LOGGER.debug("windows_jobobject: CloseHandle failed for job handle")
+        with self._lock:
+            if self._handle is None:
+                return
+            if not _kernel32().CloseHandle(wintypes.HANDLE(self._handle)):
+                raise OSError(_get_last_error(), "Windows Job Object close failed; retry cleanup")
+            self._handle = None
 
     def __enter__(self) -> _JobHandle:
         return self

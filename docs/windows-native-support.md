@@ -232,6 +232,13 @@ This proves the managed terminal boundary only. Keep the factory switch local
 to the test process and leave native provider readiness disabled until the
 provider-specific launch, resume, controls and recovery checks below pass.
 
+The shared Windows Job Object handle now retains ownership and raises when
+`CloseHandle` fails, allowing the managed terminal's existing close retry to
+work. Concurrent closes serialize and release the handle once. Two portable
+fault checks and a repeated native managed probe passed; the native unit set
+passed 51 checks with one skip after including the metadata and handle checks.
+This is a source fix only; installed host daemons remain unchanged.
+
 ## Delivery and qualification
 
 1. Validate and publish the platform-readiness increment separately.
