@@ -2930,7 +2930,9 @@ async def _launch_codex_terminal(
             "os_env_type": "caller_process",
             "cwd": str(Path.cwd()),
             "env": env,
-            "scrollback": _CODEX_TERMINAL_SCROLLBACK_LINES,
+            "scrollback": min(_CODEX_TERMINAL_SCROLLBACK_LINES, 10_000)
+            if IS_WINDOWS
+            else _CODEX_TERMINAL_SCROLLBACK_LINES,
             "tmux_allow_passthrough": not IS_WINDOWS,
             "tmux_start_on_attach": not IS_WINDOWS,
         },

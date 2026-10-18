@@ -88,6 +88,10 @@ def test_launch_codex_terminal_starts_fresh_remote_tui(
     assert client.posts[0][1]["spec"]["command"] == "/opt/codex/bin/codex"
     assert client.posts[0][1]["spec"]["tmux_allow_passthrough"] is not is_windows
     assert client.posts[0][1]["spec"]["tmux_start_on_attach"] is not is_windows
+    if is_windows:
+        from omnigent.terminals.conpty_screen import ConPTYScreen
+
+        ConPTYScreen(scrollback=client.posts[0][1]["spec"]["scrollback"])
 
 
 @pytest.mark.parametrize(

@@ -285,6 +285,9 @@ def test_claude_terminal_request_injects_claude_config(
     assert "modelOverrides" not in settings
     if is_windows:
         assert spec["env_unset"] == ["ANTHROPIC_API_KEY", "CLAUDECODE"]
+        from omnigent.terminals.conpty_screen import ConPTYScreen
+
+        ConPTYScreen(scrollback=spec["scrollback"])
     else:
         assert "env_unset" not in spec
 

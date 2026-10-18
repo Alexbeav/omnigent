@@ -6467,7 +6467,9 @@ def _claude_terminal_request(
         # single-user wrapper, so taking the explicit-cwd path
         # short-circuits it safely.
         "cwd": str(Path.cwd().resolve()),
-        "scrollback": _CLAUDE_TERMINAL_SCROLLBACK_LINES,
+        "scrollback": min(_CLAUDE_TERMINAL_SCROLLBACK_LINES, 10_000)
+        if IS_WINDOWS
+        else _CLAUDE_TERMINAL_SCROLLBACK_LINES,
     }
     spec["env"] = build_native_claude_terminal_env(claude_config)
     if claude_config is not None:

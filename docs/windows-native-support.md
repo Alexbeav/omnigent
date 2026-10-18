@@ -241,6 +241,18 @@ Windows request regressions fail against the prior source. These checks do not
 qualify provider executables, hooks, authentication or real Windows chats.
 Native provider readiness remains disabled.
 
+Both Windows launch requests now cap scrollback at the ConPTY screen's 10,000
+line limit. The owning launch checks passed 41 cases; both Windows requests
+fail screen construction against the preceding source. POSIX keeps its larger
+tmux history.
+
+An isolated Pegasus Windows runtime also started the installed Codex 0.149.1
+app-server, established its Job Object and policy-hook trust, and released the
+process, owner lock and Job handle. This used the existing minimal startup
+profile without ambient MCPs/plugins and sent no inference request. Project
+and user-hook trust were not overridden. This does not qualify real chats,
+ambient tools, authentication refresh or the browser controls.
+
 The shared Windows Job Object handle now retains ownership and raises when
 `CloseHandle` fails, allowing the managed terminal's existing close retry to
 work. Concurrent closes serialize and release the handle once. Two portable
