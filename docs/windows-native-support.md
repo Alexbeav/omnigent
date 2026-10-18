@@ -232,6 +232,15 @@ This proves the managed terminal boundary only. Keep the factory switch local
 to the test process and leave native provider readiness disabled until the
 provider-specific launch, resume, controls and recovery checks below pass.
 
+Windows launch-request checkpoint, 2026-10-19: Codex now requests immediate
+terminal startup without tmux passthrough on Windows. Claude's configured launch
+uses the terminal's environment-removal controls instead of a Unix `env`
+wrapper. POSIX requests retain their existing behavior. The owning portable
+suites passed 450 checks, including the unchanged Windows readiness gate; both
+Windows request regressions fail against the prior source. These checks do not
+qualify provider executables, hooks, authentication or real Windows chats.
+Native provider readiness remains disabled.
+
 The shared Windows Job Object handle now retains ownership and raises when
 `CloseHandle` fails, allowing the managed terminal's existing close retry to
 work. Concurrent closes serialize and release the handle once. Two portable

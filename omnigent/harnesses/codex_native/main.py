@@ -24,6 +24,7 @@ import click
 import httpx
 import yaml
 
+from omnigent._platform import IS_WINDOWS
 from omnigent._runner_startup import RunnerStartupProgress, runner_startup_progress
 from omnigent._startup_events import record_startup_event
 from omnigent._wrapper_labels import (
@@ -2930,8 +2931,8 @@ async def _launch_codex_terminal(
             "cwd": str(Path.cwd()),
             "env": env,
             "scrollback": _CODEX_TERMINAL_SCROLLBACK_LINES,
-            "tmux_allow_passthrough": True,
-            "tmux_start_on_attach": True,
+            "tmux_allow_passthrough": not IS_WINDOWS,
+            "tmux_start_on_attach": not IS_WINDOWS,
         },
     }
     resp = await client.post(

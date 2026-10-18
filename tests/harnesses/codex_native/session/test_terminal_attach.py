@@ -51,13 +51,17 @@ class _FakeTerminalClient:
         return self.response
 
 
-def test_launch_codex_terminal_starts_fresh_remote_tui() -> None:
+@pytest.mark.parametrize("is_windows", [False, True])
+def test_launch_codex_terminal_starts_fresh_remote_tui(
+    monkeypatch: pytest.MonkeyPatch, is_windows: bool
+) -> None:
     """
     Fresh sessions let the Codex TUI create the remote app-server
     thread instead of resuming a pre-created rollout-less thread.
 
     :returns: None.
     """
+    monkeypatch.setattr(codex_native, "IS_WINDOWS", is_windows)
     client = _FakeTerminalClient(httpx.Response(200, json={"id": "terminal_codex_main"}))
 
     launched = asyncio.run(
@@ -82,8 +86,8 @@ def test_launch_codex_terminal_starts_fresh_remote_tui() -> None:
         "ws://127.0.0.1:9876",
     ]
     assert client.posts[0][1]["spec"]["command"] == "/opt/codex/bin/codex"
-    assert client.posts[0][1]["spec"]["tmux_allow_passthrough"] is True
-    assert client.posts[0][1]["spec"]["tmux_start_on_attach"] is True
+    assert client.posts[0][1]["spec"]["tmux_allow_passthrough"] is not is_windows
+    assert client.posts[0][1]["spec"]["tmux_start_on_attach"] is not is_windows
 
 
 @pytest.mark.parametrize(

@@ -227,7 +227,10 @@ def test_claude_terminal_request_launcher_plugin_wraps(tmp_path, monkeypatch) ->
     assert "--settings" in spec["args"]
 
 
-def test_claude_terminal_request_injects_claude_config(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("is_windows", [False, True])
+def test_claude_terminal_request_injects_claude_config(
+    tmp_path, monkeypatch, is_windows: bool
+) -> None:
     """
     Ucode config reaches the terminal env, settings, and model argv.
 
@@ -236,6 +239,7 @@ def test_claude_terminal_request_injects_claude_config(tmp_path, monkeypatch) ->
     Databricks gateway values to the terminal resource would leave
     Claude Code on its default provider path.
     """
+    monkeypatch.setattr(claude_native, "IS_WINDOWS", is_windows)
     config = claude_native.ClaudeNativeUcodeConfig(
         env={
             "ANTHROPIC_BASE_URL": "https://example.databricks.com/ai-gateway/anthropic",
@@ -254,7 +258,7 @@ def test_claude_terminal_request_injects_claude_config(tmp_path, monkeypatch) ->
     )
 
     spec = body["spec"]
-    assert spec["command"] == "env"
+    assert spec["command"] == ("claude" if is_windows else "env")
     assert spec["env"] == {
         "ANTHROPIC_BASE_URL": "https://example.databricks.com/ai-gateway/anthropic",
         "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "900000",
@@ -264,12 +268,11 @@ def test_claude_terminal_request_injects_claude_config(tmp_path, monkeypatch) ->
         "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
     }
     args = spec["args"]
-    assert args[:9] == [
-        "-u",
-        "ANTHROPIC_API_KEY",
-        "-u",
-        "CLAUDECODE",
-        "claude",
+    expected_prefix = (
+        [] if is_windows else ["-u", "ANTHROPIC_API_KEY", "-u", "CLAUDECODE", "claude"]
+    )
+    assert args[: len(expected_prefix) + 4] == [
+        *expected_prefix,
         "--print",
         "hi",
         "--model",
@@ -280,6 +283,10 @@ def test_claude_terminal_request_injects_claude_config(tmp_path, monkeypatch) ->
     assert settings["apiKeyHelper"] == "printf %s sk-sentinel-do-not-use"
     assert "hooks" in settings
     assert "modelOverrides" not in settings
+    if is_windows:
+        assert spec["env_unset"] == ["ANTHROPIC_API_KEY", "CLAUDECODE"]
+    else:
+        assert "env_unset" not in spec
 
 
 def test_native_config_does_not_infer_overrides_from_routable_models() -> None:

@@ -64,6 +64,7 @@ from omnigent_client._http import is_loopback_url
 from websockets.exceptions import ConnectionClosed, ConnectionClosedError, WebSocketException
 from websockets.frames import Close
 
+from omnigent._platform import IS_WINDOWS
 from omnigent._runner_startup import RunnerStartupProgress, runner_startup_progress
 from omnigent._startup_events import record_startup_event
 from omnigent._startup_profile import StartupProfiler
@@ -6477,9 +6478,12 @@ def _claude_terminal_request(
             _ANTHROPIC_API_KEY_ENV,
             _CLAUDE_CODE_NESTED_SESSION_ENV,
         ]
-        env_args = [part for var in unset_env_vars for part in ("-u", var)]
-        spec["command"] = "env"
-        spec["args"] = [*env_args, command, *args]
+        if IS_WINDOWS:
+            spec["env_unset"] = unset_env_vars
+        else:
+            env_args = [part for var in unset_env_vars for part in ("-u", var)]
+            spec["command"] = "env"
+            spec["args"] = [*env_args, command, *args]
     return {
         "terminal": _TERMINAL_NAME,
         "session_key": _TERMINAL_SESSION_KEY,
