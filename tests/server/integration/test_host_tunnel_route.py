@@ -1800,3 +1800,546 @@ async def test_malformed_mcp_tools_reply_returns_502(
     assert response.json() == {"detail": "host MCP tools lookup failed"}
     assert not conn.pending_mcp_tools
     await comm.send_input({"type": "websocket.disconnect", "code": 1000})
+
+
+class _ObservationReadAuth(AuthProvider):
+    def get_user_id(self, request):
+        return request.headers.get("x-observation-test-owner") or None
+
+
+@pytest.fixture
+async def observation_app(db_uri):
+    import httpx
+    from fastapi.responses import JSONResponse
+
+    from omnigent.errors import OmnigentError
+    from omnigent.server.routes.native_observations import create_native_observations_router
+    from omnigent.stores.conversation_store.sqlalchemy_store import SqlAlchemyConversationStore
+    from omnigent.stores.permission_store.sqlalchemy_store import SqlAlchemyPermissionStore
+
+    app, registry, store = _owned_app(db_uri, authed_user="owner")
+    conversations = SqlAlchemyConversationStore(db_uri)
+    permissions = SqlAlchemyPermissionStore(db_uri)
+    app.include_router(
+        create_native_observations_router(
+            store,
+            auth_provider=_ObservationReadAuth(),
+            conversation_store=conversations,
+        ),
+        prefix="/v1",
+    )
+
+    @app.exception_handler(OmnigentError)
+    async def error_handler(request, exc):
+        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+
+    peer = await _connect_route(app, _TUNNEL_PATH)
+    await _send_hello_and_wait(peer, registry)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            yield client, peer, store, conversations, permissions
+    finally:
+        if not peer.future.done():
+            await peer.send_input({"type": "websocket.disconnect", "code": 1000})
+        await peer.wait(timeout=budget(2.0))
+
+
+def _native_inventory(*, now, harness="codex", observed_at=None, native_id="native-one"):
+    from omnigent.native_observations import NativeObservationSnapshot
+
+    return NativeObservationSnapshot.model_validate(
+        {
+            "harness": harness,
+            "epoch": "a" * 32,
+            "sequence": 1,
+            "scanned_at": now,
+            "status": "CURRENT",
+            "complete": True,
+            "capabilities": ["discovery", "lifecycle"],
+            "observations": [
+                {
+                    "native_id": native_id,
+                    "state": "ACTIVE",
+                    "event": "turn_start",
+                    "observed_at": now if observed_at is None else observed_at,
+                }
+            ],
+        }
+    )
+
+
+async def test_native_observation_read_is_owned_and_old_hosts_are_not_reported(observation_app):
+    client, _, _, _, _ = observation_app
+    assert (await client.get("/v1/observations")).status_code == 401
+    assert (
+        await client.get("/v1/observations", headers={"x-observation-test-owner": ""})
+    ).status_code == 401
+    stranger = await client.get(
+        "/v1/observations", headers={"x-observation-test-owner": "stranger"}
+    )
+    assert stranger.json()["sources"] == []
+    response = await client.get("/v1/observations", headers={"x-observation-test-owner": "owner"})
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["data"] == []
+    assert len(response.json()["sources"]) == 3
+    assert {s["status"] for s in response.json()["sources"]} == {"NOT_REPORTED"}
+
+
+async def test_native_observation_host_frame_reaches_read_api_without_import(observation_app):
+    import time
+
+    from omnigent.host.frames import HostNativeObservationsFrame
+
+    client, peer, store, _, _ = observation_app
+    now = time.time()
+    await peer.send_input(
+        {
+            "type": "websocket.receive",
+            "text": encode_host_frame(HostNativeObservationsFrame(_native_inventory(now=now))),
+        }
+    )
+    async with asyncio.timeout(budget(2.0)):
+        while True:
+            response = await client.get(
+                "/v1/observations", headers={"x-observation-test-owner": "owner"}
+            )
+            if response.json()["data"]:
+                break
+            await asyncio.sleep(0.01)
+    row = response.json()["data"][0]
+    assert (row["host_id"], row["native_id"], row["effective_state"]) == (
+        _HOST_ID,
+        "native-one",
+        "ACTIVE",
+    )
+    assert row["observed_at"] == now and row["context_tokens"] is None
+    host = store.get_host(_HOST_ID)
+    receipt = store.observations.read_sources([host])[(_HOST_ID, "codex")].received_at
+    again = await client.get("/v1/observations", headers={"x-observation-test-owner": "owner"})
+    assert again.json()["data"][0]["observed_at"] == now
+    assert store.observations.read_sources([host])[(_HOST_ID, "codex")].received_at == receipt
+
+
+async def test_native_observation_pagination_preserves_harness_identity_and_rejects_writes(
+    observation_app,
+):
+    import time
+
+    client, _, store, _, _ = observation_app
+    for harness in ["codex", "claude"]:
+        store.observations.record(
+            _HOST_ID, "owner", _native_inventory(now=time.time(), harness=harness)
+        )
+    headers = {"x-observation-test-owner": "owner"}
+    first = (await client.get("/v1/observations?limit=1", headers=headers)).json()
+    assert first["has_more"]
+    second = (
+        await client.get(
+            "/v1/observations", params={"after": first["next_cursor"]}, headers=headers
+        )
+    ).json()
+    assert not second["has_more"]
+    rows = first["data"] + second["data"]
+    assert len(rows) == 2
+    assert {row["harness"] for row in rows} == {"codex", "claude"}
+    assert {row["native_id"] for row in rows} == {"native-one"}
+    assert (await client.get("/v1/observations?after=bad", headers=headers)).status_code == 400
+    assert (await client.get("/v1/observations?limit=0", headers=headers)).status_code == 422
+    assert (await client.post("/v1/observations", headers=headers, json={})).status_code == 405
+
+
+async def test_native_observation_fresh_scan_cannot_make_old_activity_current(observation_app):
+    import time
+
+    client, _, store, _, _ = observation_app
+    now = time.time()
+    store.observations.record(_HOST_ID, "owner", _native_inventory(now=now, observed_at=now - 121))
+    body = (
+        await client.get("/v1/observations", headers={"x-observation-test-owner": "owner"})
+    ).json()
+    source = next(s for s in body["sources"] if s["harness"] == "codex")
+    assert source["status"] == "CURRENT"
+    assert body["data"][0]["state"] == "ACTIVE"
+    assert body["data"][0]["effective_state"] == "UNKNOWN"
+    assert not body["data"][0]["fresh"]
+
+
+async def test_native_observation_clock_skew_and_offline_host_are_unavailable(observation_app):
+    import time
+
+    client, _, store, _, _ = observation_app
+    now = time.time()
+    store.observations.record(_HOST_ID, "owner", _native_inventory(now=now + 10))
+    headers = {"x-observation-test-owner": "owner"}
+    body = (await client.get("/v1/observations", headers=headers)).json()
+    assert next(s for s in body["sources"] if s["harness"] == "codex")["status"] == "CLOCK_SKEW"
+    assert body["data"][0]["effective_state"] == "UNKNOWN"
+    store.set_offline(_HOST_ID)
+    body = (await client.get("/v1/observations", headers=headers)).json()
+    assert next(s for s in body["sources"] if s["harness"] == "codex")["status"] == "UNAVAILABLE"
+    assert body["data"][0]["effective_state"] == "UNKNOWN"
+
+
+async def test_native_observation_capability_loss_cannot_keep_history_active(observation_app):
+    import time
+
+    from omnigent.native_observations import NativeObservationSnapshot
+
+    client, _, store, _, _ = observation_app
+    now = time.time()
+    store.observations.record(_HOST_ID, "owner", _native_inventory(now=now))
+    reduced = NativeObservationSnapshot.model_validate(
+        _native_inventory(now=now).model_dump()
+        | {
+            "sequence": 2,
+            "status": "PARTIAL",
+            "complete": False,
+            "capabilities": ["discovery"],
+            "observations": [],
+        }
+    )
+    store.observations.record(_HOST_ID, "owner", reduced)
+    body = (
+        await client.get("/v1/observations", headers={"x-observation-test-owner": "owner"})
+    ).json()
+    source = next(s for s in body["sources"] if s["harness"] == "codex")
+    assert source["epoch"] == "a" * 32 and source["sequence"] == 2
+    assert source["capabilities"] == ["discovery"]
+    assert body["data"][0]["state"] == "ACTIVE"
+    assert body["data"][0]["effective_state"] == "UNKNOWN"
+
+
+async def test_managed_observation_exact_identity_and_owner_only_projection(observation_app):
+    import time
+
+    from omnigent.server.auth import LEVEL_OWNER, LEVEL_READ
+
+    client, _, store, conversations, permissions = observation_app
+    conv = conversations.create_conversation(
+        title="private-title-canary",
+        host_id=_HOST_ID,
+        workspace="/private-path-canary",
+        harness_override="codex-native",
+        labels={"private": "private-label-canary"},
+    )
+    permissions.grant("owner", conv.id, LEVEL_OWNER)
+    permissions.grant("stranger", conv.id, LEVEL_READ)
+    conversations.set_external_session_id(conv.id, "native-one")
+    conversations.set_session_live_status(conv.id, "running")
+    store.observations.record(_HOST_ID, "owner", _native_inventory(now=time.time()))
+    headers = {"x-observation-test-owner": "owner"}
+    body = (await client.get("/v1/observations?limit=1", headers=headers)).json()
+    assert body["managed_complete"] and not body["has_more"]
+    assert len(body["data"]) == 1
+    row = body["data"][0]
+    assert row["identity_status"] == "VERIFIED" and row["source"] == "reconciled"
+    assert row["effective_state"] == "ACTIVE"
+    assert row["managed"][0]["session_id"] == conv.id
+    assert row["managed"][0]["reported_state"] == "running"
+    assert row["managed"][0]["state_observed_at"] is None
+    assert all(
+        word not in str(body)
+        for word in (
+            "private-title-canary",
+            "private-path-canary",
+            "private-label-canary",
+        )
+    )
+    stranger = (
+        await client.get(
+            "/v1/observations",
+            headers={"x-observation-test-owner": "stranger"},
+        )
+    ).json()
+    assert stranger["data"] == [] and stranger["sources"] == []
+
+
+async def test_managed_child_missing_host_and_generic_acp_never_guess_identity(observation_app):
+    from omnigent.server.auth import LEVEL_OWNER
+
+    client, _, _, conversations, permissions = observation_app
+    parent = conversations.create_conversation(
+        host_id=_HOST_ID,
+        workspace="/fixture",
+        harness_override="codex-native",
+    )
+    child = conversations.create_conversation(
+        kind="sub_agent",
+        parent_conversation_id=parent.id,
+        harness_override="acp",
+    )
+    for conv in (parent, child):
+        permissions.grant("owner", conv.id, LEVEL_OWNER)
+        conversations.set_external_session_id(conv.id, "same-native-id")
+    conversations.set_session_live_status(parent.id, "running")
+    headers = {"x-observation-test-owner": "owner"}
+    first = (await client.get("/v1/observations?limit=1", headers=headers)).json()
+    second = (
+        await client.get(
+            "/v1/observations",
+            params={"after": first["next_cursor"]},
+            headers=headers,
+        )
+    ).json()
+    assert first["has_more"] and not second["has_more"]
+    rows = first["data"] + second["data"]
+    assert len(rows) == 2 and all(r["effective_state"] == "UNKNOWN" for r in rows)
+    child_row = next(r for r in rows if r["managed"][0]["session_id"] == child.id)
+    assert child_row["identity_status"] == "UNRESOLVED"
+    assert child_row["host_id"] is None and child_row["harness"] is None
+    assert child_row["managed"][0]["parent_session_id"] == parent.id
+
+
+async def test_managed_inventory_bound_fails_closed_instead_of_claiming_complete(
+    observation_app,
+    monkeypatch,
+):
+    from omnigent.server.auth import LEVEL_OWNER
+
+    client, _, _, conversations, permissions = observation_app
+    for _ in range(2):
+        conv = conversations.create_conversation()
+        permissions.grant("owner", conv.id, LEVEL_OWNER)
+    monkeypatch.setattr("omnigent.native_observation_identity.MAX_MANAGED_SESSIONS", 1)
+    response = await client.get(
+        "/v1/observations",
+        headers={"x-observation-test-owner": "owner"},
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Managed observation inventory unavailable"}
+
+
+async def test_resource_frame_read_scope_and_stale_projection(observation_app, monkeypatch):
+    import time
+
+    from omnigent.host.frames import HostResourceObservationsFrame
+    from tests.host.test_host_resource_transport import resource_inventory
+
+    client, peer, _store, _, _ = observation_app
+    assert (await client.get("/v1/resources")).status_code == 401
+    headers = {"x-observation-test-owner": "owner"}
+    initial = (await client.get("/v1/resources", headers=headers)).json()
+    assert initial["data"][0]["status"] == "NOT_REPORTED"
+    assert (
+        await client.get("/v1/resources", headers={"x-observation-test-owner": "stranger"})
+    ).json()["data"] == []
+    now = time.time()
+    await peer.send_input(
+        {
+            "type": "websocket.receive",
+            "text": encode_host_frame(HostResourceObservationsFrame(resource_inventory(now=now))),
+        }
+    )
+    async with asyncio.timeout(budget(2)):
+        while True:
+            response = await client.get("/v1/resources", headers=headers)
+            if response.json()["data"][0]["snapshot"] is not None:
+                break
+            await asyncio.sleep(0.01)
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["data"][0]["snapshot"]["sample"]["cpu_percent"] == 25
+    assert (await client.post("/v1/resources", headers=headers, json={})).status_code == 405
+    monkeypatch.setattr("omnigent.server.routes.native_observations.time.time", lambda: now + 91)
+    stale = (await client.get("/v1/resources", headers=headers)).json()["data"][0]
+    assert stale["status"] == "STALE"
+    assert (
+        stale["snapshot"]["sample"]["cpu_observed_at"]
+        == response.json()["data"][0]["snapshot"]["sample"]["cpu_observed_at"]
+    )
+
+
+async def test_observation_revision_changes_with_managed_inventory(observation_app):
+    from omnigent.server.auth import LEVEL_OWNER
+
+    client, _, _, conversations, permissions = observation_app
+    headers = {"x-observation-test-owner": "owner"}
+    first = (await client.get("/v1/observations", headers=headers)).json()
+    again = (await client.get("/v1/observations", headers=headers)).json()
+    assert first["snapshot_id"] == again["snapshot_id"]
+    conv = conversations.create_conversation()
+    permissions.grant("owner", conv.id, LEVEL_OWNER)
+    changed = (await client.get("/v1/observations", headers=headers)).json()
+    assert changed["snapshot_id"] != first["snapshot_id"]
+
+
+async def test_resource_store_failure_does_not_close_the_existing_tunnel(
+    observation_app, monkeypatch
+):
+    import time
+
+    from omnigent.host.frames import HostNativeObservationsFrame, HostResourceObservationsFrame
+    from tests.host.test_host_resource_transport import resource_inventory
+
+    client, peer, store, _, _ = observation_app
+
+    def fail(*args):
+        raise OSError("PRIVATE-CANARY")
+
+    monkeypatch.setattr(store.resources, "record", fail)
+    now = time.time()
+    for frame in [
+        HostResourceObservationsFrame(resource_inventory(now=now)),
+        HostNativeObservationsFrame(_native_inventory(now=now)),
+    ]:
+        await peer.send_input({"type": "websocket.receive", "text": encode_host_frame(frame)})
+    async with asyncio.timeout(budget(2)):
+        while True:
+            response = await client.get(
+                "/v1/observations", headers={"x-observation-test-owner": "owner"}
+            )
+            if response.json()["data"]:
+                break
+            await asyncio.sleep(0.01)
+    assert response.json()["data"][0]["effective_state"] == "ACTIVE"
+    assert not peer.future.done()
+
+
+@pytest.mark.parametrize("kind", ["native", "resources"])
+async def test_blocked_metadata_preserves_control_pong_disconnect_and_bounded_reconnect(
+    host_app, monkeypatch, caplog, kind
+):
+    import time
+
+    from omnigent.host.frames import HostNativeObservationsFrame, HostResourceObservationsFrame
+    from omnigent.server.routes import host_tunnel
+    from tests.host.test_host_resource_transport import resource_inventory
+
+    app, registry, store = host_app
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    calls, queues = [], []
+    original_offer = host_tunnel._ConnectionMetadata.offer
+
+    def offer(queue, frame):
+        original_offer(queue, frame)
+        if queue not in queues:
+            queues.append(queue)
+        assert len(queue.pending) <= 4
+
+    monkeypatch.setattr(host_tunnel._ConnectionMetadata, "offer", offer)
+    original_record = (store.resources if kind == "resources" else store.observations).record
+
+    def blocked(*args, **kwargs):
+        calls.append(args[2].sequence)
+        started.set()
+        try:
+            assert release.wait(10), "test failed to release its owned disk worker"
+            return original_record(*args, **kwargs)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(
+        store.resources if kind == "resources" else store.observations, "record", blocked
+    )
+    caplog.set_level(logging.DEBUG, logger=host_tunnel.__name__)
+    now = time.time()
+
+    def metadata_frame(sequence):
+        if kind == "resources":
+            return HostResourceObservationsFrame(resource_inventory(now=now, sequence=sequence))
+        return HostNativeObservationsFrame(
+            _native_inventory(now=now).model_copy(update={"sequence": sequence})
+        )
+
+    comm = await _connect_route(app, _TUNNEL_PATH)
+    await _send_hello_and_wait(comm, registry)
+    conn = registry.get(_HOST_ID)
+    assert conn is not None
+    try:
+        await comm.send_input(
+            {"type": "websocket.receive", "text": encode_host_frame(metadata_frame(1))}
+        )
+        async with asyncio.timeout(budget(2)):
+            while not started.is_set():
+                await asyncio.sleep(0.001)
+        for sequence in range(2, 102):
+            frames = [
+                HostNativeObservationsFrame(
+                    _native_inventory(now=now, harness=harness).model_copy(
+                        update={"sequence": sequence}
+                    )
+                )
+                for harness in ("claude", "codex", "cline")
+            ] + [HostResourceObservationsFrame(resource_inventory(now=now, sequence=sequence))]
+            for frame in frames:
+                await comm.send_input(
+                    {"type": "websocket.receive", "text": encode_host_frame(frame)}
+                )
+        future = asyncio.get_running_loop().create_future()
+        conn.pending_launches["metadata-probe"] = future
+        await comm.send_input(
+            {"type": "websocket.receive", "text": encode_frame(PongFrame(ts=int(now * 1000)))}
+        )
+        await comm.send_input(
+            {
+                "type": "websocket.receive",
+                "text": encode_host_frame(
+                    HostLaunchRunnerResultFrame(
+                        request_id="metadata-probe",
+                        status="launched",
+                        runner_id="already-running-fixture",
+                    )
+                ),
+            }
+        )
+        assert (await asyncio.wait_for(future, budget(1)))["status"] == "launched"
+        assert any("tunnel keepalive: pong" in record.message for record in caplog.records)
+        assert calls == [1] and not finished.is_set()
+        assert len(queues[0].pending) == 4
+        await comm.send_input({"type": "websocket.disconnect", "code": 1000})
+        await asyncio.wait_for(asyncio.shield(comm.future), budget(1))
+        assert not queues[0].pending and not finished.is_set()
+        # Repeated replacement connections share the held disk slot, rather than
+        # accumulating one abandoned to_thread writer per reconnect.
+        for _ in range(3):
+            comm = await _connect_route(app, _TUNNEL_PATH)
+            await _send_hello_and_wait(comm, registry)
+            await comm.send_input(
+                {"type": "websocket.receive", "text": encode_host_frame(metadata_frame(200))}
+            )
+            await asyncio.sleep(0.01)
+            await comm.send_input({"type": "websocket.disconnect", "code": 1000})
+            await asyncio.wait_for(asyncio.shield(comm.future), budget(1))
+            assert calls == [1]
+            assert all(not queue.pending for queue in queues)
+        release.set()
+        async with asyncio.timeout(budget(2)):
+            while not finished.is_set():
+                await asyncio.sleep(0.001)
+        host = store.get_host(_HOST_ID)
+        # The held worker rechecks connection generation inside its transaction.
+        assert (store.resources if kind == "resources" else store.observations).read_sources(
+            [host]
+        ) == {}
+        comm = await _connect_route(app, _TUNNEL_PATH)
+        await _send_hello_and_wait(comm, registry)
+        await comm.send_input(
+            {"type": "websocket.receive", "text": encode_host_frame(metadata_frame(201))}
+        )
+        async with asyncio.timeout(budget(2)):
+            while len(calls) < 2:
+                await asyncio.sleep(0.001)
+        assert calls == [1, 201]
+    finally:
+        release.set()
+        if not comm.future.done():
+            await comm.send_input({"type": "websocket.disconnect", "code": 1000})
+        await comm.wait(timeout=budget(2))
+
+
+async def test_native_api_recovers_after_future_clock_is_corrected(observation_app):
+    import time
+
+    client, _, store, _, _ = observation_app
+    now = time.time()
+    future = _native_inventory(now=now + 1000)
+    assert store.observations.record(_HOST_ID, "owner", future)
+    headers = {"x-observation-test-owner": "owner"}
+    skewed = (await client.get("/v1/observations", headers=headers)).json()
+    assert skewed["data"][0]["effective_state"] == "UNKNOWN"
+    corrected = _native_inventory(now=now).model_copy(update={"sequence": 2})
+    assert store.observations.record(_HOST_ID, "owner", corrected)
+    recovered = (await client.get("/v1/observations", headers=headers)).json()
+    assert recovered["data"][0]["effective_state"] == "ACTIVE"
+    assert recovered["data"][0]["observed_at"] == now

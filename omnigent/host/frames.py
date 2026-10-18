@@ -4,8 +4,8 @@ Host-specific frame kinds, all JSON (see :class:`HostFrameKind`),
 plus reuse of ``PingFrame``/``PongFrame`` from the runner tunnel
 for keepalive.
 
-Host frames carry only control messages (launch/stop runner
-requests and their results). They do NOT carry HTTP
+Host frames carry control messages and bounded passive native metadata.
+They do NOT carry HTTP
 request/response traffic — runners connect directly to the server
 with their own tunnels.
 
@@ -30,7 +30,9 @@ from pydantic import ValidationError
 
 from omnigent.harness_availability import HarnessAvailability, is_harness_availability
 from omnigent.host.harness_startup import HarnessStartup
+from omnigent.host_resource_observations import HostResourceSnapshot
 from omnigent.inner.native_attachments import CAP_FILESYSTEM_ATTACHMENTS
+from omnigent.native_observations import NativeObservationSnapshot
 from omnigent.util.json_types import JsonObject as _JsonObject
 from omnigent.util.tunnel_limits import RUNNER_TUNNEL_MAX_MESSAGE_BYTES
 
@@ -119,6 +121,8 @@ class HostFrameKind(str, Enum):
     """All host frame kinds; the value is the JSON wire string."""
 
     HELLO = "host.hello"
+    NATIVE_OBSERVATIONS = "host.native_observations"
+    RESOURCE_OBSERVATIONS = "host.resource_observations"
     CONNECTION_ERROR = "host.connection_error"
     HARNESS_READINESS = "host.harness_readiness"
     LAUNCH_RUNNER = "host.launch_runner"
@@ -171,6 +175,20 @@ class HostFrameKind(str, Enum):
 
 
 # ── Frame dataclasses ────────────────────────────────────
+
+
+@dataclass
+class HostResourceObservationsFrame:
+    """Bounded physical resource metadata; identity comes from the tunnel."""
+
+    snapshot: HostResourceSnapshot
+
+
+@dataclass
+class HostNativeObservationsFrame:
+    """One validated metadata snapshot from an existing authenticated host."""
+
+    snapshot: NativeObservationSnapshot
 
 
 @dataclass
@@ -1257,6 +1275,8 @@ class HostImportLocalDoneFrame:
 
 HostFrame = (
     HostHelloFrame
+    | HostNativeObservationsFrame
+    | HostResourceObservationsFrame
     | HostConnectionErrorFrame
     | HostHarnessReadinessFrame
     | HostLaunchRunnerFrame
@@ -1345,6 +1365,20 @@ def encode_host_frame(frame: HostFrame) -> str:
     :returns: JSON string for the WebSocket text message.
     :raises TypeError: If ``frame`` is not a known host frame type.
     """
+    if isinstance(frame, HostResourceObservationsFrame):
+        return _encode_payload(
+            {
+                "kind": HostFrameKind.RESOURCE_OBSERVATIONS.value,
+                "snapshot": frame.snapshot.model_dump(),
+            }
+        )
+    if isinstance(frame, HostNativeObservationsFrame):
+        return _encode_payload(
+            {
+                "kind": HostFrameKind.NATIVE_OBSERVATIONS.value,
+                "snapshot": frame.snapshot.model_dump(),
+            }
+        )
     if isinstance(frame, HostHelloFrame):
         return _encode_payload(
             {
@@ -2080,6 +2114,20 @@ def _decode_known_host_frame(
     :raises ValueError: If the kind is unexpectedly unhandled.
     """
     match kind:
+        case HostFrameKind.RESOURCE_OBSERVATIONS:
+            try:
+                return HostResourceObservationsFrame(
+                    HostResourceSnapshot.model_validate(msg.get("snapshot"))
+                )
+            except ValueError:
+                raise ValueError("Invalid host resource metadata") from None
+        case HostFrameKind.NATIVE_OBSERVATIONS:
+            try:
+                return HostNativeObservationsFrame(
+                    snapshot=NativeObservationSnapshot.model_validate(msg.get("snapshot"))
+                )
+            except ValueError:
+                raise ValueError("Invalid native observation metadata") from None
         case HostFrameKind.HELLO:
             return _decode_host_hello(msg)
         case HostFrameKind.CONNECTION_ERROR:

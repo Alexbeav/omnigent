@@ -71,12 +71,26 @@ _DELEGATED_ALLOWED_PREFIXES = (
     "/health",
     "/v1/agents",
     "/v1/hosts",
+    "/v1/observations",
     "/v1/sessions",
     "/v1/skills",
     "/v1/runners",
     "/oauth/token",
     "/oauth/revoke",
 )
+
+OBSERVATIONS_READ_SCOPE = "observations:read"
+
+
+def delegated_request_allowed(scope: str, method: str, path: str) -> bool:
+    """An observation grant cannot inherit the broader delegated write paths."""
+    if scope == OBSERVATIONS_READ_SCOPE:
+        return method in {"GET", "HEAD"} and path in {
+            "/health",
+            "/v1/observations",
+            "/v1/resources",
+        }
+    return delegated_path_allowed(path)
 
 
 def delegated_path_allowed(path: str) -> bool:
@@ -715,7 +729,9 @@ class UnifiedAuthProvider(AuthProvider):
             # first-party login grant carries no scope: its bearer is the
             # user's own CLI/host and the token renews the session JWT it
             # replaced, so it keeps that authority (revocable via ``grant_id``).
-            if scope is not None and not delegated_path_allowed(request.url.path):
+            if scope is not None and not delegated_request_allowed(
+                scope, request.scope.get("method", "WEBSOCKET"), request.url.path
+            ):
                 return None
             return user_id
 

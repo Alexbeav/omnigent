@@ -51,8 +51,10 @@ from omnigent.host.frames import (
     HostMcpServersResultFrame,
     HostMcpToolsResultFrame,
     HostModelOptionsResultFrame,
+    HostNativeObservationsFrame,
     HostPluginsResultFrame,
     HostRemoveWorktreeResultFrame,
+    HostResourceObservationsFrame,
     HostRunnerExitedFrame,
     HostRunnerStatusResultFrame,
     HostSkillContentResultFrame,
@@ -89,6 +91,92 @@ _HEARTBEAT_FAILURE_LOG_INTERVAL_S = 60.0
 
 RunnerExitedCallback = Callable[[str, str, str], Awaitable[None]]
 """Async ``(host_id, runner_id, error)`` hook for a ``host.runner_exited`` report."""
+
+
+class _MetadataWriter:
+    """Retain one optional disk worker across cancelled/replaced connections."""
+
+    def __init__(self, store: HostStore, registry: HostRegistry) -> None:
+        self.store = store
+        self.registry = registry
+        self.lock = asyncio.Lock()
+        self.pending: asyncio.Task[None] | None = None
+
+    def current(self, conn: HostConnection) -> bool:
+        return self.registry.get(conn.host_id, workspace_id=conn.workspace_id) is conn
+
+    def _record(
+        self,
+        conn: HostConnection,
+        frame: HostNativeObservationsFrame | HostResourceObservationsFrame,
+    ) -> None:
+        if not self.current(conn):
+            return
+        try:
+            if isinstance(frame, HostResourceObservationsFrame):
+                self.store.resources.record(
+                    conn.host_id,
+                    conn.owner or RESERVED_USER_LOCAL,
+                    frame.snapshot,
+                    is_current=lambda: self.current(conn),
+                )
+            else:
+                self.store.observations.record(
+                    conn.host_id,
+                    conn.owner or RESERVED_USER_LOCAL,
+                    frame.snapshot,
+                    is_current=lambda: self.current(conn),
+                )
+        except Exception:  # noqa: BLE001 -- optional metadata cannot fail host control
+            _logger.warning("Host %s optional metadata was rejected", conn.host_id)
+
+    async def write(
+        self,
+        conn: HostConnection,
+        frame: HostNativeObservationsFrame | HostResourceObservationsFrame,
+    ) -> None:
+        # ponytail: one writer per router bounds stuck threads across reconnects;
+        # use a fixed-size pool only if measured fleet throughput requires it.
+        async with self.lock:
+            if self.pending is not None:
+                await asyncio.shield(self.pending)
+                self.pending = None
+            if not self.current(conn):
+                return
+            self.pending = asyncio.create_task(asyncio.to_thread(self._record, conn, frame))
+            await asyncio.shield(self.pending)
+            self.pending = None
+
+
+class _ConnectionMetadata:
+    """At most four queued snapshots; newer frames replace pending source data."""
+
+    def __init__(self, writer: _MetadataWriter, conn: HostConnection) -> None:
+        self.writer = writer
+        self.conn = conn
+        self.pending: dict[str, HostNativeObservationsFrame | HostResourceObservationsFrame] = {}
+        self.requested = asyncio.Event()
+
+    def offer(self, frame: HostNativeObservationsFrame | HostResourceObservationsFrame) -> None:
+        key = (
+            frame.snapshot.harness
+            if isinstance(frame, HostNativeObservationsFrame)
+            else "resources"
+        )
+        self.pending[key] = frame
+        self.requested.set()
+
+    async def run(self) -> None:
+        try:
+            while True:
+                await self.requested.wait()
+                self.requested.clear()
+                while self.pending:
+                    key = next(iter(self.pending))
+                    frame = self.pending.pop(key)
+                    await self.writer.write(self.conn, frame)
+        finally:
+            self.pending.clear()
 
 
 def log_runner_exited(
@@ -191,6 +279,7 @@ def create_host_tunnel_router(
         local_single_user if local_single_user is not None else local_single_user_enabled()
     )
     router = APIRouter()
+    metadata_writer = _MetadataWriter(host_store, host_registry)
 
     @router.websocket("/hosts/{host_id}/tunnel")
     async def tunnel(ws: WebSocket, host_id: str) -> None:
@@ -383,6 +472,8 @@ def create_host_tunnel_router(
                 _sender_loop(ws, conn),
                 name=f"host-sender:{host_id}",
             )
+            metadata = _ConnectionMetadata(metadata_writer, conn)
+            metadata_task = asyncio.create_task(metadata.run(), name=f"host-metadata:{host_id}")
             heartbeat_requested = asyncio.Event()
             heartbeat_task = asyncio.create_task(
                 _heartbeat_loop(
@@ -406,6 +497,7 @@ def create_host_tunnel_router(
                     runner_exit_reports,
                     on_runner_exited,
                     on_host_update,
+                    metadata,
                 ),
                 name=f"host-receive:{host_id}",
             )
@@ -437,13 +529,14 @@ def create_host_tunnel_router(
                     if exc is not None:
                         raise exc
             finally:
-                for task in (sender_task, ping_task, receive_task, heartbeat_task):
+                for task in (sender_task, ping_task, receive_task, heartbeat_task, metadata_task):
                     task.cancel()
                 await asyncio.gather(
                     sender_task,
                     ping_task,
                     receive_task,
                     heartbeat_task,
+                    metadata_task,
                     return_exceptions=True,
                 )
                 # If the host already reconnected, this handler's connection
@@ -592,6 +685,7 @@ async def _receive_loop(
     runner_exit_reports: RunnerExitReports | None,
     on_runner_exited: RunnerExitedCallback | None,
     on_host_update: Callable[[str, str | None], Awaitable[None]] | None,
+    metadata: _ConnectionMetadata,
 ) -> None:
     """Receive host frames and route results to pending futures.
 
@@ -662,6 +756,10 @@ async def _receive_loop(
                 host_id,
                 type(runner_frame).__name__,
             )
+            continue
+
+        if isinstance(frame, (HostResourceObservationsFrame, HostNativeObservationsFrame)):
+            metadata.offer(frame)
             continue
 
         if isinstance(frame, HostHarnessReadinessFrame):

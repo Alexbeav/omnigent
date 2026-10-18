@@ -62,7 +62,7 @@ from starlette.datastructures import FormData
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from omnigent.errors import ErrorCode, OmnigentError
-from omnigent.server.auth import UnifiedAuthProvider
+from omnigent.server.auth import OBSERVATIONS_READ_SCOPE, UnifiedAuthProvider
 from omnigent.server.device_grant_store import DeviceGrantStore, hash_secret
 from omnigent.server.routes._oauth import (
     NO_STORE_HEADERS,
@@ -98,6 +98,15 @@ DELEGATED_SCOPE = "sessions"
 # to treat as first-party. See :func:`issue_login_grant`,
 # ``_is_login_grant``, and the reservation guard in ``device_authorize``.
 LOGIN_GRANT_CLIENT_ID = "omnigent-cli"
+OBSERVATIONS_CLIENT_ID = "omnigent-observations-read-only"
+
+
+def _client_scope(client_id: str | None) -> str | None:
+    if client_id == LOGIN_GRANT_CLIENT_ID:
+        return None
+    if client_id == OBSERVATIONS_CLIENT_ID:
+        return OBSERVATIONS_READ_SCOPE
+    return DELEGATED_SCOPE
 
 
 def _is_login_grant(client_id: str | None) -> bool:
@@ -441,7 +450,7 @@ def create_oauth_token_router(
         # A first-party login grant renews with the SAME authority as the
         # session JWT it replaces (scope=None); a third-party device grant
         # stays restricted to the delegated allowlist.
-        scope = None if _is_login_grant(client_id) else DELEGATED_SCOPE
+        scope = _client_scope(client_id)
         return mint_delegated_token(
             user_id,
             cookie_secret,
@@ -689,6 +698,7 @@ def create_device_auth_router(
             grant_id=grant_id,
             client_id=client_id or "",
             jti=secrets.token_urlsafe(16),
+            scope=_client_scope(client_id),
         )
 
     # ── Device authorization (public) ─────────────────────────────
@@ -1036,6 +1046,13 @@ def _consent_html(
     # Requesting client's identifier, defaulting to a neutral label when it
     # didn't identify itself.
     app_name = esc(client_id) if client_id else "An application"
+    scope_notice = (
+        "<p>Read managed/native session metadata and host CPU, memory and GPU "
+        "measurements only. This access cannot launch, control, "
+        "import or approve sessions.</p>"
+        if client_id == OBSERVATIONS_CLIENT_ID
+        else ""
+    )
     if error:
         body = f'<p class="err">{esc(error)}</p>'
     elif approved_as:
@@ -1058,6 +1075,7 @@ def _consent_html(
             "<h1>Authorize access</h1>"
             f"<p>{app_name} is requesting permission to act as "
             f"<b>{esc(user_id)}</b> on this Omnigent server.</p>"
+            f"{scope_notice}"
             f'<p class="muted">Code: {esc(user_code)}</p>'
             '<p class="warn">⚠️ Only approve if <b>you</b> just started this '
             "login and this code matches the one the application showed you. If "

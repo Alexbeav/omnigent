@@ -40,6 +40,8 @@ from omnigent.db.utils import (
 )
 from omnigent.errors import ErrorCode, OmnigentError
 from omnigent.harness_availability import HarnessAvailability, is_harness_availability
+from omnigent.stores.host_resource_store import HostResourceStore
+from omnigent.stores.native_observation_store import NativeObservationStore
 
 # A host is considered live only if its row was touched (connect or
 # heartbeat) within this window. The host tunnel's ping loop writes a
@@ -241,6 +243,8 @@ class HostStore:
             ``"sqlite:///hosts.db"``.
         """
         self._engine: Engine = get_or_create_engine(storage_location)
+        self.observations = NativeObservationStore(self._engine)
+        self.resources = HostResourceStore(self._engine)
         self._session = make_named_managed_session_maker(
             self._engine,
             query_name_prefix="omnigent.host_store",
