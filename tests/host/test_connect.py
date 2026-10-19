@@ -4217,16 +4217,26 @@ def test_forge_config_paths_survive_daemon_and_runner_hops(
 
 @pytest.mark.parametrize("server_url", [None, "https://example.databricksapps.com"])
 @pytest.mark.parametrize("setting", [None, "1", "0"])
-async def test_harness_stderr_opt_in_survives_daemon_and_runner_hops(
+@pytest.mark.parametrize(
+    "flag_name",
+    [
+        "OMNIGENT_HARNESS_STDERR_ENABLED",
+        "OMNIGENT_WINDOWS_NATIVE_TERMINALS",
+        "OMNIGENT_WINDOWS_NATIVE_HARNESSES",
+    ],
+)
+async def test_runtime_opt_in_survives_daemon_and_runner_hops(
     monkeypatch: pytest.MonkeyPatch,
     server_url: str | None,
     setting: str | None,
+    flag_name: str,
 ) -> None:
-    """Forward an explicit capture setting without enabling capture by default."""
+    """Forward runtime selectors unchanged without enabling them by default."""
     from omnigent.cli import _build_host_daemon_env
 
-    flag_name = "OMNIGENT_HARNESS_STDERR_ENABLED"
-    sibling_name = "OMNIGENT_HARNESS_STDERR_UNRELATED"
+    if flag_name == "OMNIGENT_WINDOWS_NATIVE_HARNESSES" and setting == "1":
+        setting = "codex-native,claude-native"
+    sibling_name = flag_name + "_UNRELATED"
     monkeypatch.delenv(flag_name, raising=False)
     monkeypatch.delenv("OMNIGENT_RUNNER_ENV_PASSTHROUGH", raising=False)
     monkeypatch.setenv(sibling_name, "must-not-forward")
