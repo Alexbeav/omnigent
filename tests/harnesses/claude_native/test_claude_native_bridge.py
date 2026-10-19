@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.client import BadStatusLine, RemoteDisconnected
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import pairwise
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from typing import Any, TextIO
 from unittest.mock import Mock
@@ -8188,9 +8188,20 @@ def test_ensure_trusted_creates_config_when_missing(
     assert data["projects"][str(workspace.resolve())]["hasTrustDialogAccepted"] is True
 
 
+@pytest.mark.parametrize(
+    "windows_resolved,canonical_key",
+    [
+        (None, None),
+        (PureWindowsPath(r"C:\resolved\feature-y"), "C:/resolved/feature-y"),
+        (PureWindowsPath(r"\\fixture\share\feature-y"), "//fixture/share/feature-y"),
+    ],
+    ids=["posix", "windows-drive", "windows-unc"],
+)
 def test_ensure_trusted_preserves_existing_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    windows_resolved: PureWindowsPath | None,
+    canonical_key: str | None,
 ) -> None:
     """
     Seeding adds only the two gates; all other config is preserved.
@@ -8198,7 +8209,8 @@ def test_ensure_trusted_preserves_existing_state(
     The file holds the user's OAuth account, MCP config, and per-project
     history. Clobbering any of it would be a regression, so this asserts
     an unrelated top-level key and a sibling project entry survive
-    untouched while the new workspace's trust gate is added.
+    untouched while the selected workspace's trust gate is seeded. Windows
+    keys use the resolved drive or UNC path, preserving older backslash entries.
     """
     config_path = _redirect_home(monkeypatch, tmp_path / "home")
     other_workspace = tmp_path / "repo"
@@ -8213,11 +8225,25 @@ def test_ensure_trusted_preserves_existing_state(
             },
         },
     }
-    config_path.write_text(json.dumps(existing))
-
     workspace = tmp_path / "worktrees" / "feature-y"
     workspace.mkdir(parents=True)
-    ensure_claude_workspace_trusted(workspace)
+    selected = workspace
+    project_key = str(workspace.resolve())
+    if windows_resolved is not None:
+        selected = Mock(spec=Path, wraps=workspace)
+        selected.resolve.return_value = windows_resolved
+        project_key = canonical_key
+        existing["projects"][str(windows_resolved)] = {
+            "hasTrustDialogAccepted": False,
+            "lastSessionId": "fixture_backslash",
+        }
+        existing["projects"][project_key] = {
+            "hasTrustDialogAccepted": False,
+            "lastSessionId": "fixture_selected",
+            "allowedTools": ["Read"],
+        }
+    config_path.write_text(json.dumps(existing))
+    ensure_claude_workspace_trusted(selected)
 
     data = json.loads(config_path.read_text())
     # Unrelated top-level state survives — proves we merge, not overwrite.
@@ -8228,8 +8254,21 @@ def test_ensure_trusted_preserves_existing_state(
         "hasTrustDialogAccepted": True,
         "lastSessionId": "sess_existing",
     }
-    # The new workspace's trust gate was added alongside it.
-    assert data["projects"][str(workspace.resolve())]["hasTrustDialogAccepted"] is True
+    # The selected workspace is trusted without changing sibling entries.
+    assert data["projects"][project_key]["hasTrustDialogAccepted"] is True
+    assert data == {
+        **existing,
+        "projects": {
+            **existing["projects"],
+            project_key: {
+                **existing["projects"].get(project_key, {}),
+                "hasTrustDialogAccepted": True,
+            },
+        },
+    }
+    seeded = config_path.read_bytes()
+    ensure_claude_workspace_trusted(selected)
+    assert config_path.read_bytes() == seeded
 
 
 def test_ensure_trusted_idempotent_does_not_rewrite(

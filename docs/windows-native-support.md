@@ -4,6 +4,14 @@ Tracking: [PLAT-89](https://youtrack.crosstalkis.com/issue/PLAT-89), a focused
 follow-up to the broader Windows harness work in PLAT-52. Implementation starts
 from fork source `cc854a1b6` on `feature/windows-native-support`.
 
+The existing Claude workspace-trust seed uses the resolved path with forward
+slashes for Windows project keys, preserving POSIX keys and unrelated config.
+It updates the selected canonical entry without changing older backslash
+entries. Separator variants splitting project identity are also reported in
+[the upstream issue](https://github.com/anthropics/claude-code/issues/69066).
+This source fix does not qualify composer readiness; that remains a separate
+parent-owned native check. Tool permissions and authentication are unchanged.
+
 ## Claude web-message control candidate
 
 Managed ConPTY terminals now advertise a typed, generation-bound control target

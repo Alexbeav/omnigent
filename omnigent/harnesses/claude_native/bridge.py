@@ -1888,7 +1888,7 @@ def ensure_claude_workspace_trusted(workspace: Path, env: Mapping[str, str] | No
 
     :param workspace: The runner workspace Claude will launch in, e.g.
         ``Path("/home/user/repo-worktrees/feature-x")``. Resolved to an
-        absolute path to match Claude's ``projects`` key convention.
+        absolute path with forward slashes to match Claude's ``projects`` keys.
     :param env: Environment the Claude terminal is launched with, used to
         find the config file Claude will load. ``None`` uses this process's
         environment.
@@ -1928,8 +1928,8 @@ def ensure_claude_workspace_trusted(workspace: Path, env: Mapping[str, str] | No
         changed = True
 
     # Per-directory trust gate. Claude keys its ``projects`` map by the
-    # resolved absolute path, so match that exactly.
-    project_key = str(workspace.resolve())
+    # resolved absolute path with forward slashes, including on Windows.
+    project_key = workspace.resolve().as_posix()
     projects = data.setdefault("projects", {})
     if not isinstance(projects, dict):
         raise ValueError(f"{config_path} 'projects' is not a JSON object; refusing to overwrite.")
