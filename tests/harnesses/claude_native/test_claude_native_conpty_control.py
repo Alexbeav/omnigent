@@ -18,13 +18,21 @@ from omnigent.terminals import terminal_control as control
 from omnigent.terminals.conpty import ConPTYSession
 from omnigent.terminals.conpty_instance import ConPTYTerminalInstance
 from omnigent.terminals.conpty_screen import ConPTYScreen
-from tests.harnesses.claude_native.test_claude_native_bridge import _composer_pane
+from tests.harnesses.claude_native.test_claude_native_bridge import (
+    _INLINE_REVERSE_SEARCH_PANE,
+    _MCP_APPROVAL_DIALOG_PANE,
+    _MODEL_PICKER_PANE,
+    _SHELL_MODE_PANE,
+    _composer_pane,
+)
 from tests.terminals.test_conpty import _Driver
 
 
 class _ComposerDriver(_Driver):
+    glyph = "❯"
+
     def render(self, text: str = "") -> None:
-        pane = _composer_pane(text).replace("\n", "\r\n")
+        pane = _composer_pane(text).replace("❯", self.glyph).replace("\n", "\r\n")
         self.output.put("\x1b[H\x1b[2J" + pane)
 
     def write(self, text: str) -> int:
@@ -36,12 +44,13 @@ class _ComposerDriver(_Driver):
         return size
 
 
-@pytest.fixture
-def adopted(tmp_path, monkeypatch):
+@pytest.fixture(params=["❯", ">"])
+def adopted(tmp_path, monkeypatch, request):
     directory, private = tmp_path / "bridge", tmp_path / "terminal"
     directory.mkdir(mode=0o700)
     private.mkdir(mode=0o700)
     driver = _ComposerDriver()
+    driver.glyph = request.param
     session = ConPTYSession(driver, screen=ConPTYScreen(rows=24, cols=120))
     instance = ConPTYTerminalInstance(
         name="claude", session_key="main", socket_path=None, private_dir=private
@@ -102,6 +111,23 @@ def test_pending_approval_protects_conpty_before_any_input(adopted, monkeypatch)
     with pytest.raises(bridge.ClaudeUserPromptPending):
         bridge.inject_user_message(directory, content="must not answer approval", timeout_s=0.2)
     assert driver.operations == []
+
+
+def test_windows_ascii_prompt_keeps_shell_search_and_decisions_blocked(adopted) -> None:
+    _, driver, _, _ = adopted
+    for pane in (
+        _SHELL_MODE_PANE,
+        _INLINE_REVERSE_SEARCH_PANE,
+        _MCP_APPROVAL_DIALOG_PANE,
+        _MODEL_PICKER_PANE,
+        "> an echoed user prompt without a composer frame",
+    ):
+        pane = pane.replace("❯", driver.glyph)
+        assert bridge.claude_pane_text_ready(pane) is False
+    assert bridge._draft_in_input_box(_composer_pane("draft").replace("❯", driver.glyph), "draft")
+    assert not bridge._draft_in_input_box(
+        _composer_pane().replace("❯", driver.glyph) + "\n> quoted draft", "draft"
+    )
 
 
 def test_uncertain_conpty_write_aborts_injection_without_paste_or_submit(

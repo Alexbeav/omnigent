@@ -276,10 +276,6 @@ _CLAUDE_PROMPT_GLYPH = "❯"
 # Escape; everything typed there runs as a bash command, so an injected
 # web-UI message would be EXECUTED rather than sent.
 _SHELL_MODE_GLYPH = "!"
-# Every glyph the composer row can lead with — the input modes the box
-# has. A row starting with one of these is a candidate input box; which
-# glyph it is says whether a chat message may be typed there.
-_COMPOSER_MODE_GLYPHS = (_CLAUDE_PROMPT_GLYPH, _SHELL_MODE_GLYPH)
 # Box-drawing glyphs a TUI horizontal rule is made of. A rule directly
 # above a composer glyph is what marks the live input box rather than a
 # prompt echoed into scrollback (see :func:`_composer_row`), and the last
@@ -4346,7 +4342,7 @@ def _paste_and_submit(
     delivery_diagnostics.record_draft(
         pane=pane,
         needle=needle,
-        prompt_glyph=_CLAUDE_PROMPT_GLYPH,
+        prompt_glyph=_composer_prompt_glyph(pane),
         draft_seen=draft_seen,
         start=paste_wait_started,
         polls=polls,
@@ -4440,7 +4436,7 @@ def _verify_submit_accepted(
                 draft_still_present=False,
                 pane=pane,
                 needle=needle,
-                prompt_glyph=_CLAUDE_PROMPT_GLYPH,
+                prompt_glyph=_composer_prompt_glyph(pane),
                 start=start,
                 retries=retries,
                 polls=polls,
@@ -4473,7 +4469,7 @@ def _verify_submit_accepted(
         draft_still_present=True,
         pane=pane,
         needle=needle,
-        prompt_glyph=_CLAUDE_PROMPT_GLYPH,
+        prompt_glyph=_composer_prompt_glyph(pane),
         start=start,
         retries=retries,
         polls=polls,
@@ -4500,7 +4496,11 @@ def _count_unknown_command_rejections(pane: str, needle: str) -> int:
         ``"Unknown command: /my-cmd"``.
     :returns: Number of rejections for this name currently visible.
     """
-    lines = [line for line in pane.splitlines() if _CLAUDE_PROMPT_GLYPH not in line]
+    lines = [
+        line
+        for line in pane.splitlines()
+        if _CLAUDE_PROMPT_GLYPH not in line and not (IS_WINDOWS and line.strip().startswith(">"))
+    ]
     collapsed = "".join("".join(line.split()) for line in lines)
     target = "".join(needle.split())
     if not target:
@@ -5827,6 +5827,19 @@ def _restore_occupied_input(
         time.sleep(_CLAUDE_READY_POLL_INTERVAL_S)
 
 
+def _chat_prompt_glyphs() -> tuple[str, ...]:
+    """Native Windows Claude also renders an ASCII chat prompt."""
+    return (_CLAUDE_PROMPT_GLYPH, ">") if IS_WINDOWS else (_CLAUDE_PROMPT_GLYPH,)
+
+
+def _composer_prompt_glyph(pane: str) -> str:
+    """Keep delivery diagnostics aligned with the mounted composer's glyph."""
+    row = _composer_row(pane)
+    if row is not None and row.strip().startswith(_chat_prompt_glyphs()):
+        return row.strip()[0]
+    return _CLAUDE_PROMPT_GLYPH
+
+
 def _occupying_surface(pane: str) -> str | None:
     """
     Name what is keeping the chat composer from accepting a message.
@@ -5860,7 +5873,7 @@ def _occupying_surface(pane: str) -> str | None:
     row = _composer_row(pane)
     if row is None:
         return _OVERLAY_SURFACE
-    if row.strip().startswith(_CLAUDE_PROMPT_GLYPH):
+    if row.strip().startswith(_chat_prompt_glyphs()):
         return None
     return "shell mode"
 
@@ -5872,7 +5885,7 @@ def _composer_row(pane: str) -> str | None:
     The box is the last thing on screen framed by rules
     (:func:`_is_box_rule`), and its row is the one directly under that
     frame's opening rule, led by a composer glyph
-    (:data:`_COMPOSER_MODE_GLYPHS`).
+    (:func:`_chat_prompt_glyphs` or the shell-mode glyph).
 
     That frame is what tells the composer apart from every look-alike: a
     prompt echoed into scrollback, the ctrl+r search's selected history
@@ -5900,7 +5913,7 @@ def _composer_row(pane: str) -> str | None:
         if idx >= len(non_empty):
             continue
         row = non_empty[idx]
-        if row.strip()[:1] in _COMPOSER_MODE_GLYPHS:
+        if row.strip()[:1] in (*_chat_prompt_glyphs(), _SHELL_MODE_GLYPH):
             return row
     return None
 
@@ -5910,7 +5923,7 @@ def _claude_prompt_rendered(pane: str) -> bool:
     Return whether Claude Code's chat input is rendered in a pane.
 
     The input box is located structurally (:func:`_composer_row`) and its
-    leading glyph read: only :data:`_CLAUDE_PROMPT_GLYPH` accepts a chat
+    leading glyph read: only a chat prompt glyph accepts a chat
     message. Nothing else on screen qualifies — not a prompt echoed into
     scrollback, not the ctrl+r search's selected history row, not a
     startup menu's ``❯ 2. No (recommended)``, and not the same box
@@ -5932,7 +5945,7 @@ def _claude_prompt_rendered(pane: str) -> bool:
     :returns: ``True`` when the chat input box appears mounted.
     """
     row = _composer_row(pane)
-    if row is None or not row.strip().startswith(_CLAUDE_PROMPT_GLYPH):
+    if row is None or not row.strip().startswith(_chat_prompt_glyphs()):
         return False
     return not _history_search_footer_shown(pane)
 
@@ -6060,6 +6073,11 @@ def _draft_in_input_box(pane: str, needle: str) -> bool:
         only the paste placeholder is then considered.
     :returns: ``True`` when the draft is still sitting in the input box.
     """
+    if IS_WINDOWS:
+        row = _composer_row(pane)
+        if row is not None and row.strip().startswith(">"):
+            tail = row.strip()[1:]
+            return _PASTED_PLACEHOLDER_PREFIX in tail or (bool(needle) and needle in tail)
     glyph_lines = [line for line in pane.splitlines() if _CLAUDE_PROMPT_GLYPH in line]
     if not glyph_lines:
         return False
@@ -6123,7 +6141,7 @@ def _terminal_dialog_headline(pane: str) -> str | None:
     if footer is None:
         return None
     has_selector = any(
-        line.strip().lstrip("│ ").startswith(_CLAUDE_PROMPT_GLYPH) for line in region
+        line.strip().lstrip("│ ").startswith(_chat_prompt_glyphs()) for line in region
     )
     if not has_selector and "press enter" not in footer.lower():
         return None
