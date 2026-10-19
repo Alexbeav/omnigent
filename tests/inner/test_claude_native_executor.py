@@ -26,6 +26,7 @@ from omnigent.inner import claude_native_executor
 from omnigent.inner.claude_native_executor import ClaudeNativeExecutor
 from omnigent.inner.executor import ExecutorConfig, ExecutorError, TurnComplete
 from omnigent.inner.native_attachments import attachment_cache_dir
+from omnigent.terminals.terminal_control import DeliveryUncertain
 
 # Minimal valid 1x1 white PNG used for multimodal attachment tests.
 _TINY_PNG_B64 = (
@@ -377,7 +378,7 @@ async def test_enqueue_session_message_injects_steering_into_terminal(
     harness but never reaches the native Claude Code process.
     """
     sent_messages: list[dict[str, Any]] = []
-    failure = InputDeliveryUncertain("private diagnostic")
+    failure = DeliveryUncertain("private diagnostic")
 
     def fake_inject_user_message(
         bridge_dir_arg: Path,

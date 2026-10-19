@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from omnigent.errors import InputDeliveryUncertain
 from omnigent.terminals.control_metadata import (
     PrivateMetadataError,
     private_metadata_lock,
@@ -42,7 +43,7 @@ class TerminalControlError(RuntimeError):
     """A terminal control request failed without exposing its capability."""
 
 
-class DeliveryUncertain(TerminalControlError):
+class DeliveryUncertain(TerminalControlError, InputDeliveryUncertain):
     """Input may still be queued or executing. Never automatically replay it."""
 
 

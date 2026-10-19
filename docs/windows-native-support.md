@@ -40,12 +40,14 @@ verified-draft submit behavior remains after acknowledged operations.
 
 A server-side uncertain write or failed mutation response latches subsequent
 endpoint input off for that generation. Capture, state and owned close remain
-available. This also refuses buffered re-delivery by the existing Claude
-live-message callback, which otherwise retains failed injections. Recovery
-requires explicit inspection and terminal replacement; higher-level handling
-of those buffered messages and client-only lost acknowledgements still needs
-the parent's integration review. Do not claim exactly-once GUI delivery from
-portable transport acceptance.
+available. Live steering propagates typed uncertainty to the executor adapter,
+which consumes the buffered copy and emits a neutral notice asking the person
+to inspect the terminal before sending it again. Watcher cancellation drains
+the writer and preserves successful or uncertain delivery before teardown;
+a target that was never advertised leaves the buffered message queued.
+Recovery requires explicit inspection and terminal replacement. These rules
+prevent automatic replay through the normal consumed-event stream, but do not
+provide transactional exactly-once delivery across runner or stream loss.
 
 `control_metadata.py` seals the **entire** Windows target record using
 [current-user DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),
