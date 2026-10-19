@@ -5,9 +5,11 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import json
+import queue
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -121,6 +123,66 @@ def test_revoke_stops_slow_connection_and_preserves_new_advertisement(tmp_path, 
         assert driver.operations == []
     finally:
         newer.close()
+
+
+def test_replacement_cannot_publish_between_conditional_read_and_unlink(
+    tmp_path, endpoint, monkeypatch
+) -> None:
+    _, session, old = endpoint
+    old.advertise(tmp_path)
+    replacement = control.TerminalControlServer(session)
+    read_done, release_read = threading.Event(), threading.Event()
+    publisher_status = queue.Queue()
+    publication_locked = threading.Event()
+    original_read, original_lock = control.read_target, control.private_metadata_lock
+
+    def paused_read(directory):
+        target = original_read(directory)
+        if threading.current_thread().name.startswith("remove"):
+            read_done.set()
+            assert release_read.wait(5)
+        return target
+
+    @contextlib.contextmanager
+    def observed_lock(directory):
+        publishing = threading.current_thread().name.startswith("replace")
+        if publishing:
+            try:
+                with control_metadata.FileLock(
+                    str(directory / ".terminal-control.lock"), timeout=0, mode=0o600
+                ):
+                    blocked = False
+            except control_metadata.FileLockTimeout:
+                blocked = True
+            publisher_status.put(blocked)
+        with original_lock(directory):
+            if publishing:
+                publication_locked.set()
+            yield
+
+    monkeypatch.setattr(control, "read_target", paused_read)
+    monkeypatch.setattr(control, "private_metadata_lock", observed_lock)
+    try:
+        with (
+            ThreadPoolExecutor(1, thread_name_prefix="remove") as removals,
+            ThreadPoolExecutor(1, thread_name_prefix="replace") as publications,
+        ):
+            removal = removals.submit(old.close)
+            try:
+                assert read_done.wait(5)
+                publication = publications.submit(replacement.advertise, tmp_path)
+                assert publisher_status.get(timeout=5) is True
+                assert not publication_locked.is_set() and not publication.done()
+            finally:
+                release_read.set()
+            removal.result(timeout=5)
+            publication.result(timeout=5)
+        assert publication_locked.is_set()
+        assert original_read(tmp_path) == replacement.target
+        assert control.request_control(replacement.target, "state")["alive"]
+    finally:
+        release_read.set()
+        replacement.close()
 
 
 @pytest.mark.parametrize(

@@ -61,6 +61,12 @@ Endpoint revocation happens before advertisement removal and terminal cleanup,
 including when owned process cleanup fails. A retained old target cannot adopt
 a replacement generation. Cleanup removes only advertisements still naming
 that endpoint, preserving a newer advertisement in the same bridge directory.
+Publication and the conditional read/unlink share a directory-level file lock,
+with a four-second acquisition bound, across threads and processes. Each
+managed instance serializes endpoint creation, publication and revocation with
+its own lock. Close marks the instance as closing before teardown; later
+publication is refused even while the owned session is still alive. A close
+that follows publication revokes the newly created endpoint before cleanup.
 
 Portable tests use the existing ConPTY driver and composer fixtures with real
 loopback requests. They cover runner adoption, guarded web-message submission,

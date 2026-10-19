@@ -11,8 +11,13 @@ import ctypes
 import os
 import stat
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
+
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
 
 from omnigent._platform import IS_WINDOWS
 
@@ -118,6 +123,18 @@ def write_private_metadata(path: Path, data: bytes) -> None:
         os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)
+
+
+@contextmanager
+def private_metadata_lock(directory: Path) -> Iterator[None]:
+    """Serialize publication and conditional removal across endpoint owners."""
+    _validate_directory(directory)
+    try:
+        with FileLock(str(directory / ".terminal-control.lock"), timeout=4, mode=0o600):
+            _validate_directory(directory)
+            yield
+    except FileLockTimeout:
+        raise PrivateMetadataError("Terminal metadata publication is busy") from None
 
 
 def read_private_metadata(path: Path) -> bytes:

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import queue
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -16,7 +18,13 @@ from omnigent.terminals import conpty, conpty_instance
 from omnigent.terminals.attach_target import ConPTYAttachTarget
 from omnigent.terminals.conpty_screen import ConPTYScreen
 from omnigent.terminals.registry import TerminalListEntry, TerminalRegistry
-from omnigent.terminals.terminal_control import CONTROL_FILE, TerminalControlError, request_control
+from omnigent.terminals.terminal_control import (
+    CONTROL_FILE,
+    TerminalControlError,
+    TerminalControlServer,
+    read_target,
+    request_control,
+)
 from tests.terminals.test_conpty import _Driver
 
 
@@ -218,3 +226,119 @@ def test_control_capability_is_private_and_revoked_before_failed_owned_cleanup(
         monkeypatch.setattr(driver, "terminate", original)
         asyncio.run(instance.close())
     assert driver.closed and not instance.private_dir.exists()
+
+
+@pytest.fixture
+def control_instance(tmp_path):
+    directory, private = tmp_path / "bridge", tmp_path / "terminal"
+    directory.mkdir(mode=0o700)
+    private.mkdir(mode=0o700)
+    session = conpty.ConPTYSession(_Driver(), screen=ConPTYScreen())
+    instance = conpty_instance.ConPTYTerminalInstance(
+        name="claude", session_key="main", socket_path=None, private_dir=private
+    )
+    instance._session, instance.running = session, True
+    try:
+        yield instance, session, directory
+    finally:
+        asyncio.run(instance.close())
+    assert not session.workers_alive
+
+
+class _ObservedLifecycleLock:
+    def __init__(self, events):
+        self.lock = threading.Lock()
+        self.events = events
+        self.observe = False
+
+    def __enter__(self):
+        if self.observe:
+            self.events.put("lock")
+        self.lock.acquire()
+
+    def __exit__(self, *exc):
+        self.lock.release()
+
+
+@pytest.mark.parametrize("contender", ["close", "publish"])
+def test_control_creation_serializes_with_close_and_other_publications(
+    control_instance, monkeypatch, contender
+) -> None:
+    instance, session, directory = control_instance
+    created, release = threading.Event(), threading.Event()
+    events, servers = queue.Queue(), []
+    lock = _ObservedLifecycleLock(events)
+    instance._control_lifecycle_lock = lock
+
+    def paused_create(owned):
+        server = TerminalControlServer(owned)
+        servers.append(server)
+        if len(servers) == 1:
+            created.set()
+            assert release.wait(5)
+        else:
+            events.put("extra endpoint")
+        return server
+
+    async def observe_cleanup():
+        events.put("cleanup")
+
+    monkeypatch.setattr(conpty_instance, "TerminalControlServer", paused_create)
+    monkeypatch.setattr(instance, "_stop_idle_watcher", observe_cleanup)
+    try:
+        with ThreadPoolExecutor(2) as workers:
+            publication = workers.submit(instance.publish_control_target, directory)
+            try:
+                assert created.wait(5)
+                lock.observe = True
+                if contender == "close":
+                    other = workers.submit(lambda: asyncio.run(instance.close()))
+                else:
+                    other = workers.submit(instance.publish_control_target, directory)
+                assert events.get(timeout=5) == "lock"
+                assert not other.done() and len(servers) == 1
+            finally:
+                release.set()
+            publication.result(timeout=5)
+            other.result(timeout=5)
+        assert instance._control_server is servers[0]
+        if contender == "close":
+            assert read_target(directory) is None
+            assert not servers[0]._thread.is_alive() and not session.alive
+            with pytest.raises(TerminalControlError):
+                request_control(servers[0].target, "state")
+        else:
+            assert read_target(directory) == servers[0].target
+            assert control_instance[1].alive and len(servers) == 1
+    finally:
+        release.set()
+        for server in servers:
+            server.close()
+
+
+def test_close_state_prevents_endpoint_creation_during_session_cleanup(
+    control_instance, monkeypatch
+) -> None:
+    instance, session, directory = control_instance
+    closing, release = threading.Event(), threading.Event()
+    original_close = session.close
+    create = Mock(side_effect=AssertionError("endpoint created after close began"))
+
+    def paused_close():
+        closing.set()
+        assert release.wait(5)
+        original_close()
+
+    monkeypatch.setattr(session, "close", paused_close)
+    monkeypatch.setattr(conpty_instance, "TerminalControlServer", create)
+    with ThreadPoolExecutor(2) as workers:
+        cleanup = workers.submit(lambda: asyncio.run(instance.close()))
+        try:
+            assert closing.wait(5) and session.alive
+            with pytest.raises(RuntimeError, match="closing"):
+                workers.submit(instance.publish_control_target, directory).result(timeout=5)
+            create.assert_not_called()
+        finally:
+            release.set()
+        cleanup.result(timeout=5)
+    assert instance._control_server is None and read_target(directory) is None

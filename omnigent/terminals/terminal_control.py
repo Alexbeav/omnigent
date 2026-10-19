@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from omnigent.terminals.control_metadata import (
     PrivateMetadataError,
+    private_metadata_lock,
     read_private_metadata,
     write_private_metadata,
 )
@@ -64,18 +65,19 @@ class ConPTYControlTarget:
 
 
 def advertise_target(directory: Path, target: ConPTYControlTarget) -> None:
-    write_private_metadata(
-        directory / CONTROL_FILE,
-        json.dumps(
-            {
-                "backend": "conpty",
-                "version": 1,
-                "port": target.port,
-                "generation": target.generation,
-                "token": target.token,
-            }
-        ).encode("utf-8"),
-    )
+    with private_metadata_lock(directory):
+        write_private_metadata(
+            directory / CONTROL_FILE,
+            json.dumps(
+                {
+                    "backend": "conpty",
+                    "version": 1,
+                    "port": target.port,
+                    "generation": target.generation,
+                    "token": target.token,
+                }
+            ).encode("utf-8"),
+        )
 
 
 def read_target(directory: Path) -> ConPTYControlTarget | None:
@@ -196,7 +198,10 @@ class TerminalControlServer:
 
     def _remove_advertisements(self) -> None:
         for directory in self._advertisements:
-            with contextlib.suppress(OSError, PrivateMetadataError, TerminalControlError):
+            with (
+                contextlib.suppress(OSError, PrivateMetadataError, TerminalControlError),
+                private_metadata_lock(directory),
+            ):
                 if read_target(directory) == self.target:
                     (directory / CONTROL_FILE).unlink(missing_ok=True)
 
