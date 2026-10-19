@@ -61,7 +61,7 @@ from http import HTTPStatus
 from http.client import HTTPConnection, HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, TypeVar, cast
 from urllib import request
 
 from filelock import FileLock
@@ -77,6 +77,7 @@ from omnigent.harnesses.kiro_native import bridge as kiro_bridge
 from omnigent.models.claude_model_vocabulary import MODEL_VOCABULARY_ENV_VARS
 from omnigent.models.model_metadata import concrete_reported_model
 from omnigent.native.failure_telemetry import FailureContext
+from omnigent.terminals.terminal_control import ConPTYControlTarget, read_target, request_control
 from omnigent.util.json_types import JsonObject as _JsonObject
 
 if TYPE_CHECKING:
@@ -97,6 +98,14 @@ from omnigent.util.reasoning_effort import CLAUDE_EFFORTS
 CLAUDE_FRAMEWORK_CONTEXT_FILE = "pending_framework_context.txt"
 
 _logger = logging.getLogger(__name__)
+_TerminalAddress = str | ConPTYControlTarget
+
+
+class _TerminalInfo(TypedDict):
+    socket_path: _TerminalAddress
+    tmux_target: str
+
+
 _INJECTION_CANCEL_EVENT: ContextVar[threading.Event | None] = ContextVar(
     "claude_native_injection_cancel_event", default=None
 )
@@ -4237,7 +4246,7 @@ def inject_user_message(
 
 def _paste_and_submit(
     bridge_dir: Path,
-    socket_path: str,
+    socket_path: _TerminalAddress,
     tmux_target: str,
     *,
     text: str,
@@ -4284,26 +4293,32 @@ def _paste_and_submit(
     # ``paste-buffer -p`` wraps it in the same bracketed-paste markers so
     # interior newlines (mapped to CR below) stay data instead of becoming
     # per-line submits. See anthropics/claude-code#52126.
-    with tempfile.NamedTemporaryFile(
-        dir=bridge_dir, prefix="paste_", suffix=".bin", delete=False
-    ) as paste_file:
-        paste_file.write(_paste_payload_bytes(text + "\n"))
-        paste_path = paste_file.name
-    try:
-        _run_tmux(socket_path, "load-buffer", "-b", "omnigent-paste", paste_path)
-        _run_tmux(
-            socket_path,
-            "paste-buffer",
-            "-p",  # bracketed-paste markers — the TUI keeps newlines as data
-            "-d",  # drop the buffer after pasting (no stale copies server-side)
-            "-b",
-            "omnigent-paste",
-            "-t",
-            tmux_target,
+    if isinstance(socket_path, ConPTYControlTarget):
+        _check_injection_cancelled()
+        request_control(
+            socket_path, "paste", text=_paste_payload_bytes(text + "\n").decode("utf-8")
         )
-    finally:
-        with contextlib.suppress(OSError):
-            os.unlink(paste_path)
+    else:
+        with tempfile.NamedTemporaryFile(
+            dir=bridge_dir, prefix="paste_", suffix=".bin", delete=False
+        ) as paste_file:
+            paste_file.write(_paste_payload_bytes(text + "\n"))
+            paste_path = paste_file.name
+        try:
+            _run_tmux(socket_path, "load-buffer", "-b", "omnigent-paste", paste_path)
+            _run_tmux(
+                socket_path,
+                "paste-buffer",
+                "-p",  # bracketed-paste markers — the TUI keeps newlines as data
+                "-d",  # drop the buffer after pasting (no stale copies server-side)
+                "-b",
+                "omnigent-paste",
+                "-t",
+                tmux_target,
+            )
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(paste_path)
     # Wait until the TUI has visibly committed the paste into its input
     # box before submitting. Claude Code coalesces rapid stdin bursts
     # into a paste; an Enter that arrives while it is still consuming
@@ -4381,7 +4396,7 @@ def _paste_and_submit(
 
 
 def _verify_submit_accepted(
-    socket_path: str,
+    socket_path: _TerminalAddress,
     tmux_target: str,
     *,
     needle: str,
@@ -4494,7 +4509,7 @@ def _count_unknown_command_rejections(pane: str, needle: str) -> int:
 
 
 def _unknown_command_rejection_appeared(
-    socket_path: str,
+    socket_path: _TerminalAddress,
     tmux_target: str,
     *,
     needle: str,
@@ -4721,7 +4736,7 @@ def inject_slash_command(
 
 
 def _confirm_tui_dialog(
-    socket_path: str,
+    socket_path: _TerminalAddress,
     tmux_target: str,
     *,
     hint: str,
@@ -4993,7 +5008,7 @@ def _dedent_overlay_lines(overlay_lines: list[str]) -> str:
 
 
 def _read_settled_permission_mode(
-    socket_path: str,
+    socket_path: _TerminalAddress,
     tmux_target: str,
     *,
     previous: str | None = None,
@@ -5136,7 +5151,7 @@ def confirm_dialog_if_open(bridge_dir: Path, *, hint: str) -> bool:
 
 
 def _confirm_and_verify_dialog_closed(
-    socket_path: str,
+    socket_path: _TerminalAddress,
     tmux_target: str,
     *,
     hint: str,
@@ -5245,6 +5260,8 @@ def display_cost_approval_popup(
     from omnigent.native.native_cost_popup import launch_cost_popup
 
     info = _wait_for_tmux_info(bridge_dir, timeout_s=timeout_s)
+    if isinstance(info["socket_path"], ConPTYControlTarget):
+        raise RuntimeError("Cost approval popups are unavailable on Windows; use the web card")
     launch_cost_popup(
         info["socket_path"],
         info["tmux_target"],
@@ -5348,7 +5365,7 @@ class _UnixHTTPConnection(HTTPConnection):
         self.sock = sock
 
 
-def _run_tmux(socket_path: str, *args: str) -> None:
+def _run_tmux(socket_path: _TerminalAddress, *args: str) -> None:
     """
     Invoke ``tmux -S <socket_path> <args...>`` and raise on failure.
 
@@ -5363,6 +5380,17 @@ def _run_tmux(socket_path: str, *args: str) -> None:
     import subprocess
 
     _check_injection_cancelled()
+    if isinstance(socket_path, ConPTYControlTarget):
+        target = socket_path.generation
+        if args == ("kill-session", "-t", target):
+            request_control(socket_path, "close")
+        elif len(args) >= 4 and args[:3] == ("send-keys", "-t", target):
+            request_control(socket_path, "keys", keys=" ".join(args[3:]))
+        elif len(args) >= 5 and args[:4] == ("send-keys", "-l", "-t", target):
+            request_control(socket_path, "literal", text="".join(args[4:]))
+        else:
+            raise RuntimeError("Unsupported ConPTY terminal control operation")
+        return
     cmd = ["tmux", "-S", socket_path, *args]
     try:
         proc = subprocess.run(
@@ -5370,6 +5398,8 @@ def _run_tmux(socket_path: str, *args: str) -> None:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_TMUX_SEND_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired as exc:
@@ -5379,7 +5409,9 @@ def _run_tmux(socket_path: str, *args: str) -> None:
         raise RuntimeError(f"tmux command failed (rc={proc.returncode}): {detail}")
 
 
-def _capture_pane(socket_path: str, tmux_target: str, *, join_wrapped: bool = False) -> str:
+def _capture_pane(
+    socket_path: _TerminalAddress, tmux_target: str, *, join_wrapped: bool = False
+) -> str:
     """
     Capture the current visible contents of a tmux pane.
 
@@ -5398,6 +5430,14 @@ def _capture_pane(socket_path: str, tmux_target: str, *, join_wrapped: bool = Fa
     import subprocess
 
     _check_injection_cancelled()
+    if isinstance(socket_path, ConPTYControlTarget):
+        if tmux_target != socket_path.generation:
+            raise RuntimeError("Stale ConPTY terminal generation")
+        result = request_control(socket_path, "capture", join_wrapped=join_wrapped)
+        text = result.get("text")
+        if not isinstance(text, str):
+            raise RuntimeError("Invalid ConPTY terminal capture")
+        return text
     args = ["tmux", "-S", socket_path, "capture-pane", "-t", tmux_target, "-p"]
     if join_wrapped:
         args.append("-J")
@@ -5407,6 +5447,8 @@ def _capture_pane(socket_path: str, tmux_target: str, *, join_wrapped: bool = Fa
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_TMUX_SEND_TIMEOUT_S,
         )
     except (subprocess.SubprocessError, OSError):
@@ -5425,7 +5467,7 @@ class _ClaudePaneState(NamedTuple):
     exit_status: str | None = None
 
 
-def _claude_pane_state(socket_path: str, tmux_target: str) -> _ClaudePaneState:
+def _claude_pane_state(socket_path: _TerminalAddress, tmux_target: str) -> _ClaudePaneState:
     """
     Report whether the Claude pane's process is still running.
 
@@ -5453,6 +5495,16 @@ def _claude_pane_state(socket_path: str, tmux_target: str) -> _ClaudePaneState:
     import subprocess
 
     _check_injection_cancelled()
+    if isinstance(socket_path, ConPTYControlTarget):
+        if tmux_target != socket_path.generation:
+            raise RuntimeError("Stale ConPTY terminal generation")
+        result = request_control(socket_path, "state")
+        alive, status = result.get("alive"), result.get("exit_status")
+        if type(alive) is not bool or (status is not None and type(status) is not int):
+            raise RuntimeError("Invalid ConPTY terminal state")
+        return _ClaudePaneState(
+            alive, exited=not alive, exit_status=str(status) if status is not None else None
+        )
     try:
         proc = subprocess.run(
             [
@@ -5468,6 +5520,8 @@ def _claude_pane_state(socket_path: str, tmux_target: str) -> _ClaudePaneState:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_TMUX_SEND_TIMEOUT_S,
         )
     except (subprocess.SubprocessError, OSError):
@@ -5507,12 +5561,12 @@ def claude_pane_ready(bridge_dir: Path) -> bool:
     :param bridge_dir: Bridge directory path.
     :returns: ``True`` when the pane renders the chat input box.
     """
-    payload = _read_json_file(bridge_dir / _TMUX_FILE)
+    payload = _read_terminal_info(bridge_dir)
     if not isinstance(payload, dict):
         return False
     socket_path = payload.get("socket_path")
     tmux_target = payload.get("tmux_target")
-    if not isinstance(socket_path, str) or not isinstance(tmux_target, str):
+    if not isinstance(socket_path, (str, ConPTYControlTarget)) or not isinstance(tmux_target, str):
         return False
     pane = _capture_pane(socket_path, tmux_target)
     if _MODEL_PICKER_OPEN_HINT in pane:
@@ -5579,11 +5633,11 @@ def has_pending_user_prompt(bridge_dir: Path) -> bool:
     """
     if _has_approval_wait(bridge_dir):
         return True
-    info = _read_json_file(bridge_dir / _TMUX_FILE)
+    info = _read_terminal_info(bridge_dir)
     if not isinstance(info, dict):
         return False
     socket_path, target = info.get("socket_path"), info.get("tmux_target")
-    if not isinstance(socket_path, str) or not isinstance(target, str):
+    if not isinstance(socket_path, (str, ConPTYControlTarget)) or not isinstance(target, str):
         return False
     return _user_prompt_visible(_capture_pane(socket_path, target))
 
@@ -5602,7 +5656,7 @@ def auto_mode_billing_notice_visible(pane: str) -> bool:
     return _AUTO_MODE_BILLING_NOTICE.fullmatch(body) is not None
 
 
-def _acknowledge_auto_mode_billing_notice(socket_path: str, tmux_target: str) -> bool:
+def _acknowledge_auto_mode_billing_notice(socket_path: _TerminalAddress, tmux_target: str) -> bool:
     """Confirm the notice on fresh frames before each bounded Enter attempt."""
     deadline = time.monotonic() + _CONFIRM_DIALOG_ACCEPT_TIMEOUT_S
     last_enter: float | None = None
@@ -5641,7 +5695,7 @@ def bridge_dir_from_launch_args(args: Sequence[str]) -> Path | None:
 def acknowledge_auto_mode_billing_notice(
     bridge_dir: Path,
     *,
-    expected_socket_path: str | None = None,
+    expected_socket_path: _TerminalAddress | None = None,
     expected_tmux_target: str | None = None,
 ) -> bool:
     """Acknowledge a live notice without waiting for another pane writer's lock.
@@ -5655,11 +5709,13 @@ def acknowledge_auto_mode_billing_notice(
     try:
         try:
             with _bridge_injection_file_lock(bridge_dir).acquire(timeout=0):
-                info = _read_json_file(bridge_dir / _TMUX_FILE)
+                info = _read_terminal_info(bridge_dir)
                 if not isinstance(info, dict):
                     return False
                 socket_path, target = info.get("socket_path"), info.get("tmux_target")
-                if not isinstance(socket_path, str) or not isinstance(target, str):
+                if not isinstance(socket_path, (str, ConPTYControlTarget)) or not isinstance(
+                    target, str
+                ):
                     return False
                 if expected_socket_path is not None and socket_path != expected_socket_path:
                     return False
@@ -5675,7 +5731,7 @@ def acknowledge_auto_mode_billing_notice(
 
 
 def _restore_occupied_input(
-    socket_path: str, tmux_target: str, *, bridge_dir: Path | None = None
+    socket_path: _TerminalAddress, tmux_target: str, *, bridge_dir: Path | None = None
 ) -> str | None:
     """
     Dismiss a terminal-opened surface occupying Claude's input box.
@@ -6075,7 +6131,7 @@ def _terminal_dialog_headline(pane: str) -> str | None:
 
 
 def _wait_for_claude_prompt_ready(
-    socket_path: str,
+    socket_path: _TerminalAddress,
     tmux_target: str,
     *,
     timeout_s: float,
@@ -6269,28 +6325,31 @@ def _paste_payload_bytes(text: str) -> bytes:
     return bytes(body)
 
 
-def _wait_for_tmux_info(bridge_dir: Path, *, timeout_s: float) -> dict[str, str]:
-    """
-    Wait for the runner to write ``tmux.json``.
+def _read_terminal_info(bridge_dir: Path) -> _TerminalInfo | None:
+    target = read_target(bridge_dir)
+    if target is not None:
+        return {"socket_path": target, "tmux_target": target.generation}
+    if IS_WINDOWS:
+        return None
+    payload = _read_json_file(bridge_dir / _TMUX_FILE)
+    socket_path, tmux_target = payload.get("socket_path"), payload.get("tmux_target")
+    if isinstance(socket_path, str) and isinstance(tmux_target, str):
+        return {"socket_path": socket_path, "tmux_target": tmux_target}
+    return None
 
-    :param bridge_dir: Bridge directory path.
-    :param timeout_s: Seconds to wait, e.g. ``30.0``.
-    :returns: ``{"socket_path": ..., "tmux_target": ...}``.
-    :raises TmuxSessionNotAdvertised: If the file never appears with valid
-        ``socket_path`` and ``tmux_target`` fields.
-    """
+
+def _wait_for_tmux_info(bridge_dir: Path, *, timeout_s: float) -> _TerminalInfo:
+    """Wait for a typed ConPTY target or the existing POSIX tmux advertisement."""
     deadline = time.monotonic() + timeout_s
-    path = bridge_dir / _TMUX_FILE
     while time.monotonic() < deadline:
         _check_injection_cancelled()
-        payload = _read_json_file(path)
-        socket_path = payload.get("socket_path") if isinstance(payload, dict) else None
-        tmux_target = payload.get("tmux_target") if isinstance(payload, dict) else None
-        if isinstance(socket_path, str) and isinstance(tmux_target, str):
-            return {"socket_path": socket_path, "tmux_target": tmux_target}
+        info = _read_terminal_info(bridge_dir)
+        if info is not None:
+            return info
         time.sleep(0.05)
+    backend = "control" if IS_WINDOWS else "tmux"
     raise TmuxSessionNotAdvertised(
-        "Claude terminal tmux target is not advertised yet. Wait for the "
+        f"Claude terminal {backend} target is not advertised yet. Wait for the "
         "terminal to launch before sending messages from the web UI."
     )
 
@@ -7690,12 +7749,12 @@ def read_permission_mode(bridge_dir: Path) -> str | None:
     :returns: The ``--permission-mode`` value rendered in the pane, e.g.
         ``"auto"``, or ``None`` when it cannot be determined.
     """
-    payload = _read_json_file(bridge_dir / _TMUX_FILE)
+    payload = _read_terminal_info(bridge_dir)
     if not isinstance(payload, dict):
         return None
     socket_path = payload.get("socket_path")
     tmux_target = payload.get("tmux_target")
-    if not isinstance(socket_path, str) or not isinstance(tmux_target, str):
+    if not isinstance(socket_path, (str, ConPTYControlTarget)) or not isinstance(tmux_target, str):
         return None
     return _permission_mode_from_pane(_capture_pane(socket_path, tmux_target))
 
@@ -7714,12 +7773,12 @@ def read_btw_overlay(bridge_dir: Path) -> BtwOverlay | None:
         ``/tmp/omnigent/claude-native/<digest>``.
     :returns: The parsed overlay, or ``None``.
     """
-    payload = _read_json_file(bridge_dir / _TMUX_FILE)
+    payload = _read_terminal_info(bridge_dir)
     if not isinstance(payload, dict):
         return None
     socket_path = payload.get("socket_path")
     tmux_target = payload.get("tmux_target")
-    if not isinstance(socket_path, str) or not isinstance(tmux_target, str):
+    if not isinstance(socket_path, (str, ConPTYControlTarget)) or not isinstance(tmux_target, str):
         return None
     return _btw_overlay_from_pane(_capture_pane(socket_path, tmux_target))
 
@@ -7738,12 +7797,12 @@ def read_pane_signals(bridge_dir: Path) -> PaneSignals:
         ``/tmp/omnigent/claude-native/<digest>``.
     :returns: The parsed pane signals (fields ``None`` when absent).
     """
-    payload = _read_json_file(bridge_dir / _TMUX_FILE)
+    payload = _read_terminal_info(bridge_dir)
     if not isinstance(payload, dict):
         return PaneSignals()
     socket_path = payload.get("socket_path")
     tmux_target = payload.get("tmux_target")
-    if not isinstance(socket_path, str) or not isinstance(tmux_target, str):
+    if not isinstance(socket_path, (str, ConPTYControlTarget)) or not isinstance(tmux_target, str):
         return PaneSignals()
     pane = _capture_pane(socket_path, tmux_target)
     return PaneSignals(
@@ -7768,12 +7827,12 @@ def dismiss_btw_overlay(bridge_dir: Path) -> bool:
         ``/tmp/omnigent/claude-native/<digest>``.
     :returns: True when an Escape was sent, False when no overlay was shown.
     """
-    payload = _read_json_file(bridge_dir / _TMUX_FILE)
+    payload = _read_terminal_info(bridge_dir)
     if not isinstance(payload, dict):
         return False
     socket_path = payload.get("socket_path")
     tmux_target = payload.get("tmux_target")
-    if not isinstance(socket_path, str) or not isinstance(tmux_target, str):
+    if not isinstance(socket_path, (str, ConPTYControlTarget)) or not isinstance(tmux_target, str):
         return False
     if not _btw_overlay_present(_capture_pane(socket_path, tmux_target)):
         return False

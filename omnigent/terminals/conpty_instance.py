@@ -25,6 +25,7 @@ from omnigent.inner.terminal import (
 )
 from omnigent.terminals import conpty
 from omnigent.terminals.attach_target import ConPTYAttachTarget
+from omnigent.terminals.terminal_control import TerminalControlServer
 
 _KEYS = {
     "Enter": "\r",
@@ -64,6 +65,22 @@ class ConPTYTerminalInstance(TerminalInstance):
     """Adapt an owned ConPTY session to the managed terminal contract."""
 
     _session: conpty.ConPTYSession | None = None
+    _control_server: TerminalControlServer | None = None
+
+    def publish_control_target(self, bridge_dir: Path) -> None:
+        """Advertise this generation privately, outside resource metadata."""
+        if self._session is None or not self._session.alive:
+            raise RuntimeError("Windows terminal is not running")
+        if self._control_server is None:
+            server = TerminalControlServer(self._session)
+            try:
+                server.advertise(bridge_dir)
+            except Exception:
+                server.close()
+                raise
+            self._control_server = server
+        else:
+            self._control_server.advertise(bridge_dir)
 
     @property
     def attach_target(self) -> ConPTYAttachTarget:
@@ -158,6 +175,8 @@ class ConPTYTerminalInstance(TerminalInstance):
         self.conversation_link = conversation_link
 
     async def close(self) -> None:
+        if self._control_server is not None:
+            await asyncio.to_thread(self._control_server.close)
         await self._stop_idle_watcher()
         await asyncio.to_thread(self._stop_idle_watcher_thread)
         if self._session is not None:

@@ -136,16 +136,16 @@ def _publish_tmux_target_for_bridge(
     session_key: str,
 ) -> None:
     """
-    Advertise a launched terminal's tmux target to a bridge directory.
+    Advertise a launched terminal's private control target to a bridge directory.
 
     Called from the terminal-launch POST when the caller opts in via
     truthy ``bridge_inject_dir`` in the body. The destination path is
     derived from a server-side bridge id, so a caller can't redirect
     the write.
 
-    The ``claude-native`` harness reads ``tmux.json`` from the derived
-    directory and shells out to ``tmux -S <socket> send-keys``. No-op
-    if the registry has no live instance for the triple.
+    ConPTY advertises a generation-bound, account-protected capability;
+    POSIX retains ``tmux.json``. Neither target enters resource metadata.
+    No-op if the registry has no live instance for the triple.
 
     :param resource_registry: Session resource registry that exposes
         the underlying terminal registry.
@@ -160,7 +160,16 @@ def _publish_tmux_target_for_bridge(
     if terminal_registry is None:
         return
     instance = terminal_registry.get(session_id, terminal_name, session_key)
-    if instance is None or not instance.running or instance.socket_path is None:
+    if instance is None or not instance.running:
+        return
+    from omnigent.terminals.conpty_instance import ConPTYTerminalInstance
+
+    if isinstance(instance, ConPTYTerminalInstance):
+        from omnigent.harnesses.claude_native.bridge import bridge_dir_for_bridge_id
+
+        instance.publish_control_target(bridge_dir_for_bridge_id(bridge_id))
+        return
+    if instance.socket_path is None:
         return
     # Imported here to avoid pulling Claude-native specifics into the
     # generic runner module's import-time graph.

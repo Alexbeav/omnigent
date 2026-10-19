@@ -4,6 +4,82 @@ Tracking: [PLAT-89](https://youtrack.crosstalkis.com/issue/PLAT-89), a focused
 follow-up to the broader Windows harness work in PLAT-52. Implementation starts
 from fork source `cc854a1b6` on `feature/windows-native-support`.
 
+## Claude web-message control candidate
+
+Managed ConPTY terminals now advertise a typed, generation-bound control target
+to the Claude bridge. Publication uses the actual registered instance; no tmux
+socket or executable is fabricated. The bridge's existing injection lock,
+composer checks, approval guards, literal/key controls, capture and liveness
+dispatch to this target. POSIX continues to use its existing tmux path. Windows
+never falls back to an old `tmux.json`. Tmux cost popups are unavailable on this
+path; their existing web approval card remains the response surface.
+
+`terminal_control.py` owns a per-terminal endpoint bound literally to
+`127.0.0.1`, with no environment override. It supports only literal input,
+named keys, one atomic bracketed paste, visible-screen capture, state and owned
+close. It accepts no executable, command, URL or filesystem path. The capability
+is sent only in the Authorization header. The client connects directly to the
+literal loopback address, without proxies, redirects or retries. Every request
+and response is bound to the terminal generation. Neither resource metadata
+nor diagnostic representations contain the capability.
+
+| Resource | Bound |
+| --- | --- |
+| Serving workers / active connections | 1 / 1 per terminal |
+| Pending connection backlog | 4 |
+| Header / JSON request / JSON response | 4 KiB / 192 KiB / 1 MiB |
+| Accepted connection lifetime | 4 seconds, absolute read/write deadline |
+| Input completion wait / client operation | 1 second / 6 seconds |
+| Endpoint shutdown join / owned session close | 4 seconds / 2 seconds |
+
+Input completion means backend acceptance, not child consumption. A timed-out
+or failed write, lost response or malformed mutation response reports delivery
+uncertainty and unwinds injection. Queued input may still execute; the bridge
+does not replay the prompt or submit after that uncertainty. The existing
+verified-draft submit behavior remains after acknowledged operations.
+
+A server-side uncertain write or failed mutation response latches subsequent
+endpoint input off for that generation. Capture, state and owned close remain
+available. This also refuses buffered re-delivery by the existing Claude
+live-message callback, which otherwise retains failed injections. Recovery
+requires explicit inspection and terminal replacement; higher-level handling
+of those buffered messages and client-only lost acknowledgements still needs
+the parent's integration review. Do not claim exactly-once GUI delivery from
+portable transport acceptance.
+
+`control_metadata.py` seals the **entire** Windows target record using
+[current-user DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata),
+with UI forbidden, machine scope disabled and bridge-directory context binding.
+This is the OS-bound alternative to an owner+SYSTEM ACL boundary; chmod and
+inherited Windows ACLs are not treated as evidence of privacy. Protection
+failure, plaintext Windows records, invalid targets and redirected paths are
+refused. No existing path's ACL is changed. Same-account processes remain in
+the trust boundary; access by an administrator with the account's keys is not
+excluded. A different-account Windows probe is still required.
+
+Endpoint revocation happens before advertisement removal and terminal cleanup,
+including when owned process cleanup fails. A retained old target cannot adopt
+a replacement generation. Cleanup removes only advertisements still naming
+that endpoint, preserving a newer advertisement in the same bridge directory.
+
+Portable tests use the existing ConPTY driver and composer fixtures with real
+loopback requests. They cover runner adoption, guarded web-message submission,
+atomic Unicode/multiline paste, capture, interrupt, close, malformed and stale
+requests, input uncertainty, bounded framing and deadlines, proxy/redirect
+refusal, revocation and failed cleanup. A Windows-only test exercises actual
+DPAPI roundtrip, tampering and directory binding. Portable tests do not qualify
+Windows cryptography, the real Claude GUI, or browser-to-Claude delivery.
+
+Before integration, the parent must qualify those Windows boundaries and
+obtain the joint source review of this new authentication/lifecycle delta. On
+the isolated Windows GUI candidate, send a Unicode multiline web message,
+confirm exactly one submission in the same Claude session, interrupt a turn,
+then close the terminal and confirm its old capability is rejected. Repeat
+with a parked approval: the web message must send no terminal input. Check
+DPAPI account separation with a second Windows identity, and retain the
+existing fresh/resume provider-turn evidence separately. Global Windows
+harness readiness remains OFF.
+
 ## First increment: explain platform availability
 
 The Windows host reports `unsupported-platform` for native terminal harnesses.

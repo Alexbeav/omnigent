@@ -16,6 +16,7 @@ from omnigent.terminals import conpty, conpty_instance
 from omnigent.terminals.attach_target import ConPTYAttachTarget
 from omnigent.terminals.conpty_screen import ConPTYScreen
 from omnigent.terminals.registry import TerminalListEntry, TerminalRegistry
+from omnigent.terminals.terminal_control import CONTROL_FILE, TerminalControlError, request_control
 from tests.terminals.test_conpty import _Driver
 
 
@@ -178,3 +179,42 @@ def test_native_resource_metadata_has_no_tmux_socket(tmp_path: Path) -> None:
     )
     view = terminal_resource_view("conv", TerminalListEntry("shell", "main", instance))
     assert view.metadata["tmux_socket"] is None
+
+
+def test_control_capability_is_private_and_revoked_before_failed_owned_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    driver = _Driver()
+    _candidate(monkeypatch, driver)
+    created = conpty_instance.create_conpty_instance(
+        "claude",
+        "main",
+        TerminalEnvSpec(
+            command="fixture.exe",
+            inherit_env=False,
+            os_env=OSEnvSpec(cwd=str(tmp_path), sandbox=OSEnvSandboxSpec(type="none")),
+        ),
+    )
+    instance = created.instance
+    asyncio.run(instance.launch(cwd=tmp_path))
+    instance.publish_control_target(tmp_path)
+    target = instance._control_server.target
+    payload = terminal_resource_view("fixture", TerminalListEntry("claude", "main", instance))
+    assert target.token not in str(payload) and "terminal-control" not in str(payload)
+    original = driver.terminate
+
+    def fail_after_revocation():
+        with pytest.raises(TerminalControlError):
+            request_control(target, "state")
+        assert not (tmp_path / CONTROL_FILE).exists()
+        raise RuntimeError("owned cleanup refused")
+
+    monkeypatch.setattr(driver, "terminate", fail_after_revocation)
+    try:
+        with pytest.raises(conpty.ConPTYError):
+            asyncio.run(instance.close())
+        assert instance.private_dir.exists() and not driver.closed
+    finally:
+        monkeypatch.setattr(driver, "terminate", original)
+        asyncio.run(instance.close())
+    assert driver.closed and not instance.private_dir.exists()
