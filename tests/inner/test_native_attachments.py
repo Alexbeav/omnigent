@@ -411,6 +411,36 @@ def test_materialize_cache_does_not_overwrite_when_both_names_taken(
     assert (attachments_dir / f"archive_{digest}.zip").read_bytes() == b"second"
 
 
+@pytest.mark.windows_only
+@pytest.mark.parametrize(
+    "filename", ["NUL.png", "CON", "photo.png:private", "photo.png.", "photo.png "]
+)
+def test_materialize_windows_refuses_devices_and_alternate_streams(
+    tmp_path: Path, filename: str
+) -> None:
+    assert materialize_attachment(_zip_block(filename), tmp_path) is None
+    assert not attachment_cache_dir(tmp_path).exists()
+
+
+@pytest.mark.windows_only
+def test_materialize_windows_refuses_junctioned_cache_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    monkeypatch.setenv("OMNIGENT_DATA_DIR", str(tmp_path / "data"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = attachment_cache_dir(tmp_path).parent
+    root.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["cmd.exe", "/c", "mklink", "/J", str(root), str(outside)], check=True, capture_output=True
+    )
+
+    assert materialize_attachment(_zip_block(), tmp_path) is None
+    assert list(outside.iterdir()) == []
+
+
 def test_attachment_cache_isolates_sessions_and_leaves_git_workspace_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

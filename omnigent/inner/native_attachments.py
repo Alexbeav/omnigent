@@ -183,6 +183,14 @@ def materialize_attachment(block: Mapping[str, object], bridge_dir: Path) -> Pat
         return None
 
     attachments_dir = attachment_cache_dir(bridge_dir)
+    if os.name == "nt":
+        from omnigent.inner.windows_attachments import materialize_windows_attachment
+
+        try:
+            return materialize_windows_attachment(attachments_dir, filename, raw_bytes)
+        except OSError:
+            _logger.warning("Failed to materialize attachment %s", filename, exc_info=True)
+            return None
     try:
         attachments_dir.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         root_fd = os.open(attachments_dir.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
