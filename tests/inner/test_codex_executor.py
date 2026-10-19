@@ -5025,11 +5025,13 @@ def test_declared_passthrough_reads_sandbox_env_passthrough():
     assert _declared_passthrough(OSEnvSpec(sandbox=OSEnvSandboxSpec(type="none"))) == ()
 
 
-def test_find_codex_cli_delegates_to_shared_resolver(monkeypatch):
+@pytest.mark.parametrize("windows", [False, True])
+def test_find_codex_cli_delegates_to_shared_resolver(monkeypatch, windows):
     """``_find_codex_cli`` resolves codex via the shared resolver with the
     OMNIGENT_CODEX_PATH override. (The resolver's own PATH/override/fallback
     behavior is covered in tests/inner/test_proc_and_platform.py.)"""
     from omnigent.inner import codex_executor as ce
+    from omnigent.native import codex_binary
 
     captured = {}
 
@@ -5038,9 +5040,19 @@ def test_find_codex_cli_delegates_to_shared_resolver(monkeypatch):
         captured["env_var"] = env_var
         return "/opt/homebrew/bin/codex"
 
+    def fake_native(*, which):
+        captured["which"] = which
+        return "C:/tools/codex.exe"
+
+    monkeypatch.setattr(ce._platform, "IS_WINDOWS", windows)
     monkeypatch.setattr(ce, "resolve_cli_binary", fake_resolve)
-    assert ce._find_codex_cli() == "/opt/homebrew/bin/codex"
-    assert captured == {"name": "codex", "env_var": "OMNIGENT_CODEX_PATH"}
+    monkeypatch.setattr(codex_binary, "resolve_native_codex_binary", fake_native)
+    assert ce._find_codex_cli() == ("C:/tools/codex.exe" if windows else "/opt/homebrew/bin/codex")
+    assert captured == (
+        {"which": ce.shutil.which}
+        if windows
+        else {"name": "codex", "env_var": "OMNIGENT_CODEX_PATH"}
+    )
 
 
 class TestCodexAppServerSessionHomeStaging(unittest.TestCase):

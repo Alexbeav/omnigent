@@ -894,7 +894,9 @@ def harness_cli_version_satisfies(key: str) -> bool:
     return _harness_cli_version_satisfies(spec, binary)
 
 
-def harness_cli_installed(key: str, timeout: float = _DEFAULT_CLI_PROBE_TIMEOUT_S) -> bool:
+def harness_cli_installed(
+    key: str, timeout: float = _DEFAULT_CLI_PROBE_TIMEOUT_S, *, binary: str | None = None
+) -> bool:
     """Return whether the harness's CLI is present and meets its version range.
 
     "Installed" now means the CLI binary (:func:`resolve_cli_binary`) is
@@ -909,6 +911,8 @@ def harness_cli_installed(key: str, timeout: float = _DEFAULT_CLI_PROBE_TIMEOUT_
     :param timeout: Seconds to wait for the ``--version`` probe subprocess,
         e.g. ``10.0`` on the readiness path where a hung CLI must not stall
         the refresh.
+    :param binary: An already resolved native executable to probe instead of
+        looking up the install spec's CLI again.
     :returns: ``True`` when the CLI resolves and is version-compatible;
         ``False`` when it doesn't resolve, the key has no associated CLI,
         or its version falls outside the declared range.
@@ -916,7 +920,8 @@ def harness_cli_installed(key: str, timeout: float = _DEFAULT_CLI_PROBE_TIMEOUT_
     spec = harness_install_spec(key)
     if spec is None:
         return False
-    binary = resolve_cli_binary(spec.binary)
+    if binary is None:
+        binary = resolve_cli_binary(spec.binary)
     if binary is None:
         return False
     return _harness_cli_version_satisfies(spec, binary, timeout)

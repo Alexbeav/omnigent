@@ -1449,6 +1449,26 @@ def test_the_codex_launch_floor_accepts_the_ci_pinned_cli(
     assert hi.harness_cli_installed(OPENAI_FAMILY) is True
 
 
+@pytest.mark.parametrize("version, expected", [("0.0.1", False), ("0.139.0", True)])
+def test_version_probe_uses_a_selected_native_binary_without_resolving_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, version: str, expected: bool
+) -> None:
+    binary = str(tmp_path / "selected.exe")
+    probes = []
+
+    def unexpected_lookup(name: str) -> str | None:
+        pytest.fail(f"The selected native binary was replaced by a lookup for {name}")
+
+    def probe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        probes.append((argv, kwargs["timeout"]))
+        return subprocess.CompletedProcess(argv, 0, stdout=f"codex-cli {version}\n", stderr="")
+
+    monkeypatch.setattr(hi, "resolve_cli_binary", unexpected_lookup)
+    monkeypatch.setattr(hi.subprocess, "run", probe)
+    assert hi.harness_cli_installed(OPENAI_FAMILY, 1.25, binary=binary) is expected
+    assert probes == [([binary, "--version"], 1.25)]
+
+
 def test_the_kimi_floor_accepts_the_cli_this_spec_installs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

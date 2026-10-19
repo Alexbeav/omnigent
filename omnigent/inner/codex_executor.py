@@ -39,6 +39,7 @@ from typing import Any, Protocol, TypeAlias, cast
 
 from packaging.version import InvalidVersion, Version
 
+from omnigent import _platform
 from omnigent._platform import resolve_cli_binary
 from omnigent.errors import HarnessTransportClosedError
 from omnigent.harnesses.codex_egress import (
@@ -575,6 +576,10 @@ _CODEX_PATH_ENV = "OMNIGENT_CODEX_PATH"
 
 def _find_codex_cli() -> str | None:
     """Resolve the ``codex`` CLI binary (override → ``PATH`` → global dirs)."""
+    if _platform.IS_WINDOWS:
+        from omnigent.native.codex_binary import resolve_native_codex_binary
+
+        return resolve_native_codex_binary(which=shutil.which)
     return resolve_cli_binary("codex", env_var=_CODEX_PATH_ENV)
 
 

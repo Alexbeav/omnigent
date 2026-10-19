@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from omnigent import _platform
 from omnigent.harnesses.codex_native import app_server as codex_native_app_server
 from omnigent.harnesses.codex_native import main as codex_native
+from omnigent.inner import codex_executor
+from omnigent.onboarding import harness_install
+from omnigent.onboarding.provider_config import OPENAI_FAMILY
+from tests.native.test_codex_binary import _npm_install
 
 
 def _write_codex_auth(path: Path, payload: object) -> None:
@@ -76,6 +83,70 @@ def test_codex_auth_unavailable_reason_binary_missing(
     _point_codex_auth_check_at(monkeypatch, auth_path, binary_present=False)
 
     assert codex_native._codex_auth_unavailable_reason() == "binary-missing"
+
+
+@pytest.mark.parametrize("override", [None, "exe", "missing", "shim"])
+def test_windows_native_callers_and_readiness_use_the_same_executable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, override: str | None
+) -> None:
+    shim, _, exe = _npm_install(tmp_path / "Ελληνικά with spaces")
+    real_find = codex_native._find_codex_cli
+    _point_codex_auth_check_at(monkeypatch, tmp_path / "home" / "auth.json", binary_present=False)
+    monkeypatch.setattr(codex_native, "_find_codex_cli", real_find)
+    monkeypatch.setattr(_platform, "IS_WINDOWS", True)
+    monkeypatch.setattr(_platform.platform, "machine", lambda: "AMD64")
+    monkeypatch.setattr(_platform, "_cli_fallback_dirs", lambda: ())
+    monkeypatch.setattr(
+        _platform.shutil, "which", lambda name: str(shim) if name == "codex" else None
+    )
+    monkeypatch.delenv("OMNIGENT_CODEX_PATH", raising=False)
+    if override is not None:
+        selected = {"exe": exe, "missing": tmp_path / "absent.exe", "shim": shim}[override]
+        monkeypatch.setenv("OMNIGENT_CODEX_PATH", str(selected))
+    expected = str(exe) if override in {None, "exe"} else None
+    assert codex_native._find_codex_cli() == expected
+    assert codex_executor._find_codex_cli() == expected
+
+    probes = []
+
+    def probe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        probes.append((argv, kwargs["timeout"]))
+        return subprocess.CompletedProcess(argv, 0, stdout="codex-cli 0.139.0\n", stderr="")
+
+    def unexpected_lookup(name: str) -> str | None:
+        pytest.fail(f"The version probe re-resolved {name}")
+
+    monkeypatch.setattr(harness_install.subprocess, "run", probe)
+    monkeypatch.setattr(harness_install, "resolve_cli_binary", unexpected_lookup)
+    assert codex_native._codex_auth_unavailable_reason() == (
+        "needs-auth" if expected else "binary-missing"
+    )
+    assert probes == (
+        [([expected, "--version"], harness_install.READINESS_CLI_PROBE_TIMEOUT_S)]
+        if expected
+        else []
+    )
+
+
+def test_posix_native_lookup_preserves_the_install_spec_and_which(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = harness_install.harness_install_spec(OPENAI_FAMILY)
+    assert spec is not None
+    monkeypatch.setattr(_platform, "IS_WINDOWS", False)
+    monkeypatch.setattr(
+        harness_install, "harness_install_spec", lambda key: replace(spec, binary="custom-codex")
+    )
+    monkeypatch.setenv("OMNIGENT_CODEX_PATH", "/another/override")
+    seen = []
+
+    def lookup(name: str) -> str | None:
+        seen.append(name)
+        return "/installed/custom-codex" if name == "custom-codex" else None
+
+    monkeypatch.setattr(codex_native.shutil, "which", lookup)
+    assert codex_native._find_codex_cli() == "/installed/custom-codex"
+    assert seen == ["custom-codex"]
 
 
 def test_codex_auth_unavailable_reason_absent_auth_json_needs_auth(

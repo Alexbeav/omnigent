@@ -225,13 +225,17 @@ def _codex_auth_json_has_available_credential(auth_path: Path) -> bool:
 
 def _find_codex_cli() -> str | None:
     """Return the resolved path to the Codex CLI binary, if any."""
-    from omnigent._platform import resolve_cli_binary
+    from omnigent._platform import IS_WINDOWS, resolve_cli_binary
     from omnigent.onboarding.harness_install import harness_install_spec
     from omnigent.onboarding.provider_config import OPENAI_FAMILY
 
     spec = harness_install_spec(OPENAI_FAMILY)
     if spec is None:
         return None
+    if IS_WINDOWS:
+        from omnigent.native.codex_binary import resolve_native_codex_binary
+
+        return resolve_native_codex_binary(which=shutil.which)
     return resolve_cli_binary(spec.binary)
 
 
@@ -279,15 +283,22 @@ def _codex_auth_unavailable_reason() -> HarnessUnavailableReason | None:
         Token *validity* (revoked/expired refresh, an unreachable gateway) is
         not judged locally — it surfaces at the first turn via the executor.
     """
+    from omnigent._platform import IS_WINDOWS
     from omnigent.onboarding.harness_install import (
         READINESS_CLI_PROBE_TIMEOUT_S,
         harness_cli_installed,
     )
     from omnigent.onboarding.provider_config import OPENAI_FAMILY
 
-    if _find_codex_cli() is None:
+    binary = _find_codex_cli()
+    if binary is None:
         return HARNESS_BINARY_MISSING
-    if not harness_cli_installed(OPENAI_FAMILY, timeout=READINESS_CLI_PROBE_TIMEOUT_S):
+    version_ok = (
+        harness_cli_installed(OPENAI_FAMILY, timeout=READINESS_CLI_PROBE_TIMEOUT_S, binary=binary)
+        if IS_WINDOWS
+        else harness_cli_installed(OPENAI_FAMILY, timeout=READINESS_CLI_PROBE_TIMEOUT_S)
+    )
+    if not version_ok:
         return HARNESS_VERSION_TOO_LOW
     # On a host with no configured provider this may run ambient detection.
     # configured_harness_map shares one probe across all Codex aliases.
