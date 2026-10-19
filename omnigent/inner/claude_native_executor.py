@@ -125,21 +125,28 @@ class ClaudeNativeExecutor(Executor):
             return False
         try:
             async with self._inject_lock:
-                await self._inject_prompt(text, framework_notices(content))
+                await self._inject_prompt(
+                    text, framework_notices(content), preserve_delivery_outcome=True
+                )
         except InputDeliveryUncertain:
             raise
         except RuntimeError:
             return False
         return True
 
-    async def _inject_prompt(self, text: str, notices: list[str]) -> None:
+    async def _inject_prompt(
+        self, text: str, notices: list[str], *, preserve_delivery_outcome: bool = False
+    ) -> None:
         """Inject user text with one-shot context while holding the injection lock."""
         context_path = self._bridge_dir / CLAUDE_FRAMEWORK_CONTEXT_FILE
         context_path.unlink(missing_ok=True)
         if notices:
             context_path.write_text("\n\n".join(notices), encoding="utf-8")
         try:
-            await self._inject(partial(inject_user_message, self._bridge_dir, content=text))
+            await self._inject(
+                partial(inject_user_message, self._bridge_dir, content=text),
+                preserve_delivery_outcome=preserve_delivery_outcome,
+            )
         except BaseException:
             context_path.unlink(missing_ok=True)
             raise
@@ -324,7 +331,9 @@ class ClaudeNativeExecutor(Executor):
             return
         yield TurnComplete(response=None)
 
-    async def _inject(self, operation: Callable[[], None]) -> None:
+    async def _inject(
+        self, operation: Callable[[], None], *, preserve_delivery_outcome: bool = False
+    ) -> None:
         """Drain cancelled delivery workers before releasing the pane's injection lock."""
         cancelled = threading.Event()
         with cancellable_injection(cancelled):
@@ -336,6 +345,16 @@ class ClaudeNativeExecutor(Executor):
             while not worker.done():
                 with contextlib.suppress(Exception, asyncio.CancelledError):
                     await asyncio.shield(worker)
+            if preserve_delivery_outcome:
+                try:
+                    worker.result()
+                except TmuxSessionNotAdvertised:
+                    raise asyncio.CancelledError from None
+                except (Exception, asyncio.CancelledError) as exc:
+                    raise InputDeliveryUncertain(
+                        "Terminal delivery was interrupted; inspect before retrying"
+                    ) from exc
+                return
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 worker.result()
             self._reap_failed_turn()

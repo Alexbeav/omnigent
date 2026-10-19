@@ -2191,6 +2191,69 @@ async def test_watch_injections_emits_consumed_marker_on_accept(delivery: str) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("delivery", ["accepted", "uncertain", "not_advertised"])
+async def test_watcher_teardown_preserves_drained_native_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delivery: str
+) -> None:
+    """Turn completion during steering must not replay an already attempted message."""
+    import asyncio
+    import threading
+
+    from omnigent.errors import InputDeliveryUncertain
+    from omnigent.inner import claude_native_executor
+    from omnigent.runtime.harnesses._executor_adapter import ExecutorAdapter
+    from omnigent.server.schemas import CreateResponseRequest, InjectionConsumedEvent
+
+    started, release = threading.Event(), threading.Event()
+
+    def inject(*args: Any, **kwargs: Any) -> None:
+        started.set()
+        assert release.wait(5)
+        if delivery == "uncertain":
+            raise InputDeliveryUncertain("private delivery diagnostic")
+        if delivery == "not_advertised":
+            raise claude_native_executor.TmuxSessionNotAdvertised("no terminal")
+
+    monkeypatch.setattr(claude_native_executor, "inject_user_message", inject)
+    monkeypatch.setattr(claude_native_executor, "_session_is_active", lambda *args: True)
+    executor = claude_native_executor.ClaudeNativeExecutor(tmp_path)
+    adapter = ExecutorAdapter(executor_factory=lambda: executor, session_key="sk")
+    ctx = _OneInjectionCtx(
+        CreateResponseRequest(model="m", input="steer me", injection_id="inj_x")
+    )
+    task = asyncio.create_task(adapter._watch_injections(ctx, executor))  # type: ignore[arg-type]
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert executor._inject_lock.locked()
+        task.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        if delivery == "not_advertised":
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 2)
+        else:
+            await asyncio.wait_for(task, 2)
+        assert not executor._inject_lock.locked()
+        markers = [event for event in ctx.emitted if isinstance(event, InjectionConsumedEvent)]
+        if delivery == "not_advertised":
+            assert ctx.emitted == []
+        else:
+            assert len(markers) == 1
+            assert markers[0].injection_id == "inj_x"
+            assert len(ctx.emitted) == (2 if delivery == "uncertain" else 1)
+            assert "private delivery diagnostic" not in str(ctx.emitted)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
 async def test_watch_injections_drops_injection_when_turn_cancelled() -> None:
     """A queued injection is dropped if the turn was interrupted.
 

@@ -768,6 +768,8 @@ class ExecutorAdapter(HarnessApp):
                         },
                     )
                 )
+                if (task := asyncio.current_task()) is not None and task.cancelling():
+                    return
                 continue
             except Exception:
                 _logger.exception(
@@ -790,6 +792,8 @@ class ExecutorAdapter(HarnessApp):
                         injection_id=injection_id,
                     )
                 )
+            if (task := asyncio.current_task()) is not None and task.cancelling():
+                return
 
     async def _stable_tool_executor(
         self,
