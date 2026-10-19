@@ -31,6 +31,7 @@ import logging
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from importlib.util import find_spec
 from pathlib import Path
 
 import omnigent.onboarding.gemini_auth as _gemini_auth
@@ -218,6 +219,31 @@ def _install_key(canonical: str) -> str:
     return _HARNESS_FAMILY.get(canonical) or PI_KEY
 
 
+def _windows_native_dependencies_available() -> bool:
+    """Check the opt-in terminal runtime without starting a CLI or terminal."""
+    try:
+        return all(find_spec(module) is not None for module in ("winpty", "pyte"))
+    except (ImportError, ValueError):
+        return False
+
+
+def _windows_native_pilot_selected(canonical: str) -> bool:
+    """Allow only explicitly selected Claude/Codex pilots on the native runtime."""
+    if canonical in {"native-claude", "native-codex"}:
+        canonical = canonical.removeprefix("native-") + "-native"
+    if canonical not in {"claude-native", "codex-native"}:
+        return False
+    if os.environ.get("OMNIGENT_WINDOWS_NATIVE_TERMINALS") != "1":
+        return False
+    selected = {
+        _canonical_harness(value.strip())
+        for value in os.environ.get("OMNIGENT_WINDOWS_NATIVE_HARNESSES", "").split(",")
+        if value.strip()
+    }
+    aliases = {canonical, "native-" + canonical.removesuffix("-native")}
+    return bool(aliases & selected) and _windows_native_dependencies_available()
+
+
 def _harness_availability_core(harness: str) -> HarnessAvailability:
     """Return the detailed availability state for *harness*.
 
@@ -234,8 +260,12 @@ def _harness_availability_core(harness: str) -> HarnessAvailability:
     """
     canonical = _canonical_harness(harness)
     if IS_WINDOWS and canonical in NATIVE_HARNESSES:
-        # Native harnesses require tmux/PTY, which the runner does not support on Windows.
-        return HARNESS_UNSUPPORTED_PLATFORM
+        if not _windows_native_pilot_selected(canonical):
+            return HARNESS_UNSUPPORTED_PLATFORM
+        if canonical in CODEX_CANONICAL_HARNESSES:
+            from omnigent.harnesses.codex_native.main import _codex_auth_unavailable_reason
+
+            return _codex_auth_unavailable_reason() or True
     if canonical == "acp":
         # The generic ACP harness has no fixed binary — "configured" means at
         # least one agent is registered in the ``acp:`` config block. Each
@@ -953,7 +983,11 @@ def _cli_family_availability(canonical: str, install_key: str) -> HarnessAvailab
 
 def _harness_availability(canonical: str) -> HarnessAvailability:
     """Return picker-facing availability for one canonical harness spelling."""
-    if IS_WINDOWS and canonical in NATIVE_HARNESSES:
+    if (
+        IS_WINDOWS
+        and canonical in NATIVE_HARNESSES
+        and not _windows_native_pilot_selected(canonical)
+    ):
         return HARNESS_UNSUPPORTED_PLATFORM
     if _is_codex_family_harness(canonical):
         from omnigent.harnesses.codex_native.main import _codex_auth_unavailable_reason

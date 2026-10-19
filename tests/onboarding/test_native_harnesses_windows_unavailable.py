@@ -15,6 +15,8 @@ from omnigent.harness_aliases import NATIVE_HARNESSES
 @pytest.fixture(autouse=True)
 def _isolate_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("OMNIGENT_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("OMNIGENT_WINDOWS_NATIVE_TERMINALS", raising=False)
+    monkeypatch.delenv("OMNIGENT_WINDOWS_NATIVE_HARNESSES", raising=False)
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     for var in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
         monkeypatch.delenv(var, raising=False)
@@ -86,3 +88,62 @@ def test_sdk_harnesses_remain_available_on_windows(
 
     for sdk_harness in ("claude-sdk", "claude_sdk", "openai-agents", "openai-agents-sdk"):
         assert result.get(sdk_harness) is True
+
+
+@pytest.mark.parametrize(
+    "selection, expected",
+    [
+        ("codex-native", {"codex-native", "native-codex"}),
+        ("claude-native", {"claude-native", "native-claude"}),
+        (
+            "native-codex, claude-native, pi-native",
+            {"codex-native", "native-codex", "claude-native", "native-claude"},
+        ),
+    ],
+)
+def test_windows_pilot_exposes_only_selected_core_harnesses(
+    monkeypatch: pytest.MonkeyPatch, selection: str, expected: set[str]
+) -> None:
+    _all_clis_installed(monkeypatch)
+    monkeypatch.setattr(readiness, "IS_WINDOWS", True)
+    monkeypatch.setattr(readiness, "_windows_native_dependencies_available", lambda: True)
+    monkeypatch.setattr(
+        "omnigent.harnesses.codex_native.main._codex_auth_unavailable_reason", lambda: None
+    )
+    monkeypatch.setenv("OMNIGENT_WINDOWS_NATIVE_TERMINALS", "1")
+    monkeypatch.setenv("OMNIGENT_WINDOWS_NATIVE_HARNESSES", selection)
+    result = readiness.configured_harness_map()
+    for harness in NATIVE_HARNESSES:
+        assert result[harness] == (True if harness in expected else "unsupported-platform")
+        assert readiness.harness_is_configured(harness) is (harness in expected)
+
+
+@pytest.mark.parametrize("transport, dependencies", [("", True), ("1", False)])
+def test_windows_pilot_requires_transport_and_its_runtime(
+    monkeypatch: pytest.MonkeyPatch, transport: str, dependencies: bool
+) -> None:
+    _all_clis_installed(monkeypatch)
+    monkeypatch.setattr(readiness, "IS_WINDOWS", True)
+    monkeypatch.setattr(readiness, "_windows_native_dependencies_available", lambda: dependencies)
+    monkeypatch.setenv("OMNIGENT_WINDOWS_NATIVE_TERMINALS", transport)
+    monkeypatch.setenv("OMNIGENT_WINDOWS_NATIVE_HARNESSES", "codex-native,claude-native")
+    for harness in ("codex-native", "claude-native"):
+        assert readiness._harness_availability(harness) == "unsupported-platform"
+        assert not readiness.harness_is_configured(harness)
+
+
+@pytest.mark.parametrize("reason", ["binary-missing", "version-too-low", "needs-auth"])
+@pytest.mark.parametrize("harness", ["codex-native", "native-codex"])
+def test_windows_pilot_preserves_selected_codex_readiness_failures(
+    monkeypatch: pytest.MonkeyPatch, reason: str, harness: str
+) -> None:
+    monkeypatch.setattr(readiness, "IS_WINDOWS", True)
+    monkeypatch.setattr(readiness, "_windows_native_dependencies_available", lambda: True)
+    monkeypatch.setattr(
+        "omnigent.harnesses.codex_native.main._codex_auth_unavailable_reason", lambda: reason
+    )
+    monkeypatch.setenv("OMNIGENT_WINDOWS_NATIVE_TERMINALS", "1")
+    monkeypatch.setenv("OMNIGENT_WINDOWS_NATIVE_HARNESSES", "codex-native")
+    assert readiness._harness_availability(harness) == reason
+    assert readiness._harness_availability_core(harness) == reason
+    assert not readiness.harness_is_configured(harness)

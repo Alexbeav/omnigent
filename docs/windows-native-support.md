@@ -97,6 +97,16 @@ disabled, so the switch does not enable Claude or Codex in the host picker.
 No AgentOps collector, lifecycle frame, tunnel or observation schema changes
 are part of this boundary.
 
+An isolated host pilot may additionally set
+`OMNIGENT_WINDOWS_NATIVE_HARNESSES=codex-native,claude-native`. The two switches
+are separate: the transport switch alone still leaves native harnesses
+unavailable. The allowlist accepts each provider separately and its reversed
+native alias; all other native harnesses remain unsupported. The optional
+`winpty` and `pyte` modules must be present, and normal executable, version and
+authentication checks still apply. Neither switch is enabled by default or
+applied to an existing host by installing the package. This is a qualification
+entry point, not evidence that the full Windows web workflow has passed.
+
 The transport uses pywinpty's low-level ConPTY API, with one output reader and
 one serialized input worker. It bounds replay, viewer queues and pending input;
 a stalled viewer gets a reconnect error instead of silently losing VT bytes.
