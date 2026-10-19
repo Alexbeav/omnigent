@@ -2046,6 +2046,11 @@ class CodexNativeAppServer:
             )
         self.codex_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.codex_home, 0o700)
+        if IS_WINDOWS:
+            # Let Codex initialize capability state in a file owned by this user,
+            # rather than first creating it from its elevated setup helper.
+            with contextlib.suppress(FileExistsError):
+                (self.codex_home / "cap_sid").open("xb").close()
         # A previous launch's certificate record must not fail this launch's turns.
         clear_certificate_failure(self.bridge_dir)
         if self.listen_url is None or self.listen_url.startswith("unix://"):

@@ -42,8 +42,12 @@ def test_app_server_hidden_flags_preserve_process_group(
 
 
 @pytest.mark.parametrize("process_owner", ["posix", "windows-owned", "windows-refused"])
+@pytest.mark.parametrize("existing_cap_state", [None, b"retained capability state"])
 async def test_start_reuses_initialized_readiness_client_for_hook_trust(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, process_owner: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    process_owner: str,
+    existing_cap_state: bytes | None,
 ) -> None:
     """Startup trusts hooks over the readiness connection, then closes it."""
     from omnigent.harnesses.codex_native import app_server as codex_native_app_server
@@ -55,6 +59,12 @@ async def test_start_reuses_initialized_readiness_client_for_hook_trust(
     monkeypatch.setenv("CODEX_HOME", str(source_home))
 
     async def _supported_version(_codex_path: str) -> tuple[int, int, int]:
+        if existing_cap_state is not None:
+            assert cap_state.read_bytes() == existing_cap_state
+        elif process_owner == "posix":
+            assert not cap_state.exists()
+        else:
+            assert cap_state.read_bytes() == b""
         return (0, 147, 0)
 
     startup_client = _FakeStartupClient()
@@ -83,6 +93,10 @@ async def test_start_reuses_initialized_readiness_client_for_hook_trust(
         tmp_path / "bridge",
         workspace,
     )
+    cap_state = server.codex_home / "cap_sid"
+    if existing_cap_state is not None:
+        server.codex_home.mkdir(exist_ok=True)
+        cap_state.write_bytes(existing_cap_state)
 
     if process_owner == "windows-refused":
         with pytest.raises(RuntimeError, match="ownership was not established"):
