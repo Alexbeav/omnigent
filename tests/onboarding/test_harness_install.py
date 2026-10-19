@@ -1450,9 +1450,12 @@ def test_the_codex_launch_floor_accepts_the_ci_pinned_cli(
 
 
 @pytest.mark.parametrize("version, expected", [("0.0.1", False), ("0.139.0", True)])
+@pytest.mark.parametrize("windows", [False, True])
 def test_version_probe_uses_a_selected_native_binary_without_resolving_again(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, version: str, expected: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, version: str, expected: bool, windows: bool
 ) -> None:
+    monkeypatch.setattr(hi, "IS_WINDOWS", windows)
+    monkeypatch.setattr(hi.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     binary = str(tmp_path / "selected.exe")
     probes = []
 
@@ -1461,6 +1464,8 @@ def test_version_probe_uses_a_selected_native_binary_without_resolving_again(
 
     def probe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         probes.append((argv, kwargs["timeout"]))
+        assert kwargs["encoding"] == "utf-8" and kwargs["errors"] == "replace"
+        assert kwargs["creationflags"] == (0x08000000 if windows else 0)
         return subprocess.CompletedProcess(argv, 0, stdout=f"codex-cli {version}\n", stderr="")
 
     monkeypatch.setattr(hi, "resolve_cli_binary", unexpected_lookup)

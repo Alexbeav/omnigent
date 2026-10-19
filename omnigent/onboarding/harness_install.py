@@ -48,7 +48,7 @@ from typing import NamedTuple
 
 from packaging.version import InvalidVersion, Version
 
-from omnigent._platform import resolve_cli_binary
+from omnigent._platform import IS_WINDOWS, resolve_cli_binary
 from omnigent.acp_cli_harnesses import ACP_CLI_HARNESSES
 from omnigent.cli_invocation import cli_invocation
 from omnigent.harness_install_spec import HarnessInstallSpec, SetupStep
@@ -991,6 +991,9 @@ def _harness_cli_version_string(
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0,
             timeout=timeout,
             check=False,
         )
