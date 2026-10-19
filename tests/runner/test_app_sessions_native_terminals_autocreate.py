@@ -1068,8 +1068,10 @@ async def test_auto_create_pi_terminal_inherits_agent_sandbox(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("use_envelope", [False, True], ids=["legacy", "envelope"])
+@pytest.mark.parametrize("windows", [False, True])
 async def test_auto_create_claude_terminal_passes_session_effort(
     use_envelope: bool,
+    windows: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -1085,6 +1087,7 @@ async def test_auto_create_claude_terminal_passes_session_effort(
     :param tmp_path: Pytest-provided temporary directory.
     :param monkeypatch: Pytest monkeypatch fixture.
     """
+    monkeypatch.setattr("omnigent.runner.native.orchestration.IS_WINDOWS", windows)
     monkeypatch.setattr(claude_native_bridge, "_TRUSTED_PARENT", tmp_path)
     monkeypatch.setattr(claude_native_bridge, "_BRIDGE_ROOT", tmp_path / "root")
     monkeypatch.setenv("RUNNER_SERVER_URL", "http://127.0.0.1:8000")
@@ -1157,6 +1160,11 @@ async def test_auto_create_claude_terminal_passes_session_effort(
     args = captured["spec"].args
     assert captured["spec"].os_env.cwd == str(workspace)
     assert captured["spec"].command == "workspace-claude"
+    assert captured["spec"].scrollback == (10_000 if windows else 50_000)
+    if windows:
+        from omnigent.terminals.conpty_screen import ConPTYScreen
+
+        ConPTYScreen(scrollback=captured["spec"].scrollback)
     assert "--effort" in args
     effort_idx = args.index("--effort")
     assert args[effort_idx + 1] == "high"
@@ -4295,15 +4303,19 @@ class _RecordingCodexRegistry:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("windows", [False, True])
 async def test_codex_tui_launch_reads_project_config_from_session_workspace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    windows: bool,
 ) -> None:
     """A Codex TUI relaunch reads the session workspace's config after the runner cwd is gone."""
     from omnigent.runner.native.orchestration import (
         _CodexNativeLaunchConfig,
         _launch_codex_native_tui,
     )
+
+    monkeypatch.setattr("omnigent.runner.native.orchestration.IS_WINDOWS", windows)
 
     workspace = tmp_path / "workspace"
     (workspace / ".omnigent").mkdir(parents=True)
@@ -4351,6 +4363,12 @@ async def test_codex_tui_launch_reads_project_config_from_session_workspace(
     assert spec.command == "workspace-codex"
     assert spec.args[0] == "--workspace-arg"
     assert spec.os_env.cwd == str(workspace)
+    assert spec.scrollback == (10_000 if windows else 100_000)
+    assert spec.tmux_allow_passthrough is not windows
+    if windows:
+        from omnigent.terminals.conpty_screen import ConPTYScreen
+
+        ConPTYScreen(scrollback=spec.scrollback)
 
 
 @pytest.mark.asyncio

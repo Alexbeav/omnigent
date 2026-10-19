@@ -4686,12 +4686,12 @@ async def _launch_codex_native_tui(
             args=codex_launch_args,
             env=codex_terminal_env(app_server),
             # Match the local ``omnigent codex`` terminal scrollback.
-            scrollback=100_000,
+            scrollback=10_000 if IS_WINDOWS else 100_000,
             # Preserve the final frame and exit status until lifecycle cleanup.
             keep_alive_after_exit=True,
             # Enable tmux passthrough so the Codex TUI's escape sequences
             # reach the web xterm.
-            tmux_allow_passthrough=True,
+            tmux_allow_passthrough=not IS_WINDOWS,
             # Let the initial render settle detached so attaching over the
             # runner tunnel does not starve its heartbeat with startup traffic.
             tmux_start_on_attach=False,
@@ -9025,7 +9025,7 @@ async def _auto_create_claude_terminal(
         # ``ANTHROPIC_BASE_URL`` / ``apiKeyHelper``), so this affects only MCPs;
         # ones needing a specific profile must set it in their own per-MCP env.
         env_unset=claude_terminal_env_unset,
-        scrollback=50000,
+        scrollback=10_000 if IS_WINDOWS else 50_000,
         # Keep the private tmux server alive if the `claude` CLI exits (e.g. a
         # sub-agent worker whose CLI exits right after rendering its prompt on
         # some hosts — #540). Without this, that exit reaps the server and every
