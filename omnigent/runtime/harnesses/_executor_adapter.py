@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import Response
 
 from omnigent.debug_logging import phase_scope
-from omnigent.errors import ElicitationDeclinedError, ErrorPhase
+from omnigent.errors import ElicitationDeclinedError, ErrorPhase, InputDeliveryUncertain
 from omnigent.inner.executor import (
     CompactionComplete,
     CompactionStarted,
@@ -741,6 +741,34 @@ class ExecutorAdapter(HarnessApp):
                         session_id=ctx.session_id,
                         outcome="executor_accepted" if accepted else "executor_refused",
                     )
+            except InputDeliveryUncertain:
+                # Drop the buffered copy even when delivery cannot be confirmed.
+                # Retaining it would silently replay it in a replacement terminal.
+                injection_id = getattr(injection, "injection_id", None)
+                if injection_id:
+                    ctx.emit(
+                        InjectionConsumedEvent(
+                            type="injection.consumed", injection_id=injection_id
+                        )
+                    )
+                ctx.emit(
+                    OutputItemDoneEvent(
+                        type="response.output_item.done",
+                        item={
+                            "id": f"err_{uuid.uuid4().hex[:12]}",
+                            "type": "error",
+                            "source": "harness",
+                            "code": "input_delivery_uncertain",
+                            "level": "info",
+                            "message": (
+                                "The terminal may have received your steering message. "
+                                "It will not be sent again automatically. "
+                                "Check the terminal before sending it again."
+                            ),
+                        },
+                    )
+                )
+                continue
             except Exception:
                 _logger.exception(
                     "inner executor.enqueue_session_message failed; in-band injection lost"

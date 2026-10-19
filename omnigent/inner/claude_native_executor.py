@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Callable
 from functools import partial
 from pathlib import Path
 
+from omnigent.errors import InputDeliveryUncertain
 from omnigent.harnesses.claude_native.bridge import (
     BRIDGE_DIR_ENV_VAR,
     CLAUDE_FRAMEWORK_CONTEXT_FILE,
@@ -125,6 +126,8 @@ class ClaudeNativeExecutor(Executor):
         try:
             async with self._inject_lock:
                 await self._inject_prompt(text, framework_notices(content))
+        except InputDeliveryUncertain:
+            raise
         except RuntimeError:
             return False
         return True

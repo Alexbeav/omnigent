@@ -2063,21 +2063,26 @@ async def test_executor_adapter_forwards_model_override_to_config() -> None:
 
 
 class _AcceptingInjectionExecutor:
-    """Inner executor stub whose enqueue_session_message always accepts."""
+    """Record the injection and simulate its delivery outcome."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, delivery: str = "accepted") -> None:
         """Record every (session_key, text) the adapter forwards."""
         self.received: list[tuple[str, Any]] = []
+        self.delivery = delivery
 
     async def enqueue_session_message(self, session_key: str, content: Any) -> bool:
         """Accept the injection and record it.
 
         :param session_key: Adapter session key.
         :param content: The injected user text.
-        :returns: Always ``True`` (consumed into the running turn).
+        :returns: Whether delivery was accepted; uncertainty raises.
         """
         self.received.append((session_key, content))
-        return True
+        if self.delivery == "uncertain":
+            from omnigent.errors import InputDeliveryUncertain
+
+            raise InputDeliveryUncertain("private terminal diagnostic")
+        return self.delivery == "accepted"
 
 
 class _OneInjectionCtx:
@@ -2122,7 +2127,8 @@ class _OneInjectionCtx:
 
 
 @pytest.mark.asyncio
-async def test_watch_injections_emits_consumed_marker_on_accept() -> None:
+@pytest.mark.parametrize("delivery", ["accepted", "refused", "uncertain"])
+async def test_watch_injections_emits_consumed_marker_on_accept(delivery: str) -> None:
     """An accepted mid-turn injection echoes an injection.consumed marker.
 
     The runner stamps an ``injection_id`` on a forwarded mid-turn message;
@@ -2135,10 +2141,15 @@ async def test_watch_injections_emits_consumed_marker_on_accept() -> None:
     """
     import asyncio as _aio
 
+    from omnigent.entities.conversation import ErrorData
     from omnigent.runtime.harnesses._executor_adapter import ExecutorAdapter
-    from omnigent.server.schemas import CreateResponseRequest, InjectionConsumedEvent
+    from omnigent.server.schemas import (
+        CreateResponseRequest,
+        InjectionConsumedEvent,
+        OutputItemDoneEvent,
+    )
 
-    executor = _AcceptingInjectionExecutor()
+    executor = _AcceptingInjectionExecutor(delivery=delivery)
     adapter = ExecutorAdapter(executor_factory=lambda: executor, session_key="sk")
     ctx = _OneInjectionCtx(
         CreateResponseRequest(model="m", input="steer me", injection_id="inj_x")
@@ -2147,7 +2158,7 @@ async def test_watch_injections_emits_consumed_marker_on_accept() -> None:
     task = _aio.create_task(adapter._watch_injections(ctx, executor))  # type: ignore[arg-type]
     try:
         for _ in range(200):
-            if ctx.emitted:
+            if ctx.emitted or executor.received:
                 break
             await _aio.sleep(0.01)
     finally:
@@ -2158,13 +2169,25 @@ async def test_watch_injections_emits_consumed_marker_on_accept() -> None:
     # The injection text reached the inner executor under the adapter's
     # session key.
     assert executor.received == [("sk", "steer me")]
+    if delivery == "refused":
+        assert ctx.emitted == []
+        return
     # Exactly one injection.consumed marker, echoing the correlation id.
     # If 0, the runner would never drop the buffered copy → duplication.
-    assert len(ctx.emitted) == 1, f"expected one consumed marker, got {ctx.emitted!r}"
+    assert len(ctx.emitted) == (2 if delivery == "uncertain" else 1)
     marker = ctx.emitted[0]
     assert isinstance(marker, InjectionConsumedEvent)
     assert marker.type == "injection.consumed"
     assert marker.injection_id == "inj_x"
+    if delivery == "uncertain":
+        notice = ctx.emitted[1]
+        assert isinstance(notice, OutputItemDoneEvent)
+        assert notice.item["type"] == "error"
+        data = ErrorData.model_validate(notice.item)
+        assert data.code == "input_delivery_uncertain"
+        assert data.level == "info"
+        assert "not be sent again automatically" in data.message
+        assert "private terminal diagnostic" not in str(ctx.emitted)
 
 
 @pytest.mark.asyncio

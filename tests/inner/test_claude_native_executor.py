@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from omnigent.errors import InputDeliveryUncertain
 from omnigent.harnesses.claude_native import bridge as claude_bridge
 from omnigent.harnesses.claude_native.bridge import (
     REQUEST_SESSION_ID_ENV_VAR,
@@ -363,9 +364,11 @@ async def test_enqueue_session_message_rejects_stale_session_after_clear(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("delivery", ["accepted", "refused", "uncertain"])
 async def test_enqueue_session_message_injects_steering_into_terminal(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    delivery: str,
 ) -> None:
     """
     In-flight server messages are typed into Claude's tmux pane.
@@ -374,6 +377,7 @@ async def test_enqueue_session_message_injects_steering_into_terminal(
     harness but never reaches the native Claude Code process.
     """
     sent_messages: list[dict[str, Any]] = []
+    failure = InputDeliveryUncertain("private diagnostic")
 
     def fake_inject_user_message(
         bridge_dir_arg: Path,
@@ -391,6 +395,10 @@ async def test_enqueue_session_message_injects_steering_into_terminal(
         """
         del timeout_s
         sent_messages.append({"bridge_dir": bridge_dir_arg, "content": content})
+        if delivery == "uncertain":
+            raise failure
+        if delivery == "refused":
+            raise RuntimeError("not sent")
 
     monkeypatch.setattr(
         claude_native_executor,
@@ -399,9 +407,13 @@ async def test_enqueue_session_message_injects_steering_into_terminal(
     )
 
     executor = ClaudeNativeExecutor(tmp_path)
-    accepted = await executor.enqueue_session_message("session-key", "steer me")
-
-    assert accepted is True
+    if delivery == "uncertain":
+        with pytest.raises(InputDeliveryUncertain) as raised:
+            await executor.enqueue_session_message("session-key", "steer me")
+        assert raised.value is failure
+    else:
+        accepted = await executor.enqueue_session_message("session-key", "steer me")
+        assert accepted is (delivery == "accepted")
     # Steering injection delivers raw text only — no envelope. The
     # session_key is intentionally NOT included since there is one
     # tmux pane per conversation; mixing in routing metadata would

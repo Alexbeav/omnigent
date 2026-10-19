@@ -22,6 +22,10 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
+class InputDeliveryUncertain(RuntimeError):
+    """Input may have reached the terminal; never automatically replay it."""
+
+
 class HarnessTransportClosedError(RuntimeError):
     """A native harness channel ended; replay requires explicit safety evidence."""
 
