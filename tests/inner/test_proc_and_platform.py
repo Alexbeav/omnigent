@@ -590,6 +590,32 @@ def test_host_runner_env_lets_child_import_asyncio_and_resolve_home() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_windows_sandbox_identity_survives_runner_and_helper_filters(monkeypatch) -> None:
+    """Codex must identify the signed-in user when securing sandbox state."""
+    from omnigent.host.connect import _build_runner_env
+    from omnigent.inner.codex_executor import _clean_codex_env
+    from omnigent.inner.os_env import build_helper_env
+    from omnigent.inner.sandbox import SandboxPolicy
+
+    source = {"PATH": os.environ.get("PATH", ""), "USERNAME": "sandbox-test-user"}
+    runner_env = _build_runner_env(
+        base_env=source,
+        server_url="http://x",
+        runner_id="r1",
+        binding_token="t",
+        workspace=".",
+        parent_pid=os.getpid(),
+    )
+    policy = SandboxPolicy("windows_jobobject", True, None, [], [], True)
+    helper_env = build_helper_env(runner_env, policy)
+    with monkeypatch.context() as environment:
+        environment.setattr(os, "environ", helper_env)
+        codex_env = _clean_codex_env()
+    assert runner_env.get("USERNAME") == "sandbox-test-user"
+    assert helper_env.get("USERNAME") == "sandbox-test-user"
+    assert codex_env.get("USERNAME") == "sandbox-test-user"
+
+
 # ---------------------------------------------------------------------------
 # resolve_cli_binary — CLIs that may live off the daemon's frozen PATH
 # ---------------------------------------------------------------------------

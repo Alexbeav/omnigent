@@ -163,6 +163,7 @@ def is_wsl() -> bool:
 #:   ``expanduser("~")`` resolve (the Windows analog of POSIX ``HOME``).
 #: - ``APPDATA`` / ``LOCALAPPDATA`` are where Windows apps (keyring, pip, npm,
 #:   …) keep per-user config and cache.
+#: - ``USERNAME`` identifies the user allowed to read Codex sandbox setup state.
 #: - The rest let a Windows process and shell resolve binaries normally.
 #:
 #: All are path/identity constants, not credentials — consistent with POSIX
@@ -179,6 +180,7 @@ WINDOWS_ENV_PASSTHROUGH: tuple[str, ...] = (
     "PROCESSOR_LEVEL",
     "PROCESSOR_REVISION",
     "USERPROFILE",
+    "USERNAME",
     "HOMEDRIVE",
     "HOMEPATH",
     "APPDATA",
