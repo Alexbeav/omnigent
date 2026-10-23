@@ -24,9 +24,10 @@ and the recording protocol for comparing revisions.
 - `changes`: select a changed Markdown file, then exit diff to edit it.
 - `direct-link`: open a session URL with a selected Markdown file.
 - `chat-link`: follow a Markdown file link in a message; a line citation opens
-  Source at that line, rather than the rich editor. Right-clicking or
-  long-pressing the link offers Copy path, which copies its path (absolute
-  when the workspace root is known).
+  Source at that line, rather than the rich editor, and a range (`:12-18`,
+  `#L12-L18`) highlights every cited line. Right-clicking or long-pressing the
+  link offers Copy path, which copies its path (absolute when the workspace root
+  is known).
   Windows workspaces accept drive-letter paths, UNC paths, and `file:` links
   with spaces. They open through the owning session's authenticated filesystem
   route. Absolute paths retain the owner-only gate and the environment's grants;
@@ -47,6 +48,9 @@ Build the exact checkout and use its frozen dependency lock. The browser-contrac
 journeys below need no server: they run the production SPA with a sealed mock
 backend, a fresh browser context, and a fixed Markdown fixture. Server-backed
 journeys require an isolated verification instance.
+
+Browser fixtures show the [PDF preview](../docs/images/windows-file-links/pdf.png)
+and [Markdown preview](../docs/images/windows-file-links/markdown.png) for Windows links.
 
 ### Standard comparison journey
 

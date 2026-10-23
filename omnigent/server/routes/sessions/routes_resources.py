@@ -742,12 +742,8 @@ def register_resources_routes(
         ``C:\\Users\\...`` path would slip through at the collaborator level
         and be stopped only by the runner rejecting it further down.
 
-        Note this is the AUTHORIZATION predicate, not the wire-format one.
-        Deciding how to encode the path for the runner stays
-        ``startswith("/")``, because that is a URL question and URLs use ``/``
-        on every platform. The two can disagree only for a Windows-style
-        path, where the result is a stricter gate plus a runner-side refusal
-        — closed on both counts.
+        The wire encoder preserves Windows drive and UNC roots. Authorization
+        recognizes every platform's absolute form before choosing a transport.
 
         :param client_path: Client-supplied path; a leading ``/`` is absolute.
         :param within_workspace: Level required for a workspace-relative path.
@@ -895,8 +891,7 @@ def register_resources_routes(
 
         :param request: Incoming request, for the ``base`` query value.
         :param client_path: Path captured from the route's ``{path}``.
-        :returns: ``(absolute, path)`` — ``path`` carries a leading slash iff
-            ``absolute``.
+        :returns: ``(absolute, path)``, preserving the owning host's root syntax.
         """
         absolute = request.query_params.get("base") == "host" or client_path.startswith("/")
         if ntpath.isabs(client_path) and not client_path.startswith("/"):
@@ -2964,9 +2959,9 @@ def register_resources_routes(
         :param after: Cursor entry id for forward pagination.
         :param before: Cursor entry id for backward pagination.
         :param order: Sort order, ``"asc"`` or ``"desc"``.
-        :param download: When ``True``, stream the complete file as an
-            attachment with no size cap instead of the capped JSON
-            envelope. A directory rejects it with 400.
+        :param download: Return the complete file as an attachment. Runners
+            stream without a size cap. Windows host-served downloads reject
+            truncated previews above 10 MiB. Directories reject it with 400.
         :returns: File content or directory listing, or the raw file.
         """
         params: dict[str, str] = {"limit": str(limit), "order": order}
