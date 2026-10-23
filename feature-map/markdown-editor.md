@@ -27,6 +27,14 @@ and the recording protocol for comparing revisions.
   Source at that line, rather than the rich editor. Right-clicking or
   long-pressing the link offers Copy path, which copies its path (absolute
   when the workspace root is known).
+  Windows workspaces accept drive-letter paths, UNC paths, and `file:` links
+  with spaces. They open through the owning session's authenticated filesystem
+  route. Absolute paths retain the owner-only gate and the environment's grants;
+  recognizing a file link does not enable additional URL schemes.
+  Unconfined Windows sessions can read through their existing host connection
+  without restarting the native agent. Host-served downloads reject truncated
+  previews (the host reader caps reads at 10 MiB); runner downloads retain
+  their existing streaming transport.
 - `tool-row`: click the path on an agent's Read, Write, or Edit row for a
   Markdown file, including one the agent just created; absolute paths open too.
 - `document-link`: follow a relative file link inside the editor's link popup.
