@@ -922,6 +922,7 @@ function* processEvent(state: ReducerState, event: StreamEvent): Generator<AnyBl
             ? ctx(state, null, `${ELICITATION_RESPONSE_PREFIX}${event.elicitationId}`)
             : ctx(state),
         elicitationId: event.elicitationId,
+        ...(event.nativeDelivery ? { nativeDelivery: event.nativeDelivery } : {}),
         targetSessionId: event.targetSessionId,
         message: event.message,
         phase: event.phase,
@@ -936,6 +937,7 @@ function* processEvent(state: ReducerState, event: StreamEvent): Generator<AnyBl
         codexCommand: event.codexCommand,
         allowAllEdits: event.allowAllEdits,
         allowAutoMode: event.allowAutoMode,
+        permissionDirectories: event.permissionDirectories,
         rememberScope: event.rememberScope,
         codexPersistModes: event.codexPersistModes,
         agyPermission: event.agyPermission,

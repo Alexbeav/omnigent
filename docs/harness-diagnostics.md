@@ -188,6 +188,25 @@ their screen-only excerpt independently of this flag; the flag is not a master
 content switch for ordinary lifecycle logs. Other terminals still export no
 pane text in these event attributes.
 
+## Native startup failure context
+
+Native terminal startup failures carry bounded `failure_context` metadata on
+the existing runner status event and terminal-ensure error response. Updated
+servers retain it on the existing `session_turn_failed` record for both delivery
+paths, including when the runner's local logs are unavailable.
+
+`failure_id` matches the runner's `native_terminal_start_failed` `error_id`, and
+`failure_source` is `native_terminal_start`. `exception_type`,
+`exception_cause_type`, and `exception_context_type` name available exception
+classes. `native_launch_os_errno`, `native_launch_os_errno_name`, and
+`native_launch_winerror` preserve available OS facts from the bounded cause
+chain. Missing fields mean unavailable evidence. These fields contain no raw
+exception messages, paths, arguments, or pane output.
+
+Older runners can omit the context; malformed and unknown fields are ignored.
+The context does not change error codes, display text, status handling, or
+retry policy, and does not add failure records.
+
 ## Codex startup failure snapshot
 
 When a fresh native Codex session's TUI exits, thread discovery times out, or
@@ -269,6 +288,19 @@ error reporting, so this row precedes the session's `native_terminal_start_faile
 error or the CLI's startup error. Cancellation emits no event. If the collector
 fails, the row carries `diagnostics_error_type` instead of the snapshot; a
 logging failure cannot replace the startup error or skip teardown.
+
+When the readiness budget expires while the spawned process is still alive and
+has never accepted a probe, `start()` instead emits
+`event_name=codex_app_server_silent_start_respawn` at WARNING level, terminates
+that process, and spawns one replacement on the same transport with a fresh
+readiness budget, so recovery can take two full budgets plus teardown rather
+than ending after the first. The row carries the same snapshot attributes for
+the silent process plus `recent_stderr_bytes`, the size of its retained stderr
+tail, and `last_error_type`, the class of the last failed readiness probe (for
+example `ConnectionRefusedError`); the stderr text itself appears only in the
+opt-in, redacted `stderr_tail` attribute, never in the message. If the replacement fails in turn, the
+`codex_app_server_start_failed` row describes the replacement, so the respawn
+row is the only record of the original silent process.
 
 ## Native turn failure evidence
 

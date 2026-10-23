@@ -1,4 +1,5 @@
 import type { AsyncUserInput } from "./asyncQuestions";
+import type { NativePermissionDelivery } from "./nativePermissionDelivery";
 // Block walker — converts a flat `AnyBlock[]` into a list of bubble
 // groups for the JSX layer to map over.
 //
@@ -132,6 +133,7 @@ export type RenderItem =
     }
   | {
       kind: "elicitation";
+      nativeDelivery?: NativePermissionDelivery;
       itemId: string | null;
       elicitationId: string;
       targetSessionId?: string | null;
@@ -157,6 +159,7 @@ export type RenderItem =
       } | null;
       allowAllEdits?: boolean;
       allowAutoMode?: boolean;
+      permissionDirectories?: string[];
       rememberScope?: RememberScope | null;
       codexPersistModes?: CodexPersistMode[];
       agyPermission?: AgyPermission | null;
@@ -1665,6 +1668,7 @@ function buildAssistantItems(
     if (b.type === "elicitation") {
       items.push({
         kind: "elicitation",
+        ...(b.nativeDelivery ? { nativeDelivery: b.nativeDelivery } : {}),
         itemId: b.ctx.itemId,
         elicitationId: b.elicitationId,
         targetSessionId: b.targetSessionId,
@@ -1681,6 +1685,7 @@ function buildAssistantItems(
         codexCommand: b.codexCommand,
         allowAllEdits: b.allowAllEdits,
         allowAutoMode: b.allowAutoMode,
+        permissionDirectories: b.permissionDirectories,
         rememberScope: b.rememberScope,
         codexPersistModes: b.codexPersistModes,
         agyPermission: b.agyPermission,

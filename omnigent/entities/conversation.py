@@ -318,6 +318,14 @@ class AsyncQuestionReply(BaseModel):
     cancelled: bool = False
 
 
+class StartupInputOptions(BaseModel):
+    """Request options retained only while a startup input awaits delivery."""
+
+    model_override: str | None = None
+    tools: list[dict[str, Any]] | None = None
+    background_titles_enabled: bool = False
+
+
 class MessageData(BaseModel):
     """
     Data for a message item (user or assistant).
@@ -356,6 +364,9 @@ class MessageData(BaseModel):
     async_user_input: AsyncUserInput | None = Field(default=None, exclude_if=lambda v: v is None)
     async_question_reply: AsyncQuestionReply | None = Field(
         default=None, exclude_if=lambda v: v is None
+    )
+    startup_options: StartupInputOptions | None = Field(
+        default=None, exclude_if=lambda value: value is None
     )
 
     @field_validator("content")
@@ -798,6 +809,9 @@ class SlashCommandData(BaseModel):
     name: str
     arguments: str
     output: str | None = None
+    startup_options: StartupInputOptions | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 ItemData = (
@@ -907,6 +921,8 @@ class NewConversationItem(BaseModel):
     # know whether a timed-out POST committed). Same 32-hex shape the store
     # mints itself; ``None`` keeps the store-assigned random id.
     stable_id: str | None = None
+    status: Literal["completed", "in_progress", "incomplete", "failed"] = "completed"
+    replaces_pending_id: str | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def check_type_matches_data(self) -> NewConversationItem:
@@ -982,12 +998,16 @@ class ConversationItem(BaseModel):
 
         :returns: Flat dict, e.g. for an assistant message::
 
-            {"id": "msg_abc", "response_id": "resp_xyz",
-             "type": "message", "status": "completed",
-             "created_at": 1753900000,
-             "role": "assistant",
-             "content": [{"type": "output_text", "text": "hi"}],
-             "model": "databricks-gpt-5-4"}
+            {
+                "id": "msg_abc",
+                "response_id": "resp_xyz",
+                "type": "message",
+                "status": "completed",
+                "created_at": 1753900000,
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "hi"}],
+                "model": "databricks-gpt-5-4",
+            }
         """
         return {
             "id": self.id,
